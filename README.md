@@ -6,7 +6,7 @@ This repository is an experimental implementation and is not intended for produc
 
 
 ```
-Copyright 2022, naoki9911 (Original Author)
+Copyright 2022, Naoki MATSUMOTO (Original Author)
 Copyright 2022, Shiguredo Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");

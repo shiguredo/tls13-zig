@@ -2,7 +2,93 @@ const std = @import("std");
 const io = std.io;
 const log = std.log;
 const assert = std.debug.assert;
-const NamedGroup = @import("msg.zig").NamedGroup;
+const msg = @import("msg.zig");
+const ArrayList = std.ArrayList;
+const NamedGroup = msg.NamedGroup;
+const HandshakeType = msg.HandshakeType;
+
+pub const KeyShare = struct {
+    entries:ArrayList(KeyShareEntry) = undefined, // for ClientHello
+    selected: NamedGroup = undefined,             // for HelloRetryRequest
+
+    ht: HandshakeType = undefined,
+    is_hello_retry_request: bool = false,
+    const Self = @This();
+
+    pub fn init(allocator: std.mem.Allocator, ht: HandshakeType, hello_retry: bool) Self {
+        return .{
+           .entries = ArrayList(KeyShareEntry).init(allocator),
+           .ht = ht,
+           .is_hello_retry_request = hello_retry,
+        };
+    }
+
+    pub fn decode(reader: anytype, allocator: std.mem.Allocator, ht: HandshakeType, hello_retry: bool) !Self {
+        var res = Self.init(allocator, ht, hello_retry);
+
+        // type is already read
+        const len = try reader.readIntBig(u16);
+        switch (res.ht) {
+            HandshakeType.client_hello => {
+                const ks_len = try reader.readIntBig(u16);
+                assert(len == ks_len + 2);
+                var i:usize = 0;
+                while (i < ks_len) {
+                    var kse = try KeyShareEntry.decode(reader);
+                    try res.entries.append(kse);
+                    i += kse.length();
+                }
+                assert(i == ks_len);
+            },
+            HandshakeType.server_hello => {
+                if (res.is_hello_retry_request) {
+                    res.selected = @intToEnum(NamedGroup, try reader.readIntBig(u16));
+                } else {
+                    try res.entries.append(try KeyShareEntry.decode(reader));
+                }
+            },
+        }
+
+        return res;
+    }
+
+    pub fn length(self: Self) usize {
+        var len: usize = 0;
+        len += @sizeOf(u16); // type
+        len += @sizeOf(u16); // length
+        switch (self.ht) {
+            HandshakeType.client_hello => {
+                len += @sizeOf(u16); // entries length
+                for (self.entries.items) |entry| {
+                    len += entry.length();
+                }
+            },
+            HandshakeType.server_hello => {
+                if (self.is_hello_retry_request) {
+                    len += @sizeOf(u16);
+                } else {
+                    len += self.entries.items[0].length();
+                }
+            }
+        }
+        return len;
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.entries.deinit();
+    }
+
+    pub fn print(self: Self) void {
+        log.debug("Extension: KeyShare({s})", .{@tagName(self.ht)});
+        if (self.is_hello_retry_request) {
+            log.debug("- SelectedGroup = {s}(0x{x:0>4})", .{@tagName(self.selected), @enumToInt(self.selected)});
+        } else {
+            for (self.entries.items) |e| {
+                e.print();
+            }
+        }
+    }
+};
 
 pub const KeyShareEntry = union(NamedGroup) {
     x25519: EntryX25519,
@@ -114,13 +200,14 @@ const KeyShareEntryDummy = struct {};
 const expect = std.testing.expect;
 
 test "EntryX25519 decode" {
-    //const recv_data = [_]u8{0x00, 0x33, 0x00, 0x26, 0x00, 0x24, 0x00, 0x1d, 0x00, 0x20, 0x49, 0x6c, 0xc8, 0x42, 0x40, 0x7f, 0x7e, 0x62, 0xad, 0x5c, 0xd3, 0x92, 0x97, 0xf7, 0x7f, 0xfc, 0x6c, 0x72, 0x83, 0xba, 0xcb, 0x89, 0x4b, 0x58, 0x20, 0x16, 0x24, 0xae, 0x27, 0xbe, 0x87, 0x2f};
-    const recv_data = [_]u8{ 0x00, 0x1d, 0x00, 0x20, 0x49, 0x6c, 0xc8, 0x42, 0x40, 0x7f, 0x7e, 0x62, 0xad, 0x5c, 0xd3, 0x92, 0x97, 0xf7, 0x7f, 0xfc, 0x6c, 0x72, 0x83, 0xba, 0xcb, 0x89, 0x4b, 0x58, 0x20, 0x16, 0x24, 0xae, 0x27, 0xbe, 0x87, 0x2f };
+    const recv_data = [_]u8{0x00, 0x26, 0x00, 0x24, 0x00, 0x1d, 0x00, 0x20, 0x49, 0x6c, 0xc8, 0x42, 0x40, 0x7f, 0x7e, 0x62, 0xad, 0x5c, 0xd3, 0x92, 0x97, 0xf7, 0x7f, 0xfc, 0x6c, 0x72, 0x83, 0xba, 0xcb, 0x89, 0x4b, 0x58, 0x20, 0x16, 0x24, 0xae, 0x27, 0xbe, 0x87, 0x2f};
     var readStream = io.fixedBufferStream(&recv_data);
 
-    const res = try KeyShareEntry.decode(readStream.reader());
-    try expect(res == .x25519);
-    const x25519 = res.x25519;
+    var res = try KeyShare.decode(readStream.reader(), std.testing.allocator, .client_hello, false);
+    defer res.deinit();
+    try expect(res.entries.items.len == 1);
+    try expect(res.entries.items[0] == .x25519);
+    const x25519 = res.entries.items[0].x25519;
 
     const key_exchg_ans = [_]u8{ 0x49, 0x6c, 0xc8, 0x42, 0x40, 0x7f, 0x7e, 0x62, 0xad, 0x5c, 0xd3, 0x92, 0x97, 0xf7, 0x7f, 0xfc, 0x6c, 0x72, 0x83, 0xba, 0xcb, 0x89, 0x4b, 0x58, 0x20, 0x16, 0x24, 0xae, 0x27, 0xbe, 0x87, 0x2f };
     try expect(x25519.key_exchange.len == key_exchg_ans.len);

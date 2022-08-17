@@ -1,5 +1,5 @@
 const std = @import("std");
-const io  = std.io;
+const io = std.io;
 const log = std.log;
 const assert = std.debug.assert;
 const msg = @import("msg.zig");
@@ -29,8 +29,8 @@ pub const SupportedVersions = struct {
 
                 //TODO: return error when the versions are not TLSv1.3
                 assert(supported_len == 2); //only supports TLSv1.3
-                var i:usize = 0;
-                while(i < supported_len) : (i += 2) {
+                var i: usize = 0;
+                while (i < supported_len) : (i += 2) {
                     assert(res.version == try reader.readIntBig(u16)); //only suppoerts TLSv1.3
                 }
             },
@@ -50,12 +50,12 @@ pub const SupportedVersions = struct {
         len += @sizeOf(u16); // length
         switch (self.ht) {
             msg.HandshakeType.client_hello => {
-                len += @sizeOf(u8);  // supported versions length
+                len += @sizeOf(u8); // supported versions length
                 len += @sizeOf(u16); // TLSv1.3 (0x0304)
             },
             msg.HandshakeType.server_hello => {
                 len += @sizeOf(u16);
-            }
+            },
         }
         return len;
     }
@@ -74,7 +74,7 @@ pub const SupportedVersions = struct {
 const expect = std.testing.expect;
 
 test "SupportedVersions decode" {
-    const recv_data = [_]u8{0x00, 0x03, 0x02, 0x03, 0x04};
+    const recv_data = [_]u8{ 0x00, 0x03, 0x02, 0x03, 0x04 };
     var readStream = io.fixedBufferStream(&recv_data);
 
     const res = try SupportedVersions.decode(readStream.reader(), msg.HandshakeType.client_hello);

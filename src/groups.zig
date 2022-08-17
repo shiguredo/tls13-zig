@@ -6,7 +6,7 @@ const ArrayList = std.ArrayList;
 const NamedGroup = @import("msg.zig").NamedGroup;
 
 pub const SupportedGroups = struct {
-    groups:ArrayList(NamedGroup) = undefined,
+    groups: ArrayList(NamedGroup) = undefined,
 
     const Self = @This();
 
@@ -24,7 +24,7 @@ pub const SupportedGroups = struct {
         const group_len = try reader.readIntBig(u16);
         assert(len == group_len + @sizeOf(u16));
         assert(group_len % 2 == 0);
-        var i:usize = 0;
+        var i: usize = 0;
         while (i < group_len) : (i += 2) {
             try res.groups.append(@intToEnum(NamedGroup, try reader.readIntBig(u16)));
         }
@@ -48,7 +48,7 @@ pub const SupportedGroups = struct {
     pub fn print(self: Self) void {
         log.debug("Extension: SupportedGroups", .{});
         for (self.groups.items) |group| {
-            log.debug("- {s}(0x{x:0>4})", .{@tagName(group), @enumToInt(group)});
+            log.debug("- {s}(0x{x:0>4})", .{ @tagName(group), @enumToInt(group) });
         }
     }
 };
@@ -56,7 +56,7 @@ pub const SupportedGroups = struct {
 const expect = std.testing.expect;
 
 test "SupportedGroups decode" {
-    const recv_data = [_]u8{0x00,0x0c, 0x00, 0x0a, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x1e, 0x00, 0x19, 0x00, 0x18};
+    const recv_data = [_]u8{ 0x00, 0x0c, 0x00, 0x0a, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x1e, 0x00, 0x19, 0x00, 0x18 };
     var readStream = io.fixedBufferStream(&recv_data);
 
     var res = try SupportedGroups.decode(readStream.reader(), std.testing.allocator);

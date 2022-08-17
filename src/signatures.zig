@@ -22,7 +22,7 @@ pub const SignatureAlgorithm = enum(u16) {
 };
 
 pub const SignatureAlgorithms = struct {
-    algos:ArrayList(SignatureAlgorithm) = undefined,
+    algos: ArrayList(SignatureAlgorithm) = undefined,
 
     const Self = @This();
 
@@ -41,7 +41,7 @@ pub const SignatureAlgorithms = struct {
         assert(len == algos_len + 2);
         assert(algos_len % 2 == 0);
 
-        var i:usize = 0;
+        var i: usize = 0;
         while (i < algos_len) : (i += 2) {
             try res.algos.append(@intToEnum(SignatureAlgorithm, try reader.readIntBig(u16)));
         }
@@ -65,7 +65,7 @@ pub const SignatureAlgorithms = struct {
     pub fn print(self: Self) void {
         log.debug("Extension: SignatureAlgrotihms", .{});
         for (self.algos.items) |algo| {
-            log.debug("- {s}(0x{x:0>4})", .{@tagName(algo), @enumToInt(algo)});
+            log.debug("- {s}(0x{x:0>4})", .{ @tagName(algo), @enumToInt(algo) });
         }
     }
 };
@@ -73,7 +73,7 @@ pub const SignatureAlgorithms = struct {
 const expect = std.testing.expect;
 
 test "SignatureAlgorithms decode" {
-    const recv_data = [_]u8{0x00, 0x1e, 0x00, 0x1c, 0x04, 0x03, 0x05, 0x03,0x06, 0x03, 0x08, 0x07, 0x08, 0x08, 0x08, 0x09, 0x08, 0x0a, 0x08, 0x0b, 0x08, 0x04, 0x08, 0x05, 0x08, 0x06, 0x04, 0x01, 0x05, 0x01, 0x06, 0x01};
+    const recv_data = [_]u8{ 0x00, 0x1e, 0x00, 0x1c, 0x04, 0x03, 0x05, 0x03, 0x06, 0x03, 0x08, 0x07, 0x08, 0x08, 0x08, 0x09, 0x08, 0x0a, 0x08, 0x0b, 0x08, 0x04, 0x08, 0x05, 0x08, 0x06, 0x04, 0x01, 0x05, 0x01, 0x06, 0x01 };
     var readStream = io.fixedBufferStream(&recv_data);
 
     var res = try SignatureAlgorithms.decode(readStream.reader(), std.testing.allocator);

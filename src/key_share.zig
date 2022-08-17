@@ -8,8 +8,8 @@ const NamedGroup = msg.NamedGroup;
 const HandshakeType = msg.HandshakeType;
 
 pub const KeyShare = struct {
-    entries:ArrayList(KeyShareEntry) = undefined, // for ClientHello
-    selected: NamedGroup = undefined,             // for HelloRetryRequest
+    entries: ArrayList(KeyShareEntry) = undefined, // for ClientHello
+    selected: NamedGroup = undefined, // for HelloRetryRequest
 
     ht: HandshakeType = undefined,
     is_hello_retry_request: bool = false,
@@ -17,9 +17,9 @@ pub const KeyShare = struct {
 
     pub fn init(allocator: std.mem.Allocator, ht: HandshakeType, hello_retry: bool) Self {
         return .{
-           .entries = ArrayList(KeyShareEntry).init(allocator),
-           .ht = ht,
-           .is_hello_retry_request = hello_retry,
+            .entries = ArrayList(KeyShareEntry).init(allocator),
+            .ht = ht,
+            .is_hello_retry_request = hello_retry,
         };
     }
 
@@ -32,7 +32,7 @@ pub const KeyShare = struct {
             HandshakeType.client_hello => {
                 const ks_len = try reader.readIntBig(u16);
                 assert(len == ks_len + 2);
-                var i:usize = 0;
+                var i: usize = 0;
                 while (i < ks_len) {
                     var kse = try KeyShareEntry.decode(reader);
                     try res.entries.append(kse);
@@ -69,7 +69,7 @@ pub const KeyShare = struct {
                 } else {
                     len += self.entries.items[0].length();
                 }
-            }
+            },
         }
         return len;
     }
@@ -81,7 +81,7 @@ pub const KeyShare = struct {
     pub fn print(self: Self) void {
         log.debug("Extension: KeyShare({s})", .{@tagName(self.ht)});
         if (self.is_hello_retry_request) {
-            log.debug("- SelectedGroup = {s}(0x{x:0>4})", .{@tagName(self.selected), @enumToInt(self.selected)});
+            log.debug("- SelectedGroup = {s}(0x{x:0>4})", .{ @tagName(self.selected), @enumToInt(self.selected) });
         } else {
             for (self.entries.items) |e| {
                 e.print();
@@ -200,7 +200,7 @@ const KeyShareEntryDummy = struct {};
 const expect = std.testing.expect;
 
 test "EntryX25519 decode" {
-    const recv_data = [_]u8{0x00, 0x26, 0x00, 0x24, 0x00, 0x1d, 0x00, 0x20, 0x49, 0x6c, 0xc8, 0x42, 0x40, 0x7f, 0x7e, 0x62, 0xad, 0x5c, 0xd3, 0x92, 0x97, 0xf7, 0x7f, 0xfc, 0x6c, 0x72, 0x83, 0xba, 0xcb, 0x89, 0x4b, 0x58, 0x20, 0x16, 0x24, 0xae, 0x27, 0xbe, 0x87, 0x2f};
+    const recv_data = [_]u8{ 0x00, 0x26, 0x00, 0x24, 0x00, 0x1d, 0x00, 0x20, 0x49, 0x6c, 0xc8, 0x42, 0x40, 0x7f, 0x7e, 0x62, 0xad, 0x5c, 0xd3, 0x92, 0x97, 0xf7, 0x7f, 0xfc, 0x6c, 0x72, 0x83, 0xba, 0xcb, 0x89, 0x4b, 0x58, 0x20, 0x16, 0x24, 0xae, 0x27, 0xbe, 0x87, 0x2f };
     var readStream = io.fixedBufferStream(&recv_data);
 
     var res = try KeyShare.decode(readStream.reader(), std.testing.allocator, .client_hello, false);

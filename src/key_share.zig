@@ -2,14 +2,7 @@ const std = @import("std");
 const io = std.io;
 const log = std.log;
 const assert = std.debug.assert;
-
-pub const NamedGroup = enum(u16) {
-    x25519 = 0x001D,
-    x448 = 0x001e,
-    secp256r1 = 0x0017,
-    secp521r1 = 0x0019,
-    secp384r1 = 0x0018,
-};
+const NamedGroup = @import("msg.zig").NamedGroup;
 
 pub const KeyShareEntry = union(NamedGroup) {
     x25519: EntryX25519,

@@ -60,10 +60,6 @@ pub const SupportedVersions = struct {
         return len;
     }
 
-    pub fn deinit(self: *Self) void {
-        _ = self;
-    }
-
     pub fn print(self: Self) void {
         _ = self;
         log.debug("Extension: SupportedVersions({s})", .{@tagName(self.ht)});

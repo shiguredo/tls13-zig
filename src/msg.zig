@@ -3,19 +3,24 @@ const log = std.log;
 const io = std.io;
 const assert = std.debug.assert;
 const ArrayList = std.ArrayList;
+const BoundedArray = std.BoundedArray;
 const Extension = @import("extension.zig").Extension;
-
-pub const HandshakeType = enum(u8) {
-    client_hello = 0x1,
-    server_hello = 0x2,
-};
+const ExtensionType = @import("extension.zig").ExtensionType;
+const Certificate = @import("certificate.zig").Certificate;
+const CertificateVerify = @import("certificate.zig").CertificateVerify;
 
 pub const NamedGroup = enum(u16) {
     x25519 = 0x001D,
     x448 = 0x001e,
     secp256r1 = 0x0017,
-    secp521r1 = 0x0019,
     secp384r1 = 0x0018,
+    secp521r1 = 0x0019,
+
+    ffdhe2048 = 0x0100,
+    ffdhe3072 = 0x0101,
+    ffdhe4096 = 0x0102,
+    ffdhe6144 = 0x0103,
+    ffdhe8192 = 0x0104,
 };
 
 pub const CipherSuite = enum(u16) {
@@ -29,19 +34,21 @@ pub const CipherSuite = enum(u16) {
 };
 
 pub const SessionID = struct {
-    session_id: [32]u8 = [_]u8{0} ** 32,
+    const MAX_SESSIONID_LENGTH = 32;
+
+    session_id: BoundedArray(u8, MAX_SESSIONID_LENGTH),
 
     const Self = @This();
 
-    pub fn decode(reader: anytype) !Self {
-        var res = Self{};
+    pub fn init(len: usize) !Self {
+        return Self{
+            .session_id = try BoundedArray(u8, 32).init(len),
+        };
+    }
 
-        var len: usize = 0;
-        const msg_len = try reader.readIntBig(u8);
-        assert(msg_len == 32);
-        len += @sizeOf(u8);
-        len += try reader.readAll(&res.session_id);
-        assert(len == @sizeOf(u8) + 32);
+    pub fn decode(reader: anytype) !Self {
+        var res = try Self.init(try reader.readIntBig(u8));
+        _ = try reader.readAll(res.session_id.slice());
 
         return res;
     }
@@ -56,7 +63,7 @@ pub const SessionID = struct {
 
     pub fn print(self: Self) void {
         log.debug("SessionID", .{});
-        log.debug("- id = {}", .{std.fmt.fmtSliceHexLower(&self.session_id)});
+        log.debug("- id = {}", .{std.fmt.fmtSliceHexLower(&self.session_id.slice())});
     }
 };
 
@@ -72,7 +79,7 @@ fn decodeCipherSuites(reader: anytype, suites: *ArrayList(CipherSuite)) !void {
     assert(i == len);
 }
 
-fn decodeExtensions(reader: anytype, allocator: std.mem.Allocator, extensions: *ArrayList(Extension), ht: HandshakeType, is_hello_retry: bool) !void {
+pub fn decodeExtensions(reader: anytype, allocator: std.mem.Allocator, extensions: *ArrayList(Extension), ht: HandshakeType, is_hello_retry: bool) !void {
     const ext_len = try reader.readIntBig(u16);
     var i: usize = 0;
     while (i < ext_len) {
@@ -82,6 +89,69 @@ fn decodeExtensions(reader: anytype, allocator: std.mem.Allocator, extensions: *
     }
     assert(i == ext_len);
 }
+
+pub const ExtensionError = error{
+    ExtensionNotFound,
+};
+
+pub const DecodeError = error {
+    HashNotSpecified,
+};
+
+pub fn getExtension(extensions: ArrayList(Extension), ext_type: ExtensionType) !Extension {
+    for (extensions.items) |e| {
+        if (e == ext_type) {
+            return e;
+        }
+    }
+
+    return ExtensionError.ExtensionNotFound;
+}
+
+pub const HandshakeType = enum(u8) {
+    client_hello = 0x1,
+    server_hello = 0x2,
+    encrypted_extensions = 0x8,
+    certificate = 0xb,
+    certificate_verify = 0xf,
+    finished = 0x14,
+};
+
+pub const Handshake = union(HandshakeType) {
+    client_hello: ClientHello,
+    server_hello: ServerHello,
+    encrypted_extensions: EncryptedExtensions,
+    certificate: Certificate,
+    certificate_verify: CertificateVerify,
+    finished: Finished,
+
+    const Self = @This();
+
+    pub fn decode(reader: anytype, allocator: std.mem.Allocator, Hash: ?type) !Self {
+        const t = @intToEnum(HandshakeType, try reader.readIntBig(u8));
+        const len = try reader.readIntBig(u24);
+        _ = len; // TODO: check the length is less than readable size.
+        switch (t) {
+            HandshakeType.client_hello => return Self{ .client_hello = try ClientHello.decode(reader, allocator) },
+            HandshakeType.server_hello => return Self{ .server_hello = try ServerHello.decode(reader, allocator) },
+            HandshakeType.encrypted_extensions => return Self { .encrypted_extensions = try EncryptedExtensions.decode(reader, allocator) },
+            HandshakeType.certificate => return Self { .certificate = try Certificate.decode(reader, allocator) },
+            HandshakeType.certificate_verify => return Self { .certificate_verify = try CertificateVerify.decode(reader, allocator) },
+            HandshakeType.finished => if (Hash) |h| { return Self { .finished = try Finished.decode(reader, h) };} else { return DecodeError.HashNotSpecified; },
+        }
+    }
+
+    pub fn deinit(self: Self) void {
+        switch (self) {
+            HandshakeType.client_hello => |e| e.deinit(),
+            HandshakeType.server_hello => |e| e.deinit(),
+            HandshakeType.encrypted_extensions => |e| e.deinit(),
+            HandshakeType.certificate => |e| e.deinit(),
+            HandshakeType.certificate_verify => |e| e.deinit(),
+            HandshakeType.finished => |e| e.deinit(),
+        }
+    }
+};
 
 pub const ClientHello = struct {
     protocol_version: u16 = 0x0303, // TLS v1.2 version
@@ -137,9 +207,9 @@ pub const ClientHello = struct {
         return len;
     }
 
-    pub fn deinit(self: *Self) void {
+    pub fn deinit(self: Self) void {
         self.cipher_suites.deinit();
-        for (self.extensions.items) |*e| {
+        for (self.extensions.items) |e| {
             e.deinit();
         }
         self.extensions.deinit();
@@ -211,8 +281,8 @@ pub const ServerHello = struct {
         return len;
     }
 
-    pub fn deinit(self: *Self) void {
-        for (self.extensions.items) |*e| {
+    pub fn deinit(self: Self) void {
+        for (self.extensions.items) |e| {
             e.deinit();
         }
         self.extensions.deinit();
@@ -228,13 +298,68 @@ pub const ServerHello = struct {
     }
 };
 
+pub const EncryptedExtensions = struct {
+    extensions: ArrayList(Extension) = undefined,
+
+    const Self = @This();
+
+    pub fn init(allocator: std.mem.Allocator) Self {
+        return .{
+            .extensions = ArrayList(Extension).init(allocator),
+        };
+    }
+
+    pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
+        var res = Self.init(allocator);
+        try decodeExtensions(reader, allocator, &res.extensions, .server_hello, false);
+        return res;
+    }
+
+    pub fn deinit(self: Self) void {
+        for (self.extensions.items) |e| {
+            e.deinit();
+        }
+        self.extensions.deinit();
+    }
+};
+
+pub const Finished = struct {
+    const MAX_DIGEST_LENGTH = 64; // the length of sha-512 digest
+
+    verify_data: BoundedArray(u8, MAX_DIGEST_LENGTH) = undefined,
+
+    const Self = @This();
+
+    pub fn init(Hash: anytype) !Self {
+        return Self{
+            .verify_data = try BoundedArray(u8, MAX_DIGEST_LENGTH).init(Hash.digest_length),
+        };
+    }
+
+    pub fn decode(reader: anytype, Hash: anytype) !Self {
+        var res = try Self.init(Hash);
+        _ = try reader.readAll(res.verify_data.slice());
+
+        return res;
+    }
+
+    pub fn length(self: Self) usize {
+        return self.verify_data.len;
+    }
+
+    pub fn deinit(self: Self) void {
+        _ = self;
+    }
+};
+
 const expect = std.testing.expect;
+const expectError = std.testing.expectError;
 
 test "ClientHello decode" {
     const recv_data = [_]u8{ 0x03, 0x03, 0xf0, 0x5d, 0x41, 0x2d, 0x24, 0x35, 0x27, 0xfd, 0x90, 0xb5, 0xb4, 0x24, 0x9d, 0x4a, 0x69, 0xf8, 0x97, 0xb5, 0xcf, 0xfe, 0xe3, 0x8d, 0x4c, 0xec, 0xc7, 0x8f, 0xd0, 0x25, 0xc6, 0xeb, 0xe1, 0x33, 0x20, 0x67, 0x7e, 0xb6, 0x52, 0xad, 0x12, 0x51, 0xda, 0x7a, 0xe4, 0x5d, 0x3f, 0x19, 0x2c, 0xd1, 0xbf, 0xaf, 0xca, 0xa8, 0xc5, 0xfe, 0x59, 0x2f, 0x1b, 0x2f, 0x2a, 0x96, 0x1e, 0x12, 0x83, 0x35, 0xae, 0x00, 0x02, 0x13, 0x02, 0x01, 0x00, 0x00, 0x45, 0x00, 0x2b, 0x00, 0x03, 0x02, 0x03, 0x04, 0x00, 0x0a, 0x00, 0x06, 0x00, 0x04, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x33, 0x00, 0x26, 0x00, 0x24, 0x00, 0x1d, 0x00, 0x20, 0x49, 0x51, 0x50, 0xa9, 0x0a, 0x47, 0x82, 0xfe, 0xa7, 0x47, 0xf5, 0xcb, 0x55, 0x19, 0xdc, 0xf0, 0xce, 0x0d, 0xee, 0x9c, 0xdc, 0x04, 0x93, 0xbd, 0x84, 0x9e, 0xea, 0xf7, 0xd3, 0x93, 0x64, 0x2f, 0x00, 0x0d, 0x00, 0x06, 0x00, 0x04, 0x04, 0x03, 0x08, 0x07 };
     var readStream = io.fixedBufferStream(&recv_data);
 
-    var res = try ClientHello.decode(readStream.reader(), std.testing.allocator);
+    const res = try ClientHello.decode(readStream.reader(), std.testing.allocator);
     defer res.deinit();
 
     try expect(res.protocol_version == 0x0303);
@@ -266,7 +391,7 @@ test "ServerHello decode" {
     const recv_data = [_]u8{ 0x3, 0x3, 0x11, 0x8, 0x43, 0x1b, 0xd0, 0x42, 0x9e, 0x61, 0xff, 0x65, 0x44, 0x41, 0x91, 0xfc, 0x56, 0x10, 0xf8, 0x27, 0x53, 0xd9, 0x68, 0xc8, 0x13, 0x0, 0xb1, 0xec, 0x11, 0xd5, 0x7d, 0x90, 0xa5, 0x43, 0x20, 0xc4, 0x8a, 0x5c, 0x30, 0xa8, 0x50, 0x1b, 0x2e, 0xc2, 0x45, 0x76, 0xd7, 0xf0, 0x11, 0x52, 0xa0, 0x16, 0x57, 0x7, 0xdf, 0x1, 0x30, 0x47, 0x5b, 0x94, 0xbc, 0xe7, 0x86, 0x1e, 0x41, 0x97, 0x65, 0x13, 0x2, 0x0, 0x0, 0x4f, 0x0, 0x2b, 0x0, 0x2, 0x3, 0x4, 0x0, 0x33, 0x0, 0x45, 0x0, 0x17, 0x0, 0x41, 0x4, 0x27, 0x66, 0x69, 0x3d, 0xd8, 0xd1, 0x76, 0xa8, 0x8f, 0x6a, 0xe6, 0x61, 0x6, 0x89, 0xe1, 0xe9, 0xcd, 0x63, 0xef, 0x2e, 0x79, 0x41, 0x24, 0x86, 0x26, 0x37, 0xfa, 0x83, 0xd9, 0xfd, 0xa3, 0xc5, 0xaa, 0xbc, 0xaa, 0xb5, 0x85, 0x86, 0x98, 0x21, 0x54, 0xbc, 0x81, 0xed, 0x30, 0x35, 0x42, 0xb2, 0x89, 0xd6, 0xa4, 0xc4, 0x94, 0x75, 0x41, 0x49, 0x90, 0x78, 0x3, 0xaa, 0xf5, 0x6d, 0xfc, 0x47 };
     var readStream = io.fixedBufferStream(&recv_data);
 
-    var res = try ServerHello.decode(readStream.reader(), std.testing.allocator);
+    const res = try ServerHello.decode(readStream.reader(), std.testing.allocator);
     defer res.deinit();
 
     // check extensions
@@ -278,4 +403,25 @@ test "ServerHello decode" {
     const ks = res.extensions.items[1].key_share;
     try expect(ks.entries.items.len == 1);
     try expect(ks.entries.items[0] == .secp256r1);
+}
+
+test "EncryptedExtensions decode" {
+    const recv_data = [_]u8{0x08, 0x00, 0x00, 0x24, 0x00, 0x22, 0x00, 0x0a, 0x00, 0x14, 0x00, 0x12, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x18, 0x00, 0x19, 0x01, 0x00, 0x01, 0x01, 0x01, 0x02, 0x01, 0x03, 0x01, 0x04, 0x00, 0x1c, 0x00, 0x02, 0x40, 0x01, 0x00, 0x00, 0x00, 0x00};
+    var readStream = io.fixedBufferStream(&recv_data);
+
+    const res = try Handshake.decode(readStream.reader(), std.testing.allocator, null);
+    defer res.deinit();
+}
+
+test "Finished decode" {
+    const recv_data = [_]u8{0x14, 0x00, 0x00, 0x20, 0x9b, 0x9b, 0x14, 0x1d, 0x90, 0x63, 0x37, 0xfb, 0xd2, 0xcb, 0xdc, 0xe7, 0x1d, 0xf4, 0xde, 0xda, 0x4a, 0xb4, 0x2c, 0x30, 0x95, 0x72, 0xcb, 0x7f, 0xff, 0xee, 0x54, 0x54, 0xb7, 0x8f, 0x07, 0x18};
+    var readStream = io.fixedBufferStream(&recv_data);
+
+    const res = try Handshake.decode(readStream.reader(), std.testing.allocator, std.crypto.hash.sha2.Sha256);
+    defer res.deinit();
+
+    // check all data was read.
+    try expectError(error.EndOfStream, readStream.reader().readByte());
+
+    try expect(res == .finished);
 }

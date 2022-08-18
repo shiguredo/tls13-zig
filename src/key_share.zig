@@ -47,6 +47,7 @@ pub const KeyShare = struct {
                     try res.entries.append(try KeyShareEntry.decode(reader));
                 }
             },
+            else => unreachable,
         }
 
         return res;
@@ -70,11 +71,12 @@ pub const KeyShare = struct {
                     len += self.entries.items[0].length();
                 }
             },
+            else => unreachable,
         }
         return len;
     }
 
-    pub fn deinit(self: *Self) void {
+    pub fn deinit(self: Self) void {
         self.entries.deinit();
     }
 
@@ -96,6 +98,11 @@ pub const KeyShareEntry = union(NamedGroup) {
     secp256r1: EntrySecp256r1,
     secp521r1: KeyShareEntryDummy,
     secp384r1: KeyShareEntryDummy,
+    ffdhe2048: KeyShareEntryDummy,
+    ffdhe3072: KeyShareEntryDummy,
+    ffdhe4096: KeyShareEntryDummy,
+    ffdhe6144: KeyShareEntryDummy,
+    ffdhe8192: KeyShareEntryDummy,
 
     const Self = @This();
 
@@ -114,10 +121,6 @@ pub const KeyShareEntry = union(NamedGroup) {
             NamedGroup.secp256r1 => |e| return e.length(),
             else => unreachable,
         }
-    }
-
-    pub fn deinit(self: *Self) void {
-        _ = self;
     }
 
     pub fn print(self: Self) void {
@@ -203,7 +206,7 @@ test "EntryX25519 decode" {
     const recv_data = [_]u8{ 0x00, 0x26, 0x00, 0x24, 0x00, 0x1d, 0x00, 0x20, 0x49, 0x6c, 0xc8, 0x42, 0x40, 0x7f, 0x7e, 0x62, 0xad, 0x5c, 0xd3, 0x92, 0x97, 0xf7, 0x7f, 0xfc, 0x6c, 0x72, 0x83, 0xba, 0xcb, 0x89, 0x4b, 0x58, 0x20, 0x16, 0x24, 0xae, 0x27, 0xbe, 0x87, 0x2f };
     var readStream = io.fixedBufferStream(&recv_data);
 
-    var res = try KeyShare.decode(readStream.reader(), std.testing.allocator, .client_hello, false);
+    const res = try KeyShare.decode(readStream.reader(), std.testing.allocator, .client_hello, false);
     defer res.deinit();
     try expect(res.entries.items.len == 1);
     try expect(res.entries.items[0] == .x25519);

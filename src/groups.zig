@@ -41,7 +41,7 @@ pub const SupportedGroups = struct {
         return len;
     }
 
-    pub fn deinit(self: *Self) void {
+    pub fn deinit(self: Self) void {
         self.groups.deinit();
     }
 
@@ -59,7 +59,7 @@ test "SupportedGroups decode" {
     const recv_data = [_]u8{ 0x00, 0x0c, 0x00, 0x0a, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x1e, 0x00, 0x19, 0x00, 0x18 };
     var readStream = io.fixedBufferStream(&recv_data);
 
-    var res = try SupportedGroups.decode(readStream.reader(), std.testing.allocator);
+    const res = try SupportedGroups.decode(readStream.reader(), std.testing.allocator);
     defer res.deinit();
 
     try expect(res.groups.items.len == 5);

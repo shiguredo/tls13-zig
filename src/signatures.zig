@@ -58,7 +58,7 @@ pub const SignatureAlgorithms = struct {
         return len;
     }
 
-    pub fn deinit(self: *Self) void {
+    pub fn deinit(self: Self) void {
         self.algos.deinit();
     }
 
@@ -76,7 +76,7 @@ test "SignatureAlgorithms decode" {
     const recv_data = [_]u8{ 0x00, 0x1e, 0x00, 0x1c, 0x04, 0x03, 0x05, 0x03, 0x06, 0x03, 0x08, 0x07, 0x08, 0x08, 0x08, 0x09, 0x08, 0x0a, 0x08, 0x0b, 0x08, 0x04, 0x08, 0x05, 0x08, 0x06, 0x04, 0x01, 0x05, 0x01, 0x06, 0x01 };
     var readStream = io.fixedBufferStream(&recv_data);
 
-    var res = try SignatureAlgorithms.decode(readStream.reader(), std.testing.allocator);
+    const res = try SignatureAlgorithms.decode(readStream.reader(), std.testing.allocator);
     defer res.deinit();
 
     try expect(res.algos.items.len == 14);

@@ -38,6 +38,7 @@ pub const SupportedVersions = struct {
                 assert(len == 2);
                 res.version = try reader.readIntBig(u16);
             },
+            else => unreachable,
         }
 
         return res;
@@ -56,6 +57,7 @@ pub const SupportedVersions = struct {
             msg.HandshakeType.server_hello => {
                 len += @sizeOf(u16);
             },
+            else => unreachable,
         }
         return len;
     }

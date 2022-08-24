@@ -10,7 +10,7 @@ pub const SupportedGroups = struct {
 
     const Self = @This();
 
-    const Error = error {
+    const Error = error{
         InvalidGroupLength,
     };
 
@@ -59,7 +59,7 @@ pub const SupportedGroups = struct {
 const expect = std.testing.expect;
 
 test "SupportedGroups decode" {
-    const recv_data = [_]u8{0x00, 0x0a, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x1e, 0x00, 0x19, 0x00, 0x18 };
+    const recv_data = [_]u8{ 0x00, 0x0a, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x1e, 0x00, 0x19, 0x00, 0x18 };
     var readStream = io.fixedBufferStream(&recv_data);
 
     const res = try SupportedGroups.decode(readStream.reader(), std.testing.allocator);

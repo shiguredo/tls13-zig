@@ -11,7 +11,7 @@ pub const SupportedVersions = struct {
 
     const Self = @This();
 
-    const Error = error {
+    const Error = error{
         InvalidVersionsLength,
     };
 
@@ -77,7 +77,7 @@ pub const SupportedVersions = struct {
 const expect = std.testing.expect;
 
 test "SupportedVersions decode" {
-    const recv_data = [_]u8{0x02, 0x03, 0x04 };
+    const recv_data = [_]u8{ 0x02, 0x03, 0x04 };
     var readStream = io.fixedBufferStream(&recv_data);
 
     const res = try SupportedVersions.decode(readStream.reader(), std.testing.allocator, .client_hello);

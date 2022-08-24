@@ -28,7 +28,7 @@ pub const Extension = union(ExtensionType) {
         const t = @intToEnum(ExtensionType, try reader.readIntBig(u16));
         const len = try reader.readIntBig(u16); // TODO: check readable length of reader
         switch (t) {
-            ExtensionType.server_name => return Self { .server_name = try ServerName.decode(reader, len) },
+            ExtensionType.server_name => return Self{ .server_name = try ServerName.decode(reader, len) },
             ExtensionType.supported_groups => return Self{ .supported_groups = try SupportedGroups.decode(reader, allocator) },
             ExtensionType.signature_algorithms => return Self{ .signature_algorithms = try SignatureAlgorithms.decode(reader, allocator) },
             ExtensionType.record_size_limit => return Self{ .record_size_limit = try RecordSizeLimit.decode(reader) },
@@ -45,12 +45,11 @@ pub const Extension = union(ExtensionType) {
             ExtensionType.record_size_limit => |e| e.print(),
             ExtensionType.supported_versions => |e| e.print(),
             ExtensionType.key_share => |e| e.print(),
-
         }
     }
 
     pub fn length(self: Self) usize {
-        var len:usize = 0;
+        var len: usize = 0;
         len += @sizeOf(u16); // type
         len += @sizeOf(u16); // length
         switch (self) {
@@ -76,7 +75,7 @@ pub const Extension = union(ExtensionType) {
 
 //RFC8449 Record Size Limit Extension for TLS
 pub const RecordSizeLimit = struct {
-    record_size_limit:u16 = undefined,
+    record_size_limit: u16 = undefined,
 
     const Self = @This();
 
@@ -106,7 +105,7 @@ pub const RecordSizeLimit = struct {
 
 //RFC6066 Transport Layer Security (TLS) Extensions: Extension Definitions
 pub const ServerName = struct {
-    len:u16 = undefined,
+    len: u16 = undefined,
 
     const Self = @This();
 
@@ -118,7 +117,7 @@ pub const ServerName = struct {
         var res = Self.init();
         res.len = len;
 
-        var i:u16 = 0;
+        var i: u16 = 0;
         while (i < res.len) : (i += 1) {
             _ = try reader.readIntBig(u8);
         }
@@ -141,7 +140,7 @@ const io = std.io;
 const expect = std.testing.expect;
 
 test "Extension RecordSizeLimit decode" {
-    const recv_data = [_]u8{0x00, 0x1c, 0x00, 0x02, 0x40, 0x01};
+    const recv_data = [_]u8{ 0x00, 0x1c, 0x00, 0x02, 0x40, 0x01 };
     var readStream = io.fixedBufferStream(&recv_data);
 
     const res = try Extension.decode(readStream.reader(), std.testing.allocator, .server_hello, false);
@@ -152,7 +151,7 @@ test "Extension RecordSizeLimit decode" {
 }
 
 test "Extension ServerName decode" {
-    const recv_data = [_]u8{0x00, 0x00, 0x00, 0x00};
+    const recv_data = [_]u8{ 0x00, 0x00, 0x00, 0x00 };
     var readStream = io.fixedBufferStream(&recv_data);
 
     const res = try Extension.decode(readStream.reader(), std.testing.allocator, .server_hello, false);

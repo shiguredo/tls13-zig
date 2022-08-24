@@ -94,7 +94,7 @@ pub const ExtensionError = error{
     ExtensionNotFound,
 };
 
-pub const DecodeError = error {
+pub const DecodeError = error{
     HashNotSpecified,
     NotAllDecoded,
 };
@@ -135,10 +135,14 @@ pub const Handshake = union(HandshakeType) {
         switch (t) {
             HandshakeType.client_hello => return Self{ .client_hello = try ClientHello.decode(reader, allocator) },
             HandshakeType.server_hello => return Self{ .server_hello = try ServerHello.decode(reader, allocator) },
-            HandshakeType.encrypted_extensions => return Self { .encrypted_extensions = try EncryptedExtensions.decode(reader, allocator) },
-            HandshakeType.certificate => return Self { .certificate = try Certificate.decode(reader, allocator) },
-            HandshakeType.certificate_verify => return Self { .certificate_verify = try CertificateVerify.decode(reader, allocator) },
-            HandshakeType.finished => if (Hash) |h| { return Self { .finished = try Finished.decode(reader, h) };} else { return DecodeError.HashNotSpecified; },
+            HandshakeType.encrypted_extensions => return Self{ .encrypted_extensions = try EncryptedExtensions.decode(reader, allocator) },
+            HandshakeType.certificate => return Self{ .certificate = try Certificate.decode(reader, allocator) },
+            HandshakeType.certificate_verify => return Self{ .certificate_verify = try CertificateVerify.decode(reader, allocator) },
+            HandshakeType.finished => if (Hash) |h| {
+                return Self{ .finished = try Finished.decode(reader, h) };
+            } else {
+                return DecodeError.HashNotSpecified;
+            },
         }
     }
 
@@ -410,7 +414,7 @@ test "ServerHello decode" {
 }
 
 test "EncryptedExtensions decode" {
-    const recv_data = [_]u8{0x08, 0x00, 0x00, 0x24, 0x00, 0x22, 0x00, 0x0a, 0x00, 0x14, 0x00, 0x12, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x18, 0x00, 0x19, 0x01, 0x00, 0x01, 0x01, 0x01, 0x02, 0x01, 0x03, 0x01, 0x04, 0x00, 0x1c, 0x00, 0x02, 0x40, 0x01, 0x00, 0x00, 0x00, 0x00};
+    const recv_data = [_]u8{ 0x08, 0x00, 0x00, 0x24, 0x00, 0x22, 0x00, 0x0a, 0x00, 0x14, 0x00, 0x12, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x18, 0x00, 0x19, 0x01, 0x00, 0x01, 0x01, 0x01, 0x02, 0x01, 0x03, 0x01, 0x04, 0x00, 0x1c, 0x00, 0x02, 0x40, 0x01, 0x00, 0x00, 0x00, 0x00 };
     var readStream = io.fixedBufferStream(&recv_data);
 
     const res = try Handshake.decode(readStream.reader(), std.testing.allocator, null);
@@ -418,7 +422,7 @@ test "EncryptedExtensions decode" {
 }
 
 test "Finished decode" {
-    const recv_data = [_]u8{0x14, 0x00, 0x00, 0x20, 0x9b, 0x9b, 0x14, 0x1d, 0x90, 0x63, 0x37, 0xfb, 0xd2, 0xcb, 0xdc, 0xe7, 0x1d, 0xf4, 0xde, 0xda, 0x4a, 0xb4, 0x2c, 0x30, 0x95, 0x72, 0xcb, 0x7f, 0xff, 0xee, 0x54, 0x54, 0xb7, 0x8f, 0x07, 0x18};
+    const recv_data = [_]u8{ 0x14, 0x00, 0x00, 0x20, 0x9b, 0x9b, 0x14, 0x1d, 0x90, 0x63, 0x37, 0xfb, 0xd2, 0xcb, 0xdc, 0xe7, 0x1d, 0xf4, 0xde, 0xda, 0x4a, 0xb4, 0x2c, 0x30, 0x95, 0x72, 0xcb, 0x7f, 0xff, 0xee, 0x54, 0x54, 0xb7, 0x8f, 0x07, 0x18 };
     var readStream = io.fixedBufferStream(&recv_data);
 
     const res = try Handshake.decode(readStream.reader(), std.testing.allocator, std.crypto.hash.sha2.Sha256);

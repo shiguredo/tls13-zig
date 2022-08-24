@@ -100,6 +100,40 @@ pub const TLSCipherText = struct {
 
         return res;
     }
+
+    pub fn encode(self: Self, writer: anytype) !usize {
+        var len: usize = try self.writeHeader(writer);
+
+        try writer.writeAll(self.record);
+        len += self.record.len;
+
+        return len;
+    }
+
+    fn writeHeader(self: Self, writer: anytype) !usize {
+        var len: usize = 0;
+
+        try writer.writeIntBig(u8, @enumToInt(ContentType.application_data));
+        len += @sizeOf(u8);
+
+        try writer.writeIntBig(u16, 0x0303); //protocol_version
+        len += @sizeOf(u16);
+
+        try writer.writeIntBig(u16, @intCast(u16, self.record.len)); //record length
+        len += @sizeOf(u16);
+
+        return len;
+    }
+
+    pub fn length(self: Self) usize {
+        var len:usize = 0;
+        len += @sizeOf(u8); // ContentType
+        len += @sizeOf(u16); // protocol_version
+        len += @sizeOf(u16); // record length
+        len += self.record.len; // record
+
+        return len;
+    }
 };
 
 const expect = std.testing.expect;
@@ -116,7 +150,7 @@ test "TLSPlainText ClientHello decode" {
     try expect(res.handshake == .client_hello);
 }
 
-test "TLSCipherText Alert decode" {
+test "TLSCipherText decode" {
     const recv_data = [_]u8{ 0x17, 0x03, 0x03, 0x00, 0x13, 0xB5, 0x8F, 0xD6, 0x71, 0x66, 0xEB, 0xF5, 0x99, 0xD2, 0x47, 0x20, 0xCF, 0xBE, 0x7E, 0xFA, 0x7A, 0x88, 0x64, 0xA9 };
     var readStream = io.fixedBufferStream(&recv_data);
 
@@ -127,4 +161,20 @@ test "TLSCipherText Alert decode" {
 
     const record_ans = [_]u8{ 0xB5, 0x8F, 0xD6, 0x71, 0x66, 0xEB, 0xF5, 0x99, 0xD2, 0x47, 0x20, 0xCF, 0xBE, 0x7E, 0xFA, 0x7A, 0x88, 0x64, 0xA9 };
     try expect(std.mem.eql(u8, res.record, &record_ans));
+}
+
+test "TLSCipherText encode" {
+    const record = [_]u8{ 0xB5, 0x8F, 0xD6, 0x71, 0x66, 0xEB, 0xF5, 0x99, 0xD2, 0x47, 0x20, 0xCF, 0xBE, 0x7E, 0xFA, 0x7A, 0x88, 0x64, 0xA9 };
+
+    var ct = try TLSCipherText.init(record.len, std.testing.allocator);
+    defer ct.deinit();
+    std.mem.copy(u8, ct.record, &record);
+
+    var send_data: [1000]u8 = undefined;
+    var sendStream = io.fixedBufferStream(&send_data);
+    const write_len = try ct.encode(sendStream.writer());
+    try expect(write_len == try sendStream.getPos());
+
+    const send_data_ans = [_]u8{ 0x17, 0x03, 0x03, 0x00, 0x13, 0xB5, 0x8F, 0xD6, 0x71, 0x66, 0xEB, 0xF5, 0x99, 0xD2, 0x47, 0x20, 0xCF, 0xBE, 0x7E, 0xFA, 0x7A, 0x88, 0x64, 0xA9 };
+    try expect(std.mem.eql(u8, send_data[0..write_len], &send_data_ans));
 }

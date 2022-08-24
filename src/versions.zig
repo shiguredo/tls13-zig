@@ -52,6 +52,29 @@ pub const SupportedVersions = struct {
         return res;
     }
 
+    pub fn encode(self: Self, writer: anytype) !usize {
+        var len:usize = 0;
+
+        switch (self.ht) {
+            msg.HandshakeType.client_hello => {
+                try writer.writeIntBig(u8, @intCast(u8, self.versions.items.len * @sizeOf(u16)));
+                len += @sizeOf(u8);
+
+                for (self.versions.items) |version| {
+                    try writer.writeIntBig(u16, version);
+                    len += @sizeOf(u16);
+                }
+            },
+            msg.HandshakeType.server_hello => {
+                try writer.writeIntBig(u16, self.versions.items[0]);
+                len += @sizeOf(u16);
+            },
+            else => unreachable,
+        }
+
+        return len;
+    }
+
     pub fn length(self: Self) usize {
         var len: usize = 0;
         switch (self.ht) {
@@ -60,7 +83,7 @@ pub const SupportedVersions = struct {
                 len += self.versions.items.len * @sizeOf(u16);
             },
             msg.HandshakeType.server_hello => {
-                len += @sizeOf(u16); // version
+                len += @sizeOf(u16); // version.cli
             },
             else => unreachable,
         }
@@ -84,4 +107,17 @@ test "SupportedVersions decode" {
     defer res.deinit();
     try expect(res.ht == .client_hello);
     try expect(res.versions.items[0] == 0x0304);
+}
+
+test "SuppoertedVersions encode" {
+    var res = SupportedVersions.init(.client_hello, std.testing.allocator);
+    defer res.deinit();
+
+    try res.versions.append(0x0304);
+
+    const versions_ans = [_]u8{ 0x02, 0x03, 0x04 };
+    var send_bytes: [100]u8 = undefined;
+
+    const write_len = try res.encode(io.fixedBufferStream(&send_bytes).writer());
+    try expect(std.mem.eql(u8, send_bytes[0..write_len], &versions_ans));
 }

@@ -185,6 +185,34 @@ pub const TLSInnerPlainText = struct {
 
         return res;
     }
+
+    pub fn encode(self: Self, writer: anytype) !usize {
+        var len:usize = 0;
+
+        try writer.writeAll(self.content);
+        len += self.content.len;
+
+        try writer.writeByte(@enumToInt(self.content_type));
+        len += @sizeOf(u8);
+
+        // TODO: more efficient way to zero filling
+        var i: usize = 0;
+        while (i < self.zero_pad_length) : (i += 1) {
+            try writer.writeByte(0x00);
+            len += @sizeOf(u8);
+        }
+
+        return len;
+    }
+
+    pub fn length(self: Self) usize {
+        var len: usize = 0;
+        len += self.content.len;
+        len += @sizeOf(u8); // ContentType
+        len += self.zero_pad_length;
+
+        return len;
+    }
 };
 
 const expect = std.testing.expect;
@@ -237,6 +265,26 @@ test "TLSInnerPlainText decode" {
     defer pt.deinit();
 
     const content_ans = [_]u8 { 0x01, 0x00 };
-    try expect(pt.zero_pad_length == 3);
     try expect(std.mem.eql(u8, pt.content, &content_ans));
+    try expect(pt.content_type == .alert);
+    try expect(pt.zero_pad_length == 3);
+}
+
+test "TLSInnerPlainText encode" {
+    const content = [_]u8 { 0x01, 0x00 };
+
+    var pt = try TLSInnerPlainText.init(content.len, std.testing.allocator);
+    defer pt.deinit();
+
+    std.mem.copy(u8, pt.content, &content);
+    pt.content_type = .alert;
+    pt.zero_pad_length = 2;
+
+    var send_data: [1000]u8 = undefined;
+    var sendStream = io.fixedBufferStream(&send_data);
+    const write_len = try pt.encode(sendStream.writer());
+    try expect(write_len == try sendStream.getPos());
+
+    const send_data_ans = [_]u8{ 0x01, 0x00, 0x15, 0x00, 0x00 };
+    try expect(std.mem.eql(u8, send_data[0..write_len], &send_data_ans));
 }

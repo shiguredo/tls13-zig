@@ -26,6 +26,10 @@ pub const SignatureAlgorithms = struct {
 
     const Self = @This();
 
+    const Error = error {
+        InvalidAlgorithmsLength,
+    };
+
     pub fn init(allocator: std.mem.Allocator) Self {
         return .{
             .algos = ArrayList(SignatureAlgorithm).init(allocator),
@@ -34,12 +38,12 @@ pub const SignatureAlgorithms = struct {
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
         var res = Self.init(allocator);
+        errdefer res.deinit();
 
-        // type is already read
-        const len = try reader.readIntBig(u16);
         const algos_len = try reader.readIntBig(u16);
-        assert(len == algos_len + 2);
-        assert(algos_len % 2 == 0);
+        if (algos_len % 2 != 0) {
+            return Error.InvalidAlgorithmsLength;
+        }
 
         var i: usize = 0;
         while (i < algos_len) : (i += 2) {
@@ -51,8 +55,6 @@ pub const SignatureAlgorithms = struct {
 
     pub fn length(self: Self) usize {
         var len: usize = 0;
-        len += @sizeOf(u16); // type
-        len += @sizeOf(u16); // length
         len += @sizeOf(u16); // supported groups length
         len += self.algos.items.len * @sizeOf(SignatureAlgorithm);
         return len;
@@ -73,7 +75,7 @@ pub const SignatureAlgorithms = struct {
 const expect = std.testing.expect;
 
 test "SignatureAlgorithms decode" {
-    const recv_data = [_]u8{ 0x00, 0x1e, 0x00, 0x1c, 0x04, 0x03, 0x05, 0x03, 0x06, 0x03, 0x08, 0x07, 0x08, 0x08, 0x08, 0x09, 0x08, 0x0a, 0x08, 0x0b, 0x08, 0x04, 0x08, 0x05, 0x08, 0x06, 0x04, 0x01, 0x05, 0x01, 0x06, 0x01 };
+    const recv_data = [_]u8{0x00, 0x1c, 0x04, 0x03, 0x05, 0x03, 0x06, 0x03, 0x08, 0x07, 0x08, 0x08, 0x08, 0x09, 0x08, 0x0a, 0x08, 0x0b, 0x08, 0x04, 0x08, 0x05, 0x08, 0x06, 0x04, 0x01, 0x05, 0x01, 0x06, 0x01 };
     var readStream = io.fixedBufferStream(&recv_data);
 
     const res = try SignatureAlgorithms.decode(readStream.reader(), std.testing.allocator);

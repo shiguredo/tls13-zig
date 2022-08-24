@@ -26,12 +26,13 @@ pub const Extension = union(ExtensionType) {
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator, ht: HandshakeType, hello_retry: bool) !Self {
         const t = @intToEnum(ExtensionType, try reader.readIntBig(u16));
+        const len = try reader.readIntBig(u16); // TODO: check readable length of reader
         switch (t) {
-            ExtensionType.server_name => return Self { .server_name = try ServerName.decode(reader) },
+            ExtensionType.server_name => return Self { .server_name = try ServerName.decode(reader, len) },
             ExtensionType.supported_groups => return Self{ .supported_groups = try SupportedGroups.decode(reader, allocator) },
             ExtensionType.signature_algorithms => return Self{ .signature_algorithms = try SignatureAlgorithms.decode(reader, allocator) },
             ExtensionType.record_size_limit => return Self{ .record_size_limit = try RecordSizeLimit.decode(reader) },
-            ExtensionType.supported_versions => return Self{ .supported_versions = try SupportedVersions.decode(reader, ht) },
+            ExtensionType.supported_versions => return Self{ .supported_versions = try SupportedVersions.decode(reader, allocator, ht) },
             ExtensionType.key_share => return Self{ .key_share = try KeyShare.decode(reader, allocator, ht, hello_retry) },
         }
     }
@@ -49,13 +50,16 @@ pub const Extension = union(ExtensionType) {
     }
 
     pub fn length(self: Self) usize {
+        var len:usize = 0;
+        len += @sizeOf(u16); // type
+        len += @sizeOf(u16); // length
         switch (self) {
-            ExtensionType.server_name => |e| return e.length(),
-            ExtensionType.supported_groups => |e| return e.length(),
-            ExtensionType.signature_algorithms => |e| return e.length(),
-            ExtensionType.record_size_limit => |e| return e.length(),
-            ExtensionType.supported_versions => |e| return e.length(),
-            ExtensionType.key_share => |e| return e.length(),
+            ExtensionType.server_name => |e| return e.length() + len,
+            ExtensionType.supported_groups => |e| return e.length() + len,
+            ExtensionType.signature_algorithms => |e| return e.length() + len,
+            ExtensionType.record_size_limit => |e| return e.length() + len,
+            ExtensionType.supported_versions => |e| return e.length() + len,
+            ExtensionType.key_share => |e| return e.length() + len,
         }
     }
 
@@ -63,6 +67,7 @@ pub const Extension = union(ExtensionType) {
         switch (self) {
             ExtensionType.supported_groups => |e| e.deinit(),
             ExtensionType.signature_algorithms => |e| e.deinit(),
+            ExtensionType.supported_versions => |e| e.deinit(),
             ExtensionType.key_share => |e| e.deinit(),
             else => {},
         }
@@ -82,8 +87,6 @@ pub const RecordSizeLimit = struct {
     pub fn decode(reader: anytype) !Self {
         var res = Self.init();
 
-        // type is already read.
-        _ = try reader.readIntBig(u16);
         res.record_size_limit = try reader.readIntBig(u16);
 
         return res;
@@ -92,8 +95,6 @@ pub const RecordSizeLimit = struct {
     pub fn length(self: Self) usize {
         _ = self;
         var len: usize = 0;
-        len += @sizeOf(u16); // type
-        len += @sizeOf(u16); // length
         len += @sizeOf(u16); // size limit
         return len;
     }
@@ -113,9 +114,9 @@ pub const ServerName = struct {
         return .{};
     }
 
-    pub fn decode(reader: anytype) !Self {
+    pub fn decode(reader: anytype, len: u16) !Self {
         var res = Self.init();
-        res.len = try reader.readIntBig(u16);
+        res.len = len;
 
         var i:u16 = 0;
         while (i < res.len) : (i += 1) {
@@ -127,8 +128,6 @@ pub const ServerName = struct {
 
     pub fn length(self: Self) usize {
         var len: usize = 0;
-        len += @sizeOf(u16); // type
-        len += @sizeOf(u16); // length
         len += self.len;
         return len;
     }

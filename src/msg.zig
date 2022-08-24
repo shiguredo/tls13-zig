@@ -173,6 +173,7 @@ pub const ClientHello = struct {
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
         var res = Self.init(allocator);
+        errdefer res.deinit();
 
         res.protocol_version = try reader.readIntBig(u16);
 
@@ -246,6 +247,7 @@ pub const ServerHello = struct {
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
         var res = Self.init(allocator);
+        errdefer res.deinit();
         var len: usize = 0;
 
         res.protocol_version = try reader.readIntBig(u16);
@@ -312,6 +314,7 @@ pub const EncryptedExtensions = struct {
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
         var res = Self.init(allocator);
+        errdefer res.deinit();
         try decodeExtensions(reader, allocator, &res.extensions, .server_hello, false);
         return res;
     }

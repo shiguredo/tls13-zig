@@ -136,6 +136,57 @@ pub const TLSCipherText = struct {
     }
 };
 
+pub const TLSInnerPlainText = struct {
+    content: []u8 = undefined,
+    content_type: ContentType = undefined,
+    zero_pad_length: usize = 0,
+
+    allocator: std.mem.Allocator = undefined,
+
+    const Self = @This();
+
+    const Error = error {
+        InvalidData,
+    };
+
+    pub fn init(len: usize, allocator: std.mem.Allocator) !Self {
+        return Self{
+            .content = try allocator.alloc(u8, len),
+            .allocator = allocator,
+        };
+    }
+
+    pub fn deinit(self: Self) void {
+        self.allocator.free(self.content);
+    }
+
+    pub fn decode(m: []const u8, allocator: std.mem.Allocator) !Self {
+        // specify the length of zero padding
+        var i:usize = m.len - 1;
+        while (i > 0) : (i -= 1) {
+            if (m[i] != 0x0) {
+                break;
+            }
+            if (i == 0) {
+                // if the 'm' does not contains non-zero value(ContentType), it must be invalid data.
+                return Error.InvalidData;
+            }
+        }
+
+        const zero_pad_length = (m.len - 1) - i;
+        const content_len = m.len - zero_pad_length - 1;
+
+        var res = try Self.init(content_len, allocator);
+        errdefer res.deinit();
+
+        res.content_type = @intToEnum(ContentType, m[content_len]);
+        res.zero_pad_length = zero_pad_length;
+        std.mem.copy(u8, res.content, m[0..content_len]);
+
+        return res;
+    }
+};
+
 const expect = std.testing.expect;
 const expectError = std.testing.expectError;
 
@@ -177,4 +228,15 @@ test "TLSCipherText encode" {
 
     const send_data_ans = [_]u8{ 0x17, 0x03, 0x03, 0x00, 0x13, 0xB5, 0x8F, 0xD6, 0x71, 0x66, 0xEB, 0xF5, 0x99, 0xD2, 0x47, 0x20, 0xCF, 0xBE, 0x7E, 0xFA, 0x7A, 0x88, 0x64, 0xA9 };
     try expect(std.mem.eql(u8, send_data[0..write_len], &send_data_ans));
+}
+
+test "TLSInnerPlainText decode" {
+    const recv_data = [_]u8{ 0x01, 0x00, 0x15, 0x00, 0x00, 0x00 }; // ContentType alert
+
+    const pt = try TLSInnerPlainText.decode(&recv_data, std.testing.allocator);
+    defer pt.deinit();
+
+    const content_ans = [_]u8 { 0x01, 0x00 };
+    try expect(pt.zero_pad_length == 3);
+    try expect(std.mem.eql(u8, pt.content, &content_ans));
 }

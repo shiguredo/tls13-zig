@@ -96,6 +96,7 @@ pub const ExtensionError = error{
 
 pub const DecodeError = error {
     HashNotSpecified,
+    NotAllDecoded,
 };
 
 pub fn getExtension(extensions: ArrayList(Extension), ext_type: ExtensionType) !Extension {

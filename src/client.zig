@@ -10,24 +10,6 @@ const msg = @import("msg.zig");
 const key = @import("key.zig");
 const record = @import("record.zig");
 
-fn AesGcmTLS(comptime AesGcm: anytype) type {
-    return struct {
-        pub const tag_length = AesGcm.tag_length;
-        pub const nonce_length = AesGcm.nonce_length;
-        pub const key_length = AesGcm.key_length;
-
-        const Self = @This();
-        pub fn encrypt(c: []u8, m: []const u8, n: [nonce_length]u8, k: [key_length]u8) void {
-            AesGcm.encrypt(c[5..(c.len - Self.tag_length)], c[(c.len - Self.tag_length)..][0..Self.tag_length], m, c[0..5], n, k);
-        }
-
-        pub fn decrypt(m: []u8, c: []const u8, n: [nonce_length]u8, k: [key_length]u8) std.crypto.errors.AuthenticationError!void {
-            try AesGcm.decrypt(m, c[5 .. c.len - 16], c[c.len - 16 ..][0..Self.tag_length].*, c[0..5], n, k);
-        }
-    };
-}
-
-// this test rlies on RFC8446 Appendix A.1. Client(page 120)
 test "client test with RFC8448" {
     // STATE = START
 
@@ -287,7 +269,7 @@ test "client test with RFC8448" {
         ap_write_nonce[i] = ap_write_iv[i] ^ ap_write_nonce[i];
     }
 
-    const c_alert_data = [_]u8{ 0x01, 0x00}; // ContentType alert
+    const c_alert_data = [_]u8{ 0x01, 0x00 }; // ContentType alert
     const c_alert_record = try Protector.encryptFromPlainBytes(&c_alert_data, .alert, ap_write_nonce, ap_write_key, std.testing.allocator);
     defer c_alert_record.deinit();
     const c_alert_ans = [_]u8{ 0x17, 0x03, 0x03, 0x00, 0x13, 0xC9, 0x87, 0x27, 0x60, 0x65, 0x56, 0x66, 0xB7, 0x4D, 0x7F, 0xF1, 0x15, 0x3E, 0xFD, 0x6D, 0xB6, 0xD0, 0xB0, 0xE3 };

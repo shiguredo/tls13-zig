@@ -126,7 +126,7 @@ pub const TLSCipherText = struct {
     }
 
     pub fn length(self: Self) usize {
-        var len:usize = 0;
+        var len: usize = 0;
         len += @sizeOf(u8); // ContentType
         len += @sizeOf(u16); // protocol_version
         len += @sizeOf(u16); // record length
@@ -145,7 +145,7 @@ pub const TLSInnerPlainText = struct {
 
     const Self = @This();
 
-    const Error = error {
+    const Error = error{
         InvalidData,
     };
 
@@ -162,7 +162,7 @@ pub const TLSInnerPlainText = struct {
 
     pub fn decode(m: []const u8, allocator: std.mem.Allocator) !Self {
         // specify the length of zero padding
-        var i:usize = m.len - 1;
+        var i: usize = m.len - 1;
         while (i > 0) : (i -= 1) {
             if (m[i] != 0x0) {
                 break;
@@ -187,7 +187,7 @@ pub const TLSInnerPlainText = struct {
     }
 
     pub fn encode(self: Self, writer: anytype) !usize {
-        var len:usize = 0;
+        var len: usize = 0;
 
         try writer.writeAll(self.content);
         len += self.content.len;
@@ -249,7 +249,7 @@ pub fn RecordPayloadProtector(comptime AesGcm: anytype) type {
 
             var header: [5]u8 = undefined;
             _ = try c.writeHeader(io.fixedBufferStream(&header).writer());
-            try AesGcm.decrypt(mt_bytes, c.record[0..c.record.len - tag_length], c.record[(c.record.len - tag_length)..][0..tag_length].*, &header, n, k);
+            try AesGcm.decrypt(mt_bytes, c.record[0 .. c.record.len - tag_length], c.record[(c.record.len - tag_length)..][0..tag_length].*, &header, n, k);
 
             return try TLSInnerPlainText.decode(mt_bytes, allocator);
         }
@@ -312,14 +312,14 @@ test "TLSInnerPlainText decode" {
     const pt = try TLSInnerPlainText.decode(&recv_data, std.testing.allocator);
     defer pt.deinit();
 
-    const content_ans = [_]u8 { 0x01, 0x00 };
+    const content_ans = [_]u8{ 0x01, 0x00 };
     try expect(std.mem.eql(u8, pt.content, &content_ans));
     try expect(pt.content_type == .alert);
     try expect(pt.zero_pad_length == 3);
 }
 
 test "TLSInnerPlainText encode" {
-    const content = [_]u8 { 0x01, 0x00 };
+    const content = [_]u8{ 0x01, 0x00 };
 
     var pt = try TLSInnerPlainText.init(content.len, std.testing.allocator);
     defer pt.deinit();
@@ -341,7 +341,7 @@ test "RecordPayloadProtector encrypt" {
     const key = [_]u8{ 0x17, 0x42, 0x2d, 0xda, 0x59, 0x6e, 0xd5, 0xd9, 0xac, 0xd8, 0x90, 0xe3, 0xc6, 0x3f, 0x50, 0x51 };
     const iv = [_]u8{ 0x5b, 0x78, 0x92, 0x3d, 0xee, 0x08, 0x57, 0x90, 0x33, 0xe5, 0x23, 0xd9 };
     var nonce = [_]u8{ 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1 };
-    var i:usize = 0;
+    var i: usize = 0;
     while (i < iv.len) : (i += 1) {
         nonce[i] = iv[i] ^ nonce[i];
     }
@@ -366,7 +366,7 @@ test "RecordPayloadProtector decrypt" {
     const key = [_]u8{ 0x9f, 0x02, 0x28, 0x3b, 0x6c, 0x9c, 0x07, 0xef, 0xc2, 0x6b, 0xb9, 0xf2, 0xac, 0x92, 0xe3, 0x56 };
     const iv = [_]u8{ 0xcf, 0x78, 0x2b, 0x88, 0xdd, 0x83, 0x54, 0x9a, 0xad, 0xf1, 0xe9, 0x84 };
     var nonce = [_]u8{ 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2 }; // increment nonce counter
-    var i:usize = 0;
+    var i: usize = 0;
     while (i < iv.len) : (i += 1) {
         nonce[i] = iv[i] ^ nonce[i];
     }
@@ -378,7 +378,7 @@ test "RecordPayloadProtector decrypt" {
     const mt = try Protector.decrypt(ct, nonce, key, std.testing.allocator);
     defer mt.deinit();
 
-    const mt_content_ans = [_]u8{0x01, 0x00};
+    const mt_content_ans = [_]u8{ 0x01, 0x00 };
     try expect(mt.content_type == .alert);
     try expect(std.mem.eql(u8, mt.content, &mt_content_ans));
 }
@@ -387,12 +387,12 @@ test "RecordPayloadProtector encryptFromPlainBytes" {
     const key = [_]u8{ 0x17, 0x42, 0x2d, 0xda, 0x59, 0x6e, 0xd5, 0xd9, 0xac, 0xd8, 0x90, 0xe3, 0xc6, 0x3f, 0x50, 0x51 };
     const iv = [_]u8{ 0x5b, 0x78, 0x92, 0x3d, 0xee, 0x08, 0x57, 0x90, 0x33, 0xe5, 0x23, 0xd9 };
     var nonce = [_]u8{ 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1 };
-    var i:usize = 0;
+    var i: usize = 0;
     while (i < iv.len) : (i += 1) {
         nonce[i] = iv[i] ^ nonce[i];
     }
 
-    const content = [_]u8{0x01, 0x00};
+    const content = [_]u8{ 0x01, 0x00 };
 
     const Protector = RecordPayloadProtector(std.crypto.aead.aes_gcm.Aes128Gcm);
     const ct = try Protector.encryptFromPlainBytes(&content, .alert, nonce, key, std.testing.allocator);
@@ -408,7 +408,7 @@ test "RecordPayloadProtector decryptFromBytes" {
     const key = [_]u8{ 0x9f, 0x02, 0x28, 0x3b, 0x6c, 0x9c, 0x07, 0xef, 0xc2, 0x6b, 0xb9, 0xf2, 0xac, 0x92, 0xe3, 0x56 };
     const iv = [_]u8{ 0xcf, 0x78, 0x2b, 0x88, 0xdd, 0x83, 0x54, 0x9a, 0xad, 0xf1, 0xe9, 0x84 };
     var nonce = [_]u8{ 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2 }; // increment nonce counter
-    var i:usize = 0;
+    var i: usize = 0;
     while (i < iv.len) : (i += 1) {
         nonce[i] = iv[i] ^ nonce[i];
     }
@@ -418,7 +418,7 @@ test "RecordPayloadProtector decryptFromBytes" {
     const mt = try Protector.decryptFromCipherBytes(&s_alert, nonce, key, std.testing.allocator);
     defer mt.deinit();
 
-    const mt_content_ans = [_]u8{0x01, 0x00};
+    const mt_content_ans = [_]u8{ 0x01, 0x00 };
     try expect(mt.content_type == .alert);
     try expect(std.mem.eql(u8, mt.content, &mt_content_ans));
 }

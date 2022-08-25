@@ -58,6 +58,32 @@ pub const KeyShare = struct {
         return res;
     }
 
+    pub fn encode(self: Self, writer: anytype) !usize {
+        var len:usize = 0;
+
+        switch (self.ht) {
+            HandshakeType.client_hello => {
+                try writer.writeIntBig(u16, @intCast(u16, self.length() - @sizeOf(u16))); // entire length - sizeOf(field:'len')
+                len += @sizeOf(u16);
+
+                for (self.entries.items) |entry| {
+                    len += try entry.encode(writer);
+                }
+            },
+            HandshakeType.server_hello => {
+                if (self.is_hello_retry_request) {
+                    try writer.writeIntBig(u16, @enumToInt(self.selected));
+                    len += @sizeOf(NamedGroup);
+                } else {
+                    len += try self.entries.items[0].encode(writer);
+                }
+            },
+            else => unreachable,
+        }
+
+        return len;
+    }
+
     pub fn length(self: Self) usize {
         var len: usize = 0;
         switch (self.ht) {
@@ -125,6 +151,10 @@ pub const KeyShareEntry = union(NamedGroup) {
         var len: usize = 0;
         len += @sizeOf(u16);
         switch (self) {
+            NamedGroup.x25519 => |e| {
+                try writer.writeIntBig(u16, @enumToInt(NamedGroup.x25519));
+                len += try e.encode(writer);
+            },
             NamedGroup.secp256r1 => |e| {
                 try writer.writeIntBig(u16, @enumToInt(NamedGroup.secp256r1));
                 len += try e.encode(writer);
@@ -171,6 +201,18 @@ pub const EntryX25519 = struct {
 
         return res;
     }
+
+    pub fn encode(self: Self, writer: anytype) !usize {
+        var len:usize = 0;
+        try writer.writeIntBig(u16, self.key_exchange.len);
+        len += @sizeOf(u16);
+
+        try writer.writeAll(&self.key_exchange);
+        len += self.key_exchange.len;
+
+        return len;
+    }
+
 
     pub fn length(self: Self) usize {
         var len: usize = 0;
@@ -246,6 +288,21 @@ test "Extension KeyShare with EntryX25519 decode" {
 
     const key_exchg_ans = [_]u8{ 0x49, 0x6c, 0xc8, 0x42, 0x40, 0x7f, 0x7e, 0x62, 0xad, 0x5c, 0xd3, 0x92, 0x97, 0xf7, 0x7f, 0xfc, 0x6c, 0x72, 0x83, 0xba, 0xcb, 0x89, 0x4b, 0x58, 0x20, 0x16, 0x24, 0xae, 0x27, 0xbe, 0x87, 0x2f };
     try expect(std.mem.eql(u8, &x25519.key_exchange, &key_exchg_ans));
+}
+
+test "Extension KeyShare with EntryX25519 encode" {
+    var res = EntryX25519{};
+    const key = [_]u8{ 0x49, 0x6c, 0xc8, 0x42, 0x40, 0x7f, 0x7e, 0x62, 0xad, 0x5c, 0xd3, 0x92, 0x97, 0xf7, 0x7f, 0xfc, 0x6c, 0x72, 0x83, 0xba, 0xcb, 0x89, 0x4b, 0x58, 0x20, 0x16, 0x24, 0xae, 0x27, 0xbe, 0x87, 0x2f };
+    std.mem.copy(u8, &res.key_exchange, &key);
+    var ext = Extension{ .key_share = KeyShare.init(std.testing.allocator, .client_hello, false) };
+    defer ext.deinit();
+    try ext.key_share.entries.append(KeyShareEntry{ .x25519 = res });
+
+    var send_bytes: [100]u8 = undefined;
+    const write_len = try ext.encode(io.fixedBufferStream(&send_bytes).writer());
+
+    const ext_ans = [_]u8{ 0x00, 0x33, 0x00, 0x26, 0x00, 0x24, 0x00, 0x1d, 0x00, 0x20, 0x49, 0x6c, 0xc8, 0x42, 0x40, 0x7f, 0x7e, 0x62, 0xad, 0x5c, 0xd3, 0x92, 0x97, 0xf7, 0x7f, 0xfc, 0x6c, 0x72, 0x83, 0xba, 0xcb, 0x89, 0x4b, 0x58, 0x20, 0x16, 0x24, 0xae, 0x27, 0xbe, 0x87, 0x2f };
+    try expect(std.mem.eql(u8, send_bytes[0..write_len], &ext_ans));
 }
 
 test "EntrySecp256r1 decode" {

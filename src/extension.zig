@@ -62,7 +62,11 @@ pub const Extension = union(ExtensionType) {
                 len += try e.encode(writer);
             },
             ExtensionType.supported_versions => |e| return (try e.encode(writer)) + len,
-            ExtensionType.key_share => unreachable,
+            ExtensionType.key_share => |e| {
+                try writer.writeIntBig(u16, @enumToInt(ExtensionType.key_share));
+                try writer.writeIntBig(u16, @intCast(u16, e.length()));
+                len += try e.encode(writer);
+            },
         }
 
         return len;

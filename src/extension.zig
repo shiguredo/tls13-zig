@@ -46,27 +46,19 @@ pub const Extension = union(ExtensionType) {
 
     pub fn encode(self: Self, writer: anytype) !usize {
         var len: usize = 0;
+        try writer.writeIntBig(u16, @enumToInt(self));
         len += @sizeOf(ExtensionType); // type
+
+        try writer.writeIntBig(u16, @intCast(u16, self.length() - (@sizeOf(u16) + @sizeOf(u16))));
         len += @sizeOf(u16); // length
+
         switch (self) {
-            ExtensionType.server_name => |e| {
-                try writer.writeIntBig(u16, @enumToInt(ExtensionType.server_name));
-                try writer.writeIntBig(u16, @intCast(u16, e.length()));
-                len += try e.encode(writer);
-            },
-            ExtensionType.supported_groups => |e| return (try e.encode(writer)) + len,
-            ExtensionType.signature_algorithms => |e| return (try e.encode(writer)) + len,
-            ExtensionType.record_size_limit => |e| {
-                try writer.writeIntBig(u16, @enumToInt(ExtensionType.record_size_limit));
-                try writer.writeIntBig(u16, @intCast(u16, e.length()));
-                len += try e.encode(writer);
-            },
-            ExtensionType.supported_versions => |e| return (try e.encode(writer)) + len,
-            ExtensionType.key_share => |e| {
-                try writer.writeIntBig(u16, @enumToInt(ExtensionType.key_share));
-                try writer.writeIntBig(u16, @intCast(u16, e.length()));
-                len += try e.encode(writer);
-            },
+            ExtensionType.server_name => |e| len += try e.encode(writer),
+            ExtensionType.supported_groups => |e| len += try e.encode(writer),
+            ExtensionType.signature_algorithms => |e| len += try e.encode(writer),
+            ExtensionType.record_size_limit => |e| len += try e.encode(writer),
+            ExtensionType.supported_versions => |e| len += try e.encode(writer),
+            ExtensionType.key_share => |e| len += try e.encode(writer),
         }
 
         return len;

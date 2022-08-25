@@ -49,7 +49,11 @@ pub const Extension = union(ExtensionType) {
         len += @sizeOf(ExtensionType); // type
         len += @sizeOf(u16); // length
         switch (self) {
-            ExtensionType.server_name => unreachable,
+            ExtensionType.server_name => |e| {
+                try writer.writeIntBig(u16, @enumToInt(ExtensionType.server_name));
+                try writer.writeIntBig(u16, @intCast(u16, e.length()));
+                len += try e.encode(writer);
+            },
             ExtensionType.supported_groups => |e| return (try e.encode(writer)) + len,
             ExtensionType.signature_algorithms => |e| return (try e.encode(writer)) + len,
             ExtensionType.record_size_limit => |e| {
@@ -156,6 +160,15 @@ pub const ServerName = struct {
         unreachable;
     }
 
+    pub fn encode(self: Self, writer: anytype) !usize {
+        if (!self.init) {
+            return 0;
+        }
+        _ = writer;
+
+        unreachable;
+    }
+
     pub fn length(self: Self) usize {
         if (!self.init) {
             return 0;
@@ -201,4 +214,14 @@ test "Extension ServerName decode" {
 
     const res = try Extension.decode(readStream.reader(), std.testing.allocator, .server_hello, false);
     try expect(res == .server_name);
+}
+
+test "Extension ServerName encode" {
+    const res = ServerName{};
+    const ext = Extension{ .server_name = res };
+
+    const sn_ans = [_]u8{ 0x00, 0x00, 0x00, 0x00 };
+    var send_bytes: [100]u8 = undefined;
+    const write_len = try ext.encode(io.fixedBufferStream(&send_bytes).writer());
+    try expect(std.mem.eql(u8, send_bytes[0..write_len], &sn_ans));
 }

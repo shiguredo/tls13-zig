@@ -53,6 +53,19 @@ pub const SignatureAlgorithms = struct {
         return res;
     }
 
+    pub fn encode(self: Self, writer: anytype) !usize {
+        var len:usize = 0;
+        try writer.writeIntBig(u16, @intCast(u16, self.algos.items.len * @sizeOf(SignatureAlgorithm)));
+        len += @sizeOf(u16);
+
+        for (self.algos.items) |e| {
+            try writer.writeIntBig(u16, @enumToInt(e));
+            len += @sizeOf(SignatureAlgorithm);
+        }
+
+        return len;
+    }
+
     pub fn length(self: Self) usize {
         var len: usize = 0;
         len += @sizeOf(u16); // supported groups length
@@ -96,4 +109,30 @@ test "SignatureAlgorithms decode" {
     try expect(res.algos.items[11] == .rsa_pkcs1_sha256);
     try expect(res.algos.items[12] == .rsa_pkcs1_sha384);
     try expect(res.algos.items[13] == .rsa_pkcs1_sha512);
+}
+
+test "SignatureAlgorithms encode" {
+    var res = SignatureAlgorithms.init(std.testing.allocator);
+    defer res.deinit();
+
+    try res.algos.append(.ecdsa_secp256r1_sha256);
+    try res.algos.append(.ecdsa_secp384r1_sha384);
+    try res.algos.append(.ecdsa_secp521r1_sha512);
+    try res.algos.append(.ed25519);
+    try res.algos.append(.ed448);
+    try res.algos.append(.rsa_pss_pss_sha256);
+    try res.algos.append(.rsa_pss_pss_sha384);
+    try res.algos.append(.rsa_pss_pss_sha512);
+    try res.algos.append(.rsa_pss_rsae_sha256);
+    try res.algos.append(.rsa_pss_rsae_sha384);
+    try res.algos.append(.rsa_pss_rsae_sha512);
+    try res.algos.append(.rsa_pkcs1_sha256);
+    try res.algos.append(.rsa_pkcs1_sha384);
+    try res.algos.append(.rsa_pkcs1_sha512);
+
+    const algos_ans = [_]u8{ 0x00, 0x1c, 0x04, 0x03, 0x05, 0x03, 0x06, 0x03, 0x08, 0x07, 0x08, 0x08, 0x08, 0x09, 0x08, 0x0a, 0x08, 0x0b, 0x08, 0x04, 0x08, 0x05, 0x08, 0x06, 0x04, 0x01, 0x05, 0x01, 0x06, 0x01 };
+    var send_bytes: [100]u8 = undefined;
+
+    const write_len = try res.encode(io.fixedBufferStream(&send_bytes).writer());
+    try expect(std.mem.eql(u8, send_bytes[0..write_len], &algos_ans));
 }

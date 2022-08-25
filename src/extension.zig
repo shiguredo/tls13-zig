@@ -37,6 +37,26 @@ pub const Extension = union(ExtensionType) {
         }
     }
 
+    pub fn encode(self: Self, writer: anytype) !usize {
+        var len: usize = 0;
+        len += @sizeOf(ExtensionType); // type
+        len += @sizeOf(u16); // length
+        switch (self) {
+            ExtensionType.server_name => unreachable,
+            ExtensionType.supported_groups => |e| return (try e.encode(writer)) + len,
+            ExtensionType.signature_algorithms => |e| return (try e.encode(writer)) + len,
+            ExtensionType.record_size_limit => |e| {
+                try writer.writeIntBig(u16, @enumToInt(ExtensionType.record_size_limit));
+                try writer.writeIntBig(u16, @intCast(u16, e.length()));
+                len += try e.encode(writer);
+            },
+            ExtensionType.supported_versions => |e| return (try e.encode(writer)) + len,
+            ExtensionType.key_share => unreachable,
+        }
+
+        return len;
+    }
+
     pub fn print(self: Self) void {
         switch (self) {
             ExtensionType.server_name => |e| e.print(),
@@ -89,6 +109,15 @@ pub const RecordSizeLimit = struct {
         res.record_size_limit = try reader.readIntBig(u16);
 
         return res;
+    }
+
+    pub fn encode(self: Self, writer: anytype) !usize {
+        var len: usize = 0;
+
+        try writer.writeIntBig(u16, self.record_size_limit);
+        len += @sizeOf(u16);
+
+        return len;
     }
 
     pub fn length(self: Self) usize {
@@ -148,6 +177,18 @@ test "Extension RecordSizeLimit decode" {
 
     const rsl = res.record_size_limit;
     try expect(rsl.record_size_limit == 16385);
+}
+
+test "Extension RecordSizeLimit encode" {
+    const res = RecordSizeLimit{
+        .record_size_limit = 16385,
+    };
+    const ext = Extension{ .record_size_limit = res };
+
+    const rsl_ans = [_]u8{ 0x00, 0x1c, 0x00, 0x02, 0x40, 0x01 };
+    var send_bytes: [100]u8 = undefined;
+    const write_len = try ext.encode(io.fixedBufferStream(&send_bytes).writer());
+    try expect(std.mem.eql(u8, send_bytes[0..write_len], &rsl_ans));
 }
 
 test "Extension ServerName decode" {

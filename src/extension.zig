@@ -27,13 +27,20 @@ pub const Extension = union(ExtensionType) {
     pub fn decode(reader: anytype, allocator: std.mem.Allocator, ht: HandshakeType, hello_retry: bool) !Self {
         const t = @intToEnum(ExtensionType, try reader.readIntBig(u16));
         const len = try reader.readIntBig(u16); // TODO: check readable length of reader
-        switch (t) {
-            ExtensionType.server_name => return Self{ .server_name = try ServerName.decode(reader, len) },
-            ExtensionType.supported_groups => return Self{ .supported_groups = try SupportedGroups.decode(reader, allocator) },
-            ExtensionType.signature_algorithms => return Self{ .signature_algorithms = try SignatureAlgorithms.decode(reader, allocator) },
-            ExtensionType.record_size_limit => return Self{ .record_size_limit = try RecordSizeLimit.decode(reader) },
-            ExtensionType.supported_versions => return Self{ .supported_versions = try SupportedVersions.decode(reader, allocator, ht) },
-            ExtensionType.key_share => return Self{ .key_share = try KeyShare.decode(reader, allocator, ht, hello_retry) },
+        if (len == 0) {
+            switch (t) {
+                ExtensionType.server_name => return Self { .server_name = .{} },
+                else => unreachable,
+            }
+        } else {
+            switch (t) {
+                ExtensionType.server_name => return Self{ .server_name = try ServerName.decode(reader) },
+                ExtensionType.supported_groups => return Self{ .supported_groups = try SupportedGroups.decode(reader, allocator) },
+                ExtensionType.signature_algorithms => return Self{ .signature_algorithms = try SignatureAlgorithms.decode(reader, allocator) },
+                ExtensionType.record_size_limit => return Self{ .record_size_limit = try RecordSizeLimit.decode(reader) },
+                ExtensionType.supported_versions => return Self{ .supported_versions = try SupportedVersions.decode(reader, allocator, ht) },
+                ExtensionType.key_share => return Self{ .key_share = try KeyShare.decode(reader, allocator, ht, hello_retry) },
+            }
         }
     }
 
@@ -134,30 +141,27 @@ pub const RecordSizeLimit = struct {
 
 //RFC6066 Transport Layer Security (TLS) Extensions: Extension Definitions
 pub const ServerName = struct {
-    len: u16 = undefined,
+    init: bool = false,
 
     const Self = @This();
 
     pub fn init() Self {
-        return .{};
+        return .{
+            .init = true,
+        };
     }
 
-    pub fn decode(reader: anytype, len: u16) !Self {
-        var res = Self.init();
-        res.len = len;
-
-        var i: u16 = 0;
-        while (i < res.len) : (i += 1) {
-            _ = try reader.readIntBig(u8);
-        }
-
-        return res;
+    pub fn decode(reader: anytype) !Self {
+        _ = reader;
+        unreachable;
     }
 
     pub fn length(self: Self) usize {
-        var len: usize = 0;
-        len += self.len;
-        return len;
+        if (!self.init) {
+            return 0;
+        }
+
+        unreachable;
     }
 
     pub fn print(self: Self) void {

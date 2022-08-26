@@ -37,6 +37,19 @@ pub const Certificate = struct {
         return res;
     }
 
+    pub fn length(self: Self) usize {
+        var len: usize = 0;
+        len += @sizeOf(u16); // certificate length
+        len += self.cert_req_ctx.len;
+
+        len += @sizeOf(u16); // cert list length
+        for (self.cert_list.items) |c| {
+            len += c.length();
+        }
+
+        return len;
+    }
+
     pub fn deinit(self: Self) void {
         for (self.cert_list.items) |e| {
             e.deinit();
@@ -120,6 +133,16 @@ pub const CertificateVerify = struct {
         }
 
         return res;
+    }
+
+    pub fn length(self: Self) usize {
+        var len: usize = 0;
+
+        len += @sizeOf(SignatureAlgorithm); // signature algorithm
+        len += @sizeOf(u16); // signature length
+        len += self.signature.items.len;
+
+        return len;
     }
 
     pub fn deinit(self: Self) void {

@@ -195,9 +195,13 @@ pub const Handshake = union(HandshakeType) {
     pub fn length(self: Self) usize {
         var len: usize = 0;
         len += @sizeOf(u8); // type
-        len += @sizeOf(u24); // length
+        len += 3; // @sizeOf(u24) = 4, so that the length is directly specified;
         switch (self) {
             HandshakeType.server_hello => |e| len += e.length(),
+            HandshakeType.encrypted_extensions => |e| len += e.length(),
+            HandshakeType.certificate => |e| len += e.length(),
+            HandshakeType.certificate_verify => |e| len += e.length(),
+            HandshakeType.finished => |e| len += e.length(),
             else => unreachable,
         }
 
@@ -405,6 +409,16 @@ pub const EncryptedExtensions = struct {
         errdefer res.deinit();
         try decodeExtensions(reader, allocator, &res.extensions, .server_hello, false);
         return res;
+    }
+
+    pub fn length(self: Self) usize {
+        var len: usize = 0;
+        len += @sizeOf(u16); // extensions length
+        for (self.extensions.items) |e| {
+            len += e.length();
+        }
+
+        return len;
     }
 
     pub fn deinit(self: Self) void {

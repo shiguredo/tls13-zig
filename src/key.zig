@@ -13,10 +13,6 @@ pub fn KeyScheduler(comptime Hash: type, comptime Aead: type) type {
         const Hkdf = hkdf.Hkdf(Hmac);
         const Self = @This();
 
-        // allcate 32KiB buffer
-        hs_msg: [1024 * 32]u8 = undefined,
-        hs_stream: io.FixedBufferStream([]u8) = undefined,
-
         shared_key: []const u8 = undefined,
         psk: []const u8 = undefined,
 
@@ -53,7 +49,6 @@ pub fn KeyScheduler(comptime Hash: type, comptime Aead: type) type {
                 .shared_key = s_key,
                 .psk = psk,
             };
-            res.hs_stream = io.fixedBufferStream(&res.hs_msg);
 
             try res.generateEarlySecrets();
             return res;
@@ -65,28 +60,22 @@ pub fn KeyScheduler(comptime Hash: type, comptime Aead: type) type {
             self.hs_secret = Hkdf.extract(&self.hs_derived_secret, self.shared_key);
         }
 
-        pub fn generateHandshakeSecrets(self: *Self, ch: []const u8, sh: msg.ServerHello) !void {
-            _ = try self.hs_stream.write(ch);
-            const hs_sh = msg.Handshake{ .server_hello = sh };
-            _ = try hs_sh.encode(self.hs_stream.writer());
-
-            self.s_hs_secret = try deriveSecret(Hash, self.hs_secret, "s hs traffic", self.hs_stream.getWritten());
-            self.c_hs_secret = try deriveSecret(Hash, self.hs_secret, "c hs traffic", self.hs_stream.getWritten());
+        pub fn generateHandshakeSecrets(self: *Self, msgs: []const u8) !void {
+            self.s_hs_secret = try deriveSecret(Hash, self.hs_secret, "s hs traffic", msgs);
+            self.c_hs_secret = try deriveSecret(Hash, self.hs_secret, "c hs traffic", msgs);
             self.master_derived_secret = try deriveSecret(Hash, self.hs_secret, "derived", "");
             self.master_secret = Hkdf.extract(&self.master_derived_secret, &([_]u8{0} ** 32));
             self.s_hs_key = try hkdfExpandLabel(Hash, self.s_hs_secret, "key", "", Aead.key_length);
             self.s_hs_iv = try hkdfExpandLabel(Hash, self.s_hs_secret, "iv", "", Aead.nonce_length);
+            self.c_hs_key = try hkdfExpandLabel(Hash, self.c_hs_secret, "key", "", Aead.key_length);
+            self.c_hs_iv = try hkdfExpandLabel(Hash, self.c_hs_secret, "iv", "", Aead.nonce_length);
+            self.s_hs_finished_secret = try hkdfExpandLabel(Hash, self.s_hs_secret, "finished", "", Hash.digest_length);
+            self.c_hs_finished_secret = try hkdfExpandLabel(Hash, self.c_hs_secret, "finished", "", Hash.digest_length);
         }
 
         pub fn generateApplicationSecrets(self: *Self, msgs: []const u8) !void {
-            _ = try self.hs_stream.write(msgs);
-
-            self.s_hs_finished_secret = try hkdfExpandLabel(Hash, self.s_hs_secret, "finished", "", Hash.digest_length);
-            self.c_hs_finished_secret = try hkdfExpandLabel(Hash, self.c_hs_secret, "finished", "", Hash.digest_length);
-            self.s_ap_secret = try deriveSecret(Hash, self.master_secret, "s ap traffic", self.hs_stream.getWritten());
-            self.c_ap_secret = try deriveSecret(Hash, self.master_secret, "c ap traffic", self.hs_stream.getWritten());
-            self.c_hs_key = try hkdfExpandLabel(Hash, self.c_hs_secret, "key", "", Aead.key_length);
-            self.c_hs_iv = try hkdfExpandLabel(Hash, self.c_hs_secret, "iv", "", Aead.nonce_length);
+            self.s_ap_secret = try deriveSecret(Hash, self.master_secret, "s ap traffic", msgs);
+            self.c_ap_secret = try deriveSecret(Hash, self.master_secret, "c ap traffic", msgs);
 
             self.s_ap_key = try hkdfExpandLabel(Hash, self.s_ap_secret, "key", "", Aead.key_length);
             self.s_ap_iv = try hkdfExpandLabel(Hash, self.s_ap_secret, "iv", "", Aead.nonce_length);
@@ -94,10 +83,8 @@ pub fn KeyScheduler(comptime Hash: type, comptime Aead: type) type {
             self.c_ap_iv = try hkdfExpandLabel(Hash, self.c_ap_secret, "iv", "", Aead.nonce_length);
         }
 
-        pub fn generateResumptionMasterSecret(self: *Self, ch: []const u8) !void {
-            _ = try self.hs_stream.write(ch);
-
-            self.res_master_secret = try deriveSecret(Hash, self.master_secret, "res master", self.hs_stream.getWritten());
+        pub fn generateResumptionMasterSecret(self: *Self, msgs: []const u8) !void {
+            self.res_master_secret = try deriveSecret(Hash, self.master_secret, "res master", msgs);
         }
 
         // RFC8446 Section 5.3 Pre-Record Nonce
@@ -124,6 +111,9 @@ test "KeyScheduler AES128GCM-SHA256" {
     const Aes128Gcm = std.crypto.aead.aes_gcm.Aes128Gcm;
     const Protector = record.RecordPayloadProtector(Aes128Gcm);
 
+    var msgs_bytes = [_]u8{0} ** (1024 * 32);
+    var msgs_stream = io.fixedBufferStream(&msgs_bytes);
+
     const dhe_shared_key = [_]u8{ 0x8b, 0xd4, 0x05, 0x4f, 0xb5, 0x5b, 0x9d, 0x63, 0xfd, 0xfb, 0xac, 0xf9, 0xf0, 0x4b, 0x9f, 0x0d, 0x35, 0xe6, 0xd6, 0x3f, 0x53, 0x75, 0x63, 0xef, 0xd4, 0x62, 0x72, 0x90, 0x0f, 0x89, 0x49, 0x2d };
 
     var ks = try KeyScheduler(Sha256, Aes128Gcm).init(&dhe_shared_key, &([_]u8{0} ** 32));
@@ -140,7 +130,10 @@ test "KeyScheduler AES128GCM-SHA256" {
     const sh = (try msg.Handshake.decode(io.fixedBufferStream(&sh_bytes).reader(), std.testing.allocator, null)).server_hello;
     defer sh.deinit();
 
-    try ks.generateHandshakeSecrets(&ch_bytes, sh);
+    _ = try msgs_stream.write(&ch_bytes);
+    _ = try msgs_stream.write(&sh_bytes);
+
+    try ks.generateHandshakeSecrets(msgs_stream.getWritten());
 
     const c_hs_secret_ans = [_]u8{ 0xb3, 0xed, 0xdb, 0x12, 0x6e, 0x06, 0x7f, 0x35, 0xa7, 0x80, 0xb3, 0xab, 0xf4, 0x5e, 0x2d, 0x8f, 0x3b, 0x1a, 0x95, 0x07, 0x38, 0xf5, 0x2e, 0x96, 0x00, 0x74, 0x6a, 0x0e, 0x27, 0xa5, 0x5a, 0x21 };
     const s_hs_secret_ans = [_]u8{ 0xb6, 0x7b, 0x7d, 0x69, 0x0c, 0xc1, 0x6c, 0x4e, 0x75, 0xe5, 0x42, 0x13, 0xcb, 0x2d, 0x37, 0xb4, 0xe9, 0xc9, 0x12, 0xbc, 0xde, 0xd9, 0x10, 0x5d, 0x42, 0xbe, 0xfd, 0x59, 0xd3, 0x91, 0xad, 0x38 };
@@ -160,7 +153,8 @@ test "KeyScheduler AES128GCM-SHA256" {
     const pt_misc = try Protector.decryptFromCipherBytes(&enc_data, hs_read_nonce, ks.s_hs_key, std.testing.allocator);
     defer pt_misc.deinit();
 
-    try ks.generateApplicationSecrets(pt_misc.content);
+    _ = try msgs_stream.write(pt_misc.content);
+    try ks.generateApplicationSecrets(msgs_stream.getWritten());
 
     const c_hs_finished_secret_ans = [_]u8{ 0xb8, 0x0a, 0xd0, 0x10, 0x15, 0xfb, 0x2f, 0x0b, 0xd6, 0x5f, 0xf7, 0xd4, 0xda, 0x5d, 0x6b, 0xf8, 0x3f, 0x84, 0x82, 0x1d, 0x1f, 0x87, 0xfd, 0xc7, 0xd3, 0xc7, 0x5b, 0x5a, 0x7b, 0x42, 0xd9, 0xc4 };
     const c_ap_secret_ans = [_]u8{ 0x9e, 0x40, 0x64, 0x6c, 0xe7, 0x9a, 0x7f, 0x9d, 0xc0, 0x5a, 0xf8, 0x88, 0x9b, 0xce, 0x65, 0x52, 0x87, 0x5a, 0xfa, 0x0b, 0x06, 0xdf, 0x00, 0x87, 0xf7, 0x92, 0xeb, 0xb7, 0xc1, 0x75, 0x04, 0xa5 };
@@ -182,7 +176,8 @@ test "KeyScheduler AES128GCM-SHA256" {
     try expect(std.mem.eql(u8, &ks.c_ap_iv, &c_ap_iv_ans));
 
     const c_finished = [_]u8{ 0x14, 0x0, 0x0, 0x20, 0xa8, 0xec, 0x43, 0x6d, 0x67, 0x76, 0x34, 0xae, 0x52, 0x5a, 0xc1, 0xfc, 0xeb, 0xe1, 0x1a, 0x03, 0x9e, 0xc1, 0x76, 0x94, 0xfa, 0xc6, 0xe9, 0x85, 0x27, 0xb6, 0x42, 0xf2, 0xed, 0xd5, 0xce, 0x61 };
-    try ks.generateResumptionMasterSecret(&c_finished);
+    _ = try msgs_stream.write(&c_finished);
+    try ks.generateResumptionMasterSecret(msgs_stream.getWritten());
 
     const res_master_secret_ans = [_]u8{ 0x7d, 0xf2, 0x35, 0xf2, 0x03, 0x1d, 0x2a, 0x05, 0x12, 0x87, 0xd0, 0x2b, 0x02, 0x41, 0xb0, 0xbf, 0xda, 0xf8, 0x6c, 0xc8, 0x56, 0x23, 0x1f, 0x2d, 0x5a, 0xba, 0x46, 0xc4, 0x34, 0xec, 0x19, 0x6c };
     try expect(std.mem.eql(u8, &ks.res_master_secret, &res_master_secret_ans));

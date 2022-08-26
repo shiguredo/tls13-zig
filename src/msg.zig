@@ -175,6 +175,35 @@ pub const Handshake = union(HandshakeType) {
         }
     }
 
+    pub fn encode(self: Self, writer: anytype) !usize {
+        var len: usize = 0;
+
+        try writer.writeIntBig(u8, @enumToInt(self));
+        len += @sizeOf(HandshakeType);
+
+        try writer.writeIntBig(u24, @intCast(u24, self.length() - (@sizeOf(u8) + @sizeOf(u24))));
+        len += @sizeOf(u24);
+
+        switch (self) {
+            HandshakeType.server_hello => |e| len += try e.encode(writer),
+            else => unreachable,
+        }
+
+        return len;
+    }
+
+    pub fn length(self: Self) usize {
+        var len: usize = 0;
+        len += @sizeOf(u8);  // type
+        len += @sizeOf(u24); // length
+        switch (self) {
+            HandshakeType.server_hello => |e| len += e.length(),
+            else => unreachable,
+        }
+
+        return len;
+    }
+
     pub fn deinit(self: Self) void {
         switch (self) {
             HandshakeType.client_hello => |e| e.deinit(),
@@ -333,9 +362,13 @@ pub const ServerHello = struct {
         len += @sizeOf(@TypeOf(self.protocol_version));
         len += self.random.len;
         len += self.legacy_session_id.length();
-        len += @sizeOf(u16);
-        len += @sizeOf(u8);
-        len += self.extensions.length();
+        len += @sizeOf(u16); // cipher_suite
+        len += @sizeOf(u8); // compression_methods
+
+        len += @sizeOf(u16); // extensions length
+        for (self.extensions.items) |ext| {
+            len += ext.length();
+        }
         return len;
     }
 
@@ -484,6 +517,7 @@ test "ServerHello decode & encode" {
     var send_bytes: [1000]u8 = undefined;
     const write_len = try res.encode(io.fixedBufferStream(&send_bytes).writer());
     try expect(std.mem.eql(u8, send_bytes[0..write_len], &recv_data));
+    try expect(write_len == res.length());
 }
 
 

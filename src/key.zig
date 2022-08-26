@@ -6,15 +6,17 @@ const hkdf = std.crypto.kdf.hkdf;
 const hmac = std.crypto.auth.hmac;
 const expect = std.testing.expect;
 
-pub fn KeyScheduler(comptime Hash: type, comptime Aead: type) type {
+pub fn KeySchedulerImpl(comptime Hash: type, comptime Aead: type) type {
     return struct {
         const msg = @import("msg.zig");
         const Hmac = hmac.Hmac(Hash);
         const Hkdf = hkdf.Hkdf(Hmac);
         const Self = @This();
 
-        shared_key: []const u8 = undefined,
-        psk: []const u8 = undefined,
+        allocator: std.mem.Allocator = undefined,
+
+        shared_key: []u8 = undefined,
+        psk: []u8 = undefined,
 
         early_secret: [Hash.digest_length]u8 = undefined,
 
@@ -43,15 +45,25 @@ pub fn KeyScheduler(comptime Hash: type, comptime Aead: type) type {
 
         res_master_secret: [Hash.digest_length]u8 = undefined,
 
-        pub fn init(s_key: []const u8, psk: []const u8) !Self {
+        pub fn init(s_key: []const u8, psk: []const u8, allocator: std.mem.Allocator) !Self {
             _ = Aead;
             var res = Self{
-                .shared_key = s_key,
-                .psk = psk,
+                .allocator = allocator,
             };
+
+            res.shared_key = try allocator.alloc(u8, s_key.len);
+            std.mem.copy(u8, res.shared_key, s_key);
+
+            res.psk = try allocator.alloc(u8, psk.len);
+            std.mem.copy(u8, res.psk, psk);
 
             try res.generateEarlySecrets();
             return res;
+        }
+
+        pub fn deinit(self: Self) void {
+            self.allocator.free(self.shared_key);
+            self.allocator.free(self.psk);
         }
 
         fn generateEarlySecrets(self: *Self) !void {
@@ -116,7 +128,8 @@ test "KeyScheduler AES128GCM-SHA256" {
 
     const dhe_shared_key = [_]u8{ 0x8b, 0xd4, 0x05, 0x4f, 0xb5, 0x5b, 0x9d, 0x63, 0xfd, 0xfb, 0xac, 0xf9, 0xf0, 0x4b, 0x9f, 0x0d, 0x35, 0xe6, 0xd6, 0x3f, 0x53, 0x75, 0x63, 0xef, 0xd4, 0x62, 0x72, 0x90, 0x0f, 0x89, 0x49, 0x2d };
 
-    var ks = try KeyScheduler(Sha256, Aes128Gcm).init(&dhe_shared_key, &([_]u8{0} ** 32));
+    var ks = try KeySchedulerImpl(Sha256, Aes128Gcm).init(&dhe_shared_key, &([_]u8{0} ** 32), std.testing.allocator);
+    defer ks.deinit();
 
     const early_secret_ans = [_]u8{ 0x33, 0xad, 0x0a, 0x1c, 0x60, 0x7e, 0xc0, 0x3b, 0x09, 0xe6, 0xcd, 0x98, 0x93, 0x68, 0x0c, 0xe2, 0x10, 0xad, 0xf3, 0x00, 0xaa, 0x1f, 0x26, 0x60, 0xe1, 0xb2, 0x2e, 0x10, 0xf1, 0x70, 0xf9, 0x2a };
     const hs_derived_secret_ans = [_]u8{ 0x6f, 0x26, 0x15, 0xa1, 0x08, 0xc7, 0x02, 0xc5, 0x67, 0x8f, 0x54, 0xfc, 0x9d, 0xba, 0xb6, 0x97, 0x16, 0xc0, 0x76, 0x18, 0x9c, 0x48, 0x25, 0x0c, 0xeb, 0xea, 0xc3, 0x57, 0x6c, 0x36, 0x11, 0xba };

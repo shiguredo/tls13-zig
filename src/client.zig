@@ -134,19 +134,20 @@ test "client test with RFC8448" {
     Sha256.hash(msgs_stream.getWritten(), &c_hs_hash, .{});
     hmac.Hmac(Sha256).create(&c_hs_finished_digest, &c_hs_hash, &ks.c_hs_finished_secret);
 
+    var c_finished = try msg.Finished.init(Sha256);
+    std.mem.copy(u8, c_finished.verify_data.slice(), &c_hs_finished_digest);
+    const hs_c_finished = msg.Handshake{ .finished = c_finished };
+
     const c_finished_ans = [_]u8{ 0x14, 0x0, 0x0, 0x20, 0xa8, 0xec, 0x43, 0x6d, 0x67, 0x76, 0x34, 0xae, 0x52, 0x5a, 0xc1, 0xfc, 0xeb, 0xe1, 0x1a, 0x03, 0x9e, 0xc1, 0x76, 0x94, 0xfa, 0xc6, 0xe9, 0x85, 0x27, 0xb6, 0x42, 0xf2, 0xed, 0xd5, 0xce, 0x61 };
-    var c_finished = try record.TLSInnerPlainText.init(Sha256.digest_length + 4, std.testing.allocator);
-    c_finished.content_type = .handshake;
-    defer c_finished.deinit();
-    var c_finished_stream = io.fixedBufferStream(c_finished.content);
-    try c_finished_stream.writer().writeByte(@enumToInt(msg.HandshakeType.finished));
-    try c_finished_stream.writer().writeIntBig(u24, Sha256.digest_length);
-    try c_finished_stream.writer().writeAll(&c_hs_finished_digest);
-    try expect(std.mem.eql(u8, c_finished.content, &c_finished_ans));
+    var c_finished_inner = try record.TLSInnerPlainText.init(hs_c_finished.length(), std.testing.allocator);
+    c_finished_inner.content_type = .handshake;
+    defer c_finished_inner.deinit();
+    _ = try hs_c_finished.encode(io.fixedBufferStream(c_finished_inner.content).writer());
+    try expect(std.mem.eql(u8, c_finished_inner.content, &c_finished_ans));
 
     const c_record_finished_ans = [_]u8{ 0x17, 0x03, 0x03, 0x00, 0x35, 0x75, 0xEC, 0x4D, 0xC2, 0x38, 0xCC, 0xE6, 0x0B, 0x29, 0x80, 0x44, 0xA7, 0x1E, 0x21, 0x9C, 0x56, 0xCC, 0x77, 0xB0, 0x51, 0x7F, 0xE9, 0xB9, 0x3C, 0x7A, 0x4B, 0xFC, 0x44, 0xD8, 0x7F, 0x38, 0xF8, 0x03, 0x38, 0xAC, 0x98, 0xFC, 0x46, 0xDE, 0xB3, 0x84, 0xBD, 0x1C, 0xAE, 0xAC, 0xAB, 0x68, 0x67, 0xD7, 0x26, 0xC4, 0x05, 0x46 };
     var c_record_finished_bytes: [1000]u8 = undefined;
-    const c_record_finished = try Protector.encrypt(c_finished, ks.generateNonce(ks.c_hs_iv, 0), ks.c_hs_key, std.testing.allocator);
+    const c_record_finished = try Protector.encrypt(c_finished_inner, ks.generateNonce(ks.c_hs_iv, 0), ks.c_hs_key, std.testing.allocator);
     defer c_record_finished.deinit();
     const c_finished_write_len = try c_record_finished.encode(io.fixedBufferStream(&c_record_finished_bytes).writer());
     try expect(std.mem.eql(u8, c_record_finished_bytes[0..c_finished_write_len], &c_record_finished_ans));

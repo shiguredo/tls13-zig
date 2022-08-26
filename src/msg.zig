@@ -181,11 +181,12 @@ pub const Handshake = union(HandshakeType) {
         try writer.writeIntBig(u8, @enumToInt(self));
         len += @sizeOf(HandshakeType);
 
-        try writer.writeIntBig(u24, @intCast(u24, self.length() - (@sizeOf(u8) + @sizeOf(u24))));
-        len += @sizeOf(u24);
+        try writer.writeIntBig(u24, @intCast(u24, self.length() - (@sizeOf(u8) + 3)));
+        len += 3;
 
         switch (self) {
             HandshakeType.server_hello => |e| len += try e.encode(writer),
+            HandshakeType.finished => |e| len += try e.encode(writer),
             else => unreachable,
         }
 
@@ -447,6 +448,11 @@ pub const Finished = struct {
         _ = try reader.readAll(res.verify_data.slice());
 
         return res;
+    }
+
+    pub fn encode(self: Self, writer: anytype) !usize {
+        try writer.writeAll(self.verify_data.slice());
+        return self.verify_data.len;
     }
 
     pub fn length(self: Self) usize {

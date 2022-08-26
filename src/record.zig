@@ -230,6 +230,10 @@ pub fn RecordPayloadProtector(comptime AesGcm: anytype) type {
             var header: [5]u8 = undefined;
             _ = try ct.writeHeader(io.fixedBufferStream(&header).writer());
 
+            // RFC 8446 5.2 Record Payload Protection(p. 81)
+            // additional_data = TLSCiphertext.opaque_tyoe ||
+            //                   TLSCiphertext.legacy_record_version ||
+            //                   TLSCiphertext.length
             AesGcm.encrypt(ct.record[0..(ct.record.len - tag_length)], ct.record[(ct.record.len - tag_length)..][0..tag_length], mt_bytes, &header, n, k);
             return ct;
         }

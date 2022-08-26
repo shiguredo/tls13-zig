@@ -53,6 +53,18 @@ pub const SessionID = struct {
         return res;
     }
 
+    pub fn encode(self: Self, writer: anytype) !usize {
+        var len: usize = 0;
+
+        try writer.writeIntBig(u8, @intCast(u8, self.session_id.len));
+        len += @sizeOf(u8);
+
+        try writer.writeAll(self.session_id.slice());
+        len += self.session_id.len;
+
+        return len;
+    }
+
     pub fn length(self: Self) usize {
         var len: usize = 0;
         len += @sizeOf(u8);
@@ -88,6 +100,23 @@ pub fn decodeExtensions(reader: anytype, allocator: std.mem.Allocator, extension
         i += ext.length();
     }
     assert(i == ext_len);
+}
+
+pub fn encodeExtensions(writer: anytype, extensions: ArrayList(Extension)) !usize {
+    var ext_len: usize = 0;
+    for (extensions.items) |ext| {
+        ext_len += ext.length();
+    }
+
+    var len: usize = 0;
+    try writer.writeIntBig(u16, @intCast(u16, ext_len));
+    len += @sizeOf(u16);
+
+    for (extensions.items) |ext| {
+        len += try ext.encode(writer);
+    }
+
+    return len;
 }
 
 pub const ExtensionError = error{
@@ -277,6 +306,28 @@ pub const ServerHello = struct {
         return res;
     }
 
+    pub fn encode(self: Self, writer: anytype) !usize {
+        var len: usize = 0;
+
+        try writer.writeIntBig(u16, self.protocol_version);
+        len += @sizeOf(u16);
+
+        try writer.writeAll(&self.random);
+        len += self.random.len;
+
+        len += try self.legacy_session_id.encode(writer);
+        
+        try writer.writeIntBig(u16, @enumToInt(self.cipher_suite));
+        len += @sizeOf(CipherSuite);
+
+        try writer.writeIntBig(u8, self.legacy_compression_methods);
+        len += @sizeOf(u8);
+
+        len += try encodeExtensions(writer, self.extensions);
+        
+        return len;
+    }
+
     pub fn length(self: Self) usize {
         var len: usize = 0;
         len += @sizeOf(@TypeOf(self.protocol_version));
@@ -412,6 +463,29 @@ test "ServerHello decode" {
     try expect(ks.entries.items.len == 1);
     try expect(ks.entries.items[0] == .secp256r1);
 }
+
+test "ServerHello decode & encode" {
+    const recv_data = [_]u8{ 0x3, 0x3, 0x11, 0x8, 0x43, 0x1b, 0xd0, 0x42, 0x9e, 0x61, 0xff, 0x65, 0x44, 0x41, 0x91, 0xfc, 0x56, 0x10, 0xf8, 0x27, 0x53, 0xd9, 0x68, 0xc8, 0x13, 0x0, 0xb1, 0xec, 0x11, 0xd5, 0x7d, 0x90, 0xa5, 0x43, 0x20, 0xc4, 0x8a, 0x5c, 0x30, 0xa8, 0x50, 0x1b, 0x2e, 0xc2, 0x45, 0x76, 0xd7, 0xf0, 0x11, 0x52, 0xa0, 0x16, 0x57, 0x7, 0xdf, 0x1, 0x30, 0x47, 0x5b, 0x94, 0xbc, 0xe7, 0x86, 0x1e, 0x41, 0x97, 0x65, 0x13, 0x2, 0x0, 0x0, 0x4f, 0x0, 0x2b, 0x0, 0x2, 0x3, 0x4, 0x0, 0x33, 0x0, 0x45, 0x0, 0x17, 0x0, 0x41, 0x4, 0x27, 0x66, 0x69, 0x3d, 0xd8, 0xd1, 0x76, 0xa8, 0x8f, 0x6a, 0xe6, 0x61, 0x6, 0x89, 0xe1, 0xe9, 0xcd, 0x63, 0xef, 0x2e, 0x79, 0x41, 0x24, 0x86, 0x26, 0x37, 0xfa, 0x83, 0xd9, 0xfd, 0xa3, 0xc5, 0xaa, 0xbc, 0xaa, 0xb5, 0x85, 0x86, 0x98, 0x21, 0x54, 0xbc, 0x81, 0xed, 0x30, 0x35, 0x42, 0xb2, 0x89, 0xd6, 0xa4, 0xc4, 0x94, 0x75, 0x41, 0x49, 0x90, 0x78, 0x3, 0xaa, 0xf5, 0x6d, 0xfc, 0x47 };
+    var readStream = io.fixedBufferStream(&recv_data);
+
+    const res = try ServerHello.decode(readStream.reader(), std.testing.allocator);
+    defer res.deinit();
+
+    // check extensions
+    try expect(res.extensions.items.len == 2);
+    try expect(res.extensions.items[0] == .supported_versions);
+    try expect(res.extensions.items[1] == .key_share);
+
+    // check key_share selected group is secp256r1
+    const ks = res.extensions.items[1].key_share;
+    try expect(ks.entries.items.len == 1);
+    try expect(ks.entries.items[0] == .secp256r1);
+
+    var send_bytes: [1000]u8 = undefined;
+    const write_len = try res.encode(io.fixedBufferStream(&send_bytes).writer());
+    try expect(std.mem.eql(u8, send_bytes[0..write_len], &recv_data));
+}
+
 
 test "EncryptedExtensions decode" {
     const recv_data = [_]u8{ 0x08, 0x00, 0x00, 0x24, 0x00, 0x22, 0x00, 0x0a, 0x00, 0x14, 0x00, 0x12, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x18, 0x00, 0x19, 0x01, 0x00, 0x01, 0x01, 0x01, 0x02, 0x01, 0x03, 0x01, 0x04, 0x00, 0x1c, 0x00, 0x02, 0x40, 0x01, 0x00, 0x00, 0x00, 0x00 };

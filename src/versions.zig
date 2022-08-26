@@ -53,7 +53,7 @@ pub const SupportedVersions = struct {
     }
 
     pub fn encode(self: Self, writer: anytype) !usize {
-        var len:usize = 0;
+        var len: usize = 0;
 
         switch (self.ht) {
             msg.HandshakeType.client_hello => {

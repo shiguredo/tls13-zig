@@ -45,7 +45,7 @@ test "client test with RFC8448" {
     try expect(std.mem.eql(u8, &dhe_shared_key, &dhe_shared_key_ans));
 
     var ks = try key.KeyScheduler(Sha256, Aes128Gcm).init(&dhe_shared_key, &([_]u8{0} ** 32));
-    try ks.generateHandshakeSecrets(&client_hello_bytes, server_hello) ;
+    try ks.generateHandshakeSecrets(&client_hello_bytes, server_hello);
 
     // STATE = WAIT_EE
 

@@ -38,7 +38,7 @@ pub const SupportedGroups = struct {
     }
 
     pub fn encode(self: Self, writer: anytype) !usize {
-        var len:usize = 0;
+        var len: usize = 0;
         try writer.writeIntBig(u16, @intCast(u16, self.groups.items.len * @sizeOf(NamedGroup)));
         len += @sizeOf(u16);
 

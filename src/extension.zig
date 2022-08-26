@@ -29,7 +29,7 @@ pub const Extension = union(ExtensionType) {
         const len = try reader.readIntBig(u16); // TODO: check readable length of reader
         if (len == 0) {
             switch (t) {
-                ExtensionType.server_name => return Self { .server_name = .{} },
+                ExtensionType.server_name => return Self{ .server_name = .{} },
                 else => unreachable,
             }
         } else {

@@ -194,7 +194,7 @@ pub const Handshake = union(HandshakeType) {
 
     pub fn length(self: Self) usize {
         var len: usize = 0;
-        len += @sizeOf(u8);  // type
+        len += @sizeOf(u8); // type
         len += @sizeOf(u24); // length
         switch (self) {
             HandshakeType.server_hello => |e| len += e.length(),
@@ -345,7 +345,7 @@ pub const ServerHello = struct {
         len += self.random.len;
 
         len += try self.legacy_session_id.encode(writer);
-        
+
         try writer.writeIntBig(u16, @enumToInt(self.cipher_suite));
         len += @sizeOf(CipherSuite);
 
@@ -353,7 +353,7 @@ pub const ServerHello = struct {
         len += @sizeOf(u8);
 
         len += try encodeExtensions(writer, self.extensions);
-        
+
         return len;
     }
 
@@ -519,7 +519,6 @@ test "ServerHello decode & encode" {
     try expect(std.mem.eql(u8, send_bytes[0..write_len], &recv_data));
     try expect(write_len == res.length());
 }
-
 
 test "EncryptedExtensions decode" {
     const recv_data = [_]u8{ 0x08, 0x00, 0x00, 0x24, 0x00, 0x22, 0x00, 0x0a, 0x00, 0x14, 0x00, 0x12, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x18, 0x00, 0x19, 0x01, 0x00, 0x01, 0x01, 0x01, 0x02, 0x01, 0x03, 0x01, 0x04, 0x00, 0x1c, 0x00, 0x02, 0x40, 0x01, 0x00, 0x00, 0x00, 0x00 };

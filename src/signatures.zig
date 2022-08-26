@@ -54,7 +54,7 @@ pub const SignatureAlgorithms = struct {
     }
 
     pub fn encode(self: Self, writer: anytype) !usize {
-        var len:usize = 0;
+        var len: usize = 0;
         try writer.writeIntBig(u16, @intCast(u16, self.algos.items.len * @sizeOf(SignatureAlgorithm)));
         len += @sizeOf(u16);
 

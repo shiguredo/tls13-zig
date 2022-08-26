@@ -59,7 +59,7 @@ pub const KeyShare = struct {
     }
 
     pub fn encode(self: Self, writer: anytype) !usize {
-        var len:usize = 0;
+        var len: usize = 0;
 
         switch (self.ht) {
             HandshakeType.client_hello => {
@@ -147,7 +147,7 @@ pub const KeyShareEntry = union(NamedGroup) {
         }
     }
 
-    pub fn encode(self: Self, writer:anytype) !usize {
+    pub fn encode(self: Self, writer: anytype) !usize {
         var len: usize = 0;
         len += @sizeOf(u16);
         switch (self) {
@@ -203,7 +203,7 @@ pub const EntryX25519 = struct {
     }
 
     pub fn encode(self: Self, writer: anytype) !usize {
-        var len:usize = 0;
+        var len: usize = 0;
         try writer.writeIntBig(u16, self.key_exchange.len);
         len += @sizeOf(u16);
 
@@ -212,7 +212,6 @@ pub const EntryX25519 = struct {
 
         return len;
     }
-
 
     pub fn length(self: Self) usize {
         var len: usize = 0;
@@ -249,7 +248,7 @@ pub const EntrySecp256r1 = struct {
     }
 
     pub fn encode(self: Self, writer: anytype) !usize {
-        var len:usize = 0;
+        var len: usize = 0;
         try writer.writeIntBig(u16, self.key_exchange.len);
         len += @sizeOf(u16);
 

@@ -6,7 +6,6 @@ const hkdf = std.crypto.kdf.hkdf;
 const hmac = std.crypto.auth.hmac;
 const expect = std.testing.expect;
 
-
 pub fn KeyScheduler(comptime Hash: type, comptime Aead: type) type {
     return struct {
         const msg = @import("msg.zig");
@@ -106,7 +105,7 @@ pub fn KeyScheduler(comptime Hash: type, comptime Aead: type) type {
             _ = self;
             var nonce: [Aead.nonce_length]u8 = [_]u8{0} ** Aead.nonce_length;
             var i: usize = 0;
-            while(i < @sizeOf(u64)) : (i +=1) {
+            while (i < @sizeOf(u64)) : (i += 1) {
                 nonce[nonce.len - i - 1] = @intCast(u8, count >> (@intCast(u6, i * 8)));
             }
             i = 0;

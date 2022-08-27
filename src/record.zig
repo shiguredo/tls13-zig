@@ -57,6 +57,39 @@ pub const TLSPlainText = union(ContentType) {
         return res;
     }
 
+    pub fn encode(self: Self, writer: anytype) !usize {
+        var len:usize = 0;
+
+        try writer.writeIntBig(u8, @enumToInt(self));
+        len += @sizeOf(u8);
+
+        try writer.writeIntBig(u16, 0x0303);
+        len += @sizeOf(u16);
+
+        len += @sizeOf(u16);
+        try writer.writeIntBig(u16, @intCast(u16, self.length() - len));
+
+        switch(self) {
+            ContentType.handshake => |e| len += try e.encode(writer),
+            else => unreachable,
+        }
+
+        return len;
+    }
+
+    pub fn length(self: Self) usize {
+        var len:usize = 0;
+        len += @sizeOf(u8); // content_type
+        len += @sizeOf(u16); // protocol_version
+        len += @sizeOf(u16); // length
+        switch(self) {
+            ContentType.handshake => |e| len += e.length(),
+            else => unreachable,
+        }
+
+        return len;
+    }
+
     pub fn deinit(self: Self) void {
         switch (self) {
             ContentType.change_cipher_spec => |e| e.deinit(),

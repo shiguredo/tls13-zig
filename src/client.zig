@@ -118,14 +118,12 @@ pub const TLSClient = struct {
         var tcpBufferedWriter = io.bufferedWriter(writer);
         const ch = try self.createClientHello();
         defer ch.deinit();
-        const ch_record = msg.Handshake{ .client_hello = ch };
-        try tcpBufferedWriter.writer().writeIntBig(u8, @enumToInt(record.ContentType.handshake));
-        try tcpBufferedWriter.writer().writeIntBig(u16, 0x0303);
-        try tcpBufferedWriter.writer().writeIntBig(u16, @intCast(u16, ch_record.length()));
-        _ = try ch_record.encode(tcpBufferedWriter.writer());
+        const hs_ch = msg.Handshake{ .client_hello = ch };
+        const record_ch = record.TLSPlainText{ .handshake = hs_ch };
+        _ = try record_ch.encode(tcpBufferedWriter.writer());
         try tcpBufferedWriter.flush();
 
-        _ = try ch_record.encode(self.msgs_stream.writer());
+        _ = try hs_ch.encode(self.msgs_stream.writer());
         //_ = try self.msgs_stream.write(ch);
 
         // ClientHello is already sent.

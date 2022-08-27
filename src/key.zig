@@ -43,6 +43,7 @@ pub fn KeySchedulerImpl(comptime Hash: type, comptime Aead: type) type {
         c_ap_key: [Aead.key_length]u8 = undefined,
         c_ap_iv: [Aead.nonce_length]u8 = undefined,
 
+        exp_master_secret: [Hash.digest_length]u8 = undefined,
         res_master_secret: [Hash.digest_length]u8 = undefined,
 
         pub fn init(s_key: []const u8, psk: []const u8, allocator: std.mem.Allocator) !Self {
@@ -93,6 +94,8 @@ pub fn KeySchedulerImpl(comptime Hash: type, comptime Aead: type) type {
             self.s_ap_iv = try hkdfExpandLabel(Hash, self.s_ap_secret, "iv", "", Aead.nonce_length);
             self.c_ap_key = try hkdfExpandLabel(Hash, self.c_ap_secret, "key", "", Aead.key_length);
             self.c_ap_iv = try hkdfExpandLabel(Hash, self.c_ap_secret, "iv", "", Aead.nonce_length);
+
+            self.exp_master_secret = try deriveSecret(Hash, self.master_secret, "exp master", msgs);
         }
 
         pub fn generateResumptionMasterSecret(self: *Self, msgs: []const u8) !void {
@@ -113,6 +116,14 @@ pub fn KeySchedulerImpl(comptime Hash: type, comptime Aead: type) type {
             }
 
             return nonce;
+        }
+
+        pub fn printKeys(self: Self, random: []const u8) void {
+            std.debug.print("SERVER_HANDSHAKE_TRAFFIC_SECRET {} {}\n", .{std.fmt.fmtSliceHexLower(random), &std.fmt.fmtSliceHexLower(&self.s_hs_secret)});
+            std.debug.print("EXPORTER_SECRET {} {}\n", .{std.fmt.fmtSliceHexLower(random), std.fmt.fmtSliceHexLower(&self.exp_master_secret)});
+            std.debug.print("SERVER_TRAFFIC_SECRET_0 {} {}\n", .{std.fmt.fmtSliceHexLower(random), std.fmt.fmtSliceHexLower(&self.s_ap_secret)});
+            std.debug.print("CLIENT_HANDSHAKE_TRAFFIC_SECRET {} {}\n", .{std.fmt.fmtSliceHexLower(random), std.fmt.fmtSliceHexLower(&self.c_hs_secret)});
+            std.debug.print("CLIENT_TRAFFIC_SECRET_0 {} {}\n", .{std.fmt.fmtSliceHexLower(random), std.fmt.fmtSliceHexLower(&self.c_ap_secret)});
         }
     };
 }

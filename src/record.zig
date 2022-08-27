@@ -15,7 +15,7 @@ const Dummy = struct {};
 
 pub const TLSPlainText = union(ContentType) {
     invalid: Dummy,
-    change_cipher_spec: Dummy,
+    change_cipher_spec: ChangeCipherSpec,
     alert: Dummy,
     handshake: Handshake,
     application_data: Dummy,
@@ -24,8 +24,7 @@ pub const TLSPlainText = union(ContentType) {
 
     /// @param (Hash) is the type of hash function. It is used to decode handshake message.
     /// @param (writer) if not null, fragment is written to the writer (used for KeySchedule etc.)
-    pub fn decode(reader: anytype, allocator: std.mem.Allocator, Hash: ?type, writer: anytype) !Self {
-        const t = @intToEnum(ContentType, try reader.readIntBig(u8));
+    pub fn decode(reader: anytype, t: ContentType, allocator: std.mem.Allocator, Hash: ?type, writer: anytype) !Self {
         const proto_version = try reader.readIntBig(u16);
         if (proto_version != 0x0303) {
             // TODO: return error
@@ -41,6 +40,7 @@ pub const TLSPlainText = union(ContentType) {
         var fragmentStream = io.fixedBufferStream(fragment);
         var res: Self = undefined;
         switch (t) {
+            ContentType.change_cipher_spec => res = Self{ .change_cipher_spec = try ChangeCipherSpec.decode(fragmentStream.reader(), len)},
             ContentType.handshake => res = Self{ .handshake = try Handshake.decode(fragmentStream.reader(), allocator, Hash) },
             else => unreachable,
         }
@@ -59,9 +59,27 @@ pub const TLSPlainText = union(ContentType) {
 
     pub fn deinit(self: Self) void {
         switch (self) {
+            ContentType.change_cipher_spec => |e| e.deinit(),
             ContentType.handshake => |e| e.deinit(),
             else => unreachable,
         }
+    }
+};
+
+pub const ChangeCipherSpec = struct {
+    const Self = @This();
+
+    pub fn decode(reader: anytype, length: usize) !Self {
+        var i:usize = 0;
+        while (i < length) : (i += 1) {
+            _ = try reader.readByte();
+        }
+
+        return Self{};
+    }
+
+    pub fn deinit(self: Self) void {
+        _ = self;
     }
 };
 
@@ -87,8 +105,7 @@ pub const TLSCipherText = struct {
         self.allocator.free(self.record);
     }
 
-    pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
-        const t = @intToEnum(ContentType, try reader.readIntBig(u8));
+    pub fn decode(reader: anytype, t: ContentType, allocator: std.mem.Allocator) !Self {
         if (t != .application_data) {
             return Error.InvalidContentType;
         }

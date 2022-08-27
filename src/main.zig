@@ -17,8 +17,16 @@ pub fn main() !void {
 
     var tcpStream = try net.tcpConnectToAddress(endpoint);
 
-    try tls_client.start(tcpStream.reader(), tcpStream.writer());
+    try tls_client.connect(tcpStream.reader(), tcpStream.writer());
 
+    const http_req = "GET / HTTP/1.1\r\nHost: localhost\r\nUser-Agent: tls13-zig\r\nAccept: */*\r\n\r\n";
+    _ = try tls_client.send(http_req, tcpStream.writer());
+
+    var recv_bytes: [4096]u8 = undefined;
+    const recv_size = try tls_client.recv(&recv_bytes, tcpStream.reader());
+    log.info("RECV=\n {s}", .{recv_bytes[0..recv_size]});
+
+    try tls_client.close(tcpStream.reader(), tcpStream.writer());
     log.info("finished.", .{});
 
     return;

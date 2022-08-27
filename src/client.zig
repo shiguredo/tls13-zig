@@ -169,11 +169,67 @@ pub const TLSClient = struct {
 
         self.ks.printKeys(&self.random);
 
-        //const c_alert_data = [_]u8{ 0x01, 0x00 }; // ContentType alert
-        //const c_alert_record = try Protector.encryptFromPlainBytes(&c_alert_data, .alert, self.ks.generateNonce(self.ks.c_ap_iv, 0), self.ks.c_ap_key, self.allocator);
-        //defer c_alert_record.deinit();
-        //_ = try c_alert_record.encode(tcpBufferWriter.writer());
-        //try tcpBufferWriter.flush();
+        self.recv_count = 0;
+        self.send_count = 0;
+
+        const http_req = "GET / HTTP/1.1\r\nHost: localhost\r\nUser-Agent: tls13-zig\r\nAccept: */*\r\n\r\n";
+        const http_req_enc = try Self.Protector.encryptFromPlainBytes(http_req, .application_data, self.ks.generateNonce(self.ks.c_ap_iv, self.send_count), self.ks.c_ap_key, self.allocator);
+        defer http_req_enc.deinit();
+        _ = try http_req_enc.encode(tcpBufferedWriter.writer());
+        try tcpBufferedWriter.flush();
+        self.send_count += 1;
+
+        var ap_recv = false;
+        while (!ap_recv) {
+            const t = @intToEnum(record.ContentType, try reader.readIntBig(u8));
+            if (t != .application_data) {
+                // TODO: error
+                std.log.err("ERROR!!!", .{});
+                continue;
+            }
+            const recv_record = try record.TLSCipherText.decode(reader, t, self.allocator);
+            defer recv_record.deinit();
+
+            const plain_record = try Self.Protector.decrypt(recv_record, self.ks.generateNonce(self.ks.s_ap_iv, self.recv_count), self.ks.s_ap_key, self.allocator);
+            defer plain_record.deinit();
+            self.recv_count += 1;
+
+            ap_recv = try self.handleApplicationInnerPlaintext(plain_record);
+        }
+
+        // close connection
+        const c_alert_data = [_]u8{ 0x01, 0x00 }; // ContentType alert(close notify)
+        const c_alert_record = try Protector.encryptFromPlainBytes(&c_alert_data, .alert, self.ks.generateNonce(self.ks.c_ap_iv, self.send_count), self.ks.c_ap_key, self.allocator);
+        defer c_alert_record.deinit();
+        _ = try c_alert_record.encode(tcpBufferedWriter.writer());
+        try tcpBufferedWriter.flush();
+
+        var close_recv = false;
+        while (!close_recv) {
+            const t = @intToEnum(record.ContentType, try reader.readIntBig(u8));
+            if (t != .application_data) {
+                // TODO: error
+                std.log.err("ERROR!!!", .{});
+                continue;
+            }
+            const recv_record = try record.TLSCipherText.decode(reader, t, self.allocator);
+            defer recv_record.deinit();
+
+            const plain_record = try Self.Protector.decrypt(recv_record, self.ks.generateNonce(self.ks.s_ap_iv, self.recv_count), self.ks.s_ap_key, self.allocator);
+            defer plain_record.deinit();
+            self.recv_count += 1;
+            
+            if (plain_record.content_type != .alert) {
+                continue;
+            }
+
+            const alert_close = [_]u8 {0x01, 0x00};
+            if (std.mem.eql(u8, plain_record.content, &alert_close)) {
+                close_recv = true;
+            }
+        }
+
+        std.log.info("connection closed", .{});
     }
 
     fn handleServerHello(self: *Self, sh: msg.ServerHello) !void {
@@ -314,6 +370,24 @@ pub const TLSClient = struct {
         }
 
         self.state = .SEND_FINISHED;
+    }
+
+    fn handleApplicationInnerPlaintext(self: *Self, t: record.TLSInnerPlainText) !bool {
+        var stream = io.fixedBufferStream(t.content);
+        var ap_recv = false;
+        while ((try stream.getPos()) != (try stream.getEndPos())) {
+            if (t.content_type == .handshake) {
+                const recv_msg = try msg.Handshake.decode(stream.reader(), self.allocator, Sha256);
+                defer recv_msg.deinit();
+            } else if (t.content_type == .application_data) {
+
+                ap_recv = true;
+                std.log.info("RECV=\n{s}\n", .{t.content});
+                break;
+            }
+        }
+
+        return ap_recv;
     }
 };
 

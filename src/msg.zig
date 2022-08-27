@@ -154,6 +154,7 @@ pub fn getExtension(extensions: ArrayList(Extension), ext_type: ExtensionType) !
 pub const HandshakeType = enum(u8) {
     client_hello = 0x1,
     server_hello = 0x2,
+    new_session_ticket = 0x04,
     encrypted_extensions = 0x8,
     certificate = 0xb,
     certificate_verify = 0xf,
@@ -163,6 +164,7 @@ pub const HandshakeType = enum(u8) {
 pub const Handshake = union(HandshakeType) {
     client_hello: ClientHello,
     server_hello: ServerHello,
+    new_session_ticket: NewSessionTicket,
     encrypted_extensions: EncryptedExtensions,
     certificate: Certificate,
     certificate_verify: CertificateVerify,
@@ -171,12 +173,14 @@ pub const Handshake = union(HandshakeType) {
     const Self = @This();
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator, Hash: ?type) !Self {
-        const t = @intToEnum(HandshakeType, try reader.readIntBig(u8));
+        const t_raw = try reader.readIntBig(u8);
+        const t = @intToEnum(HandshakeType, t_raw);
         const len = try reader.readIntBig(u24);
         _ = len; // TODO: check the length is less than readable size.
         switch (t) {
             HandshakeType.client_hello => return Self{ .client_hello = try ClientHello.decode(reader, allocator) },
             HandshakeType.server_hello => return Self{ .server_hello = try ServerHello.decode(reader, allocator) },
+            HandshakeType.new_session_ticket => return Self{ .new_session_ticket = try NewSessionTicket.decode(reader, allocator) },
             HandshakeType.encrypted_extensions => return Self{ .encrypted_extensions = try EncryptedExtensions.decode(reader, allocator) },
             HandshakeType.certificate => return Self{ .certificate = try Certificate.decode(reader, allocator) },
             HandshakeType.certificate_verify => return Self{ .certificate_verify = try CertificateVerify.decode(reader, allocator) },
@@ -218,6 +222,7 @@ pub const Handshake = union(HandshakeType) {
             HandshakeType.certificate => |e| len += e.length(),
             HandshakeType.certificate_verify => |e| len += e.length(),
             HandshakeType.finished => |e| len += e.length(),
+            else => unreachable,
         }
 
         return len;
@@ -227,6 +232,7 @@ pub const Handshake = union(HandshakeType) {
         switch (self) {
             HandshakeType.client_hello => |e| e.deinit(),
             HandshakeType.server_hello => |e| e.deinit(),
+            HandshakeType.new_session_ticket => |e| e.deinit(),
             HandshakeType.encrypted_extensions => |e| e.deinit(),
             HandshakeType.certificate => |e| e.deinit(),
             HandshakeType.certificate_verify => |e| e.deinit(),
@@ -501,6 +507,51 @@ pub const Finished = struct {
 
     pub fn deinit(self: Self) void {
         _ = self;
+    }
+};
+
+pub const NewSessionTicket = struct {
+    const MAX_TICKET_NONCE_LENGTH = 256;
+
+    ticket_lifetime: u32 = undefined,
+    ticket_age_add: u32 = undefined,
+    ticket_nonce: BoundedArray(u8, MAX_TICKET_NONCE_LENGTH) = undefined,
+    ticket: []u8 = undefined,
+    extensions: ArrayList(Extension) = undefined,
+
+    allocator: std.mem.Allocator = undefined,
+
+    const Self = @This();
+    fn init(allocator: std.mem.Allocator) !Self {
+        return Self{
+            .extensions = ArrayList(Extension).init(allocator),
+            .allocator = allocator,
+        };
+    }
+
+    pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
+        var res = try Self.init(allocator);
+
+        res.ticket_lifetime = try reader.readIntBig(u32);
+        res.ticket_age_add = try reader.readIntBig(u32);
+        const nonce_len = try reader.readIntBig(u8);
+        res.ticket_nonce = try BoundedArray(u8, MAX_TICKET_NONCE_LENGTH).init(nonce_len);
+        try reader.readNoEof(res.ticket_nonce.slice());
+
+        const ticket_len = try reader.readIntBig(u16);
+        res.ticket = try allocator.alloc(u8, ticket_len);
+        try reader.readNoEof(res.ticket);
+
+        try decodeExtensions(reader, allocator, &res.extensions, .new_session_ticket, false);
+
+        return res;
+    }
+
+    pub fn deinit(self: Self) void {
+        for (self.extensions.items) |e| {
+            e.deinit();
+        }
+        self.extensions.deinit();
     }
 };
 

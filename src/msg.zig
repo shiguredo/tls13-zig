@@ -187,7 +187,8 @@ pub const Handshake = union(HandshakeType) {
             HandshakeType.certificate => return Self{ .certificate = try Certificate.decode(reader, allocator) },
             HandshakeType.certificate_verify => return Self{ .certificate_verify = try CertificateVerify.decode(reader, allocator) },
             HandshakeType.finished => if (Hash) |h| {
-                return Self{ .finished = try Finished.decode(reader, h) };
+                _ = h;
+                return Self{ .finished = try Finished.decode(reader, @import("crypto.zig").Hkdf.Sha256.h) };
             } else {
                 return DecodeError.HashNotSpecified;
             },
@@ -479,15 +480,18 @@ pub const EncryptedExtensions = struct {
 };
 
 pub const Finished = struct {
-    const MAX_DIGEST_LENGTH = 64; // the length of sha-512 digest
+    const my_crypto = @import("crypto.zig");
+    const MAX_DIGEST_LENGTH = my_crypto.Hkdf.MAX_DIGEST_LENGTH;
 
+    hkdf: my_crypto.Hkdf,
     verify_data: BoundedArray(u8, MAX_DIGEST_LENGTH) = undefined,
 
     const Self = @This();
 
-    pub fn init(Hash: anytype) !Self {
+    pub fn init(hkdf: my_crypto.Hkdf) !Self {
         return Self{
-            .verify_data = try BoundedArray(u8, MAX_DIGEST_LENGTH).init(Hash.digest_length),
+            .hkdf = hkdf,
+            .verify_data = try BoundedArray(u8, MAX_DIGEST_LENGTH).init(hkdf.digest_length),
         };
     }
 
@@ -495,8 +499,8 @@ pub const Finished = struct {
         _ = self;
     }
 
-    pub fn decode(reader: anytype, Hash: anytype) !Self {
-        var res = try Self.init(Hash);
+    pub fn decode(reader: anytype, hkdf: my_crypto.Hkdf) !Self {
+        var res = try Self.init(hkdf);
         _ = try reader.readAll(res.verify_data.slice());
 
         return res;
@@ -511,24 +515,24 @@ pub const Finished = struct {
         return self.verify_data.len;
     }
 
-    pub fn fromMessageBytes(m: []const u8, secret: []const u8, Hash: anytype) !Self {
-        var res = try Self.init(Hash);
-        var hash: [Hash.digest_length]u8 = undefined;
-        var digest: [Hash.digest_length]u8 = undefined;
-        Hash.hash(m, &hash, .{});
-        hmac.Hmac(Hash).create(&digest, &hash, secret);
-        std.mem.copy(u8, res.verify_data.slice(), &digest);
+    pub fn fromMessageBytes(m: []const u8, secret: []const u8, hkdf: my_crypto.Hkdf) !Self {
+        var res = try Self.init(hkdf);
+        var hash: [MAX_DIGEST_LENGTH]u8 = undefined;
+        var digest: [MAX_DIGEST_LENGTH]u8 = undefined;
+        hkdf.hash(&hash, m);
+        hkdf.create(&digest, &hash, secret);
+        std.mem.copy(u8, res.verify_data.slice(), digest[0..hkdf.digest_length]);
 
         return res;
     }
 
-    pub fn verify(self: Self, m: []const u8, secret: []const u8, Hash: anytype) bool {
-        var hash: [Hash.digest_length]u8 = undefined;
-        var digest: [Hash.digest_length]u8 = undefined;
-        Hash.hash(m, &hash, .{});
-        hmac.Hmac(Hash).create(&digest, &hash, secret);
+    pub fn verify(self: Self, m: []const u8, secret: []const u8) bool {
+        var hash: [MAX_DIGEST_LENGTH]u8 = undefined;
+        var digest: [MAX_DIGEST_LENGTH]u8 = undefined;
+        self.hkdf.hash(&hash, m);
+        self.hkdf.create(&digest, &hash, secret);
 
-        return std.mem.eql(u8, &digest, self.verify_data.slice());
+        return std.mem.eql(u8, digest[0..self.hkdf.digest_length], self.verify_data.slice());
     }
 };
 

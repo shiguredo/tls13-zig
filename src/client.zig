@@ -333,7 +333,7 @@ pub const TLSClient = struct {
                 try self.ks.generateApplicationSecrets(self.msgs_stream.getWritten());
 
                 // construct client finished message
-                const c_finished = try msg.Finished.fromMessageBytes(self.msgs_stream.getWritten(), &self.ks.c_hs_finished_secret, Sha256);
+                const c_finished = try msg.Finished.fromMessageBytes(self.msgs_stream.getWritten(), &self.ks.c_hs_finished_secret, @import("crypto.zig").Hkdf.Sha256.h);
                 const hs_c_finished = msg.Handshake{ .finished = c_finished };
 
                 var c_finished_inner = try record.TLSInnerPlainText.init(hs_c_finished.length(), self.allocator);
@@ -377,7 +377,7 @@ pub const TLSClient = struct {
     }
 
     fn handleFinished(self: *Self, finished: msg.Finished) !void {
-        if (!finished.verify(self.msgs_stream.getWritten(), &self.ks.s_hs_finished_secret, Sha256)) {
+        if (!finished.verify(self.msgs_stream.getWritten(), &self.ks.s_hs_finished_secret)) {
             // TODO: Error
             return;
         }

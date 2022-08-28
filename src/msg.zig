@@ -491,6 +491,10 @@ pub const Finished = struct {
         };
     }
 
+    pub fn deinit(self: Self) void {
+        _ = self;
+    }
+
     pub fn decode(reader: anytype, Hash: anytype) !Self {
         var res = try Self.init(Hash);
         _ = try reader.readAll(res.verify_data.slice());
@@ -500,6 +504,10 @@ pub const Finished = struct {
 
     pub fn encode(self: Self, writer: anytype) !usize {
         try writer.writeAll(self.verify_data.slice());
+        return self.verify_data.len;
+    }
+
+    pub fn length(self: Self) usize {
         return self.verify_data.len;
     }
 
@@ -514,13 +522,6 @@ pub const Finished = struct {
         return res;
     }
 
-    pub fn length(self: Self) usize {
-        return self.verify_data.len;
-    }
-
-    pub fn deinit(self: Self) void {
-        _ = self;
-    }
 };
 
 pub const NewSessionTicket = struct {

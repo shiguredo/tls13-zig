@@ -188,7 +188,7 @@ pub const Handshake = union(HandshakeType) {
             HandshakeType.certificate_verify => return Self{ .certificate_verify = try CertificateVerify.decode(reader, allocator) },
             HandshakeType.finished => if (Hash) |h| {
                 _ = h;
-                return Self{ .finished = try Finished.decode(reader, @import("crypto.zig").Hkdf.Sha256.h) };
+                return Self{ .finished = try Finished.decode(reader, @import("crypto.zig").Hkdf.Sha256.hkdf) };
             } else {
                 return DecodeError.HashNotSpecified;
             },

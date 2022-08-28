@@ -83,6 +83,11 @@ pub const Hkdf = struct {
         try self.hkdfExpandLabel(out, prk, label, hash[0..self.digest_length], self.digest_length);
     }
 
+    pub fn hkdfExpandLabel(self:Self, out: []u8, prk: []const u8, label: []const u8, ctx: []const u8, len: usize) !void {
+        const info = try generateHkdfLabel(@intCast(u16, len), label, ctx);
+        self.expand(out, info.slice(), prk);
+    }
+
     fn generateHkdfLabel(len: u16, label: []const u8, ctx: []const u8) !BoundedArray(u8, MAX_HKDF_LABEL_LENGTH) {
         var hkdf_label = try BoundedArray(u8, MAX_HKDF_LABEL_LENGTH).init(0);
 
@@ -97,11 +102,6 @@ pub const Hkdf = struct {
         try hkdf_label.appendSlice(ctx);
 
         return hkdf_label;
-    }
-
-    fn hkdfExpandLabel(self:Self, out: []u8, prk: []const u8, label: []const u8, ctx: []const u8, len: usize) !void {
-        const info = try generateHkdfLabel(@intCast(u16, len), label, ctx);
-        self.expand(out, info.slice(), prk);
     }
 };
 
@@ -127,9 +127,9 @@ pub const Aead = struct {
 
 pub const Secret = struct {
     // TODO: Is using allocator better in terms of spece efficiency?
-    const DigestBoundedArray = BoundedArray(u8, Hkdf.MAX_DIGEST_LENGTH);
-    const KeyBoundedArray = BoundedArray(u8, Aead.MAX_KEY_LEGNTH);
-    const NonceBoundedArray = BoundedArray(u8, Aead.MAX_NONCE_LENGTH);
+    pub const DigestBoundedArray = BoundedArray(u8, Hkdf.MAX_DIGEST_LENGTH);
+    pub const KeyBoundedArray = BoundedArray(u8, Aead.MAX_KEY_LEGNTH);
+    pub const NonceBoundedArray = BoundedArray(u8, Aead.MAX_NONCE_LENGTH);
 
     early_secret: DigestBoundedArray,
 

@@ -105,22 +105,37 @@ pub const Hkdf = struct {
     }
 };
 
+const AuthenticationError = std.crypto.errors.AuthenticationError;
+
 // abstraction struct for Aead functions
 pub const Aead = struct {
     const MAX_KEY_LEGNTH = Aes128Gcm.C.key_length;
     const MAX_NONCE_LENGTH = Aes128Gcm.C.nonce_length;
-    // encrypt
-    // decrypt
 
     key_length: usize,
     nonce_length: usize,
+    tag_length: usize,
+
+    encrypt: fn (c: []u8, tag: []u8, m: []const u8, ad: []const u8, nonce: []const u8, key: []const u8) void,
+    decrypt: fn (m: []u8, c: []const u8, tag: []const u8, ad: []const u8, nonce: []const u8, key: []const u8) AuthenticationError!void,
 
     pub const Aes128Gcm = struct {
         const C = std.crypto.aead.aes_gcm.Aes128Gcm;
 
+        fn encrypt(c: []u8, tag: []u8, m: []const u8, ad: []const u8, nonce: []const u8, key: []const u8) void {
+            C.encrypt(c, tag[0..C.tag_length], m, ad, nonce[0..C.nonce_length].*, key[0..C.key_length].*);
+        }
+
+        fn decrypt(m: []u8, c: []const u8, tag: []const u8, ad: []const u8, nonce: []const u8, key: []const u8) AuthenticationError!void {
+            try C.decrypt(m, c, tag[0..C.tag_length].*, ad, nonce[0..C.nonce_length].*, key[0..C.key_length].*);
+        }
+
         pub const aead = Aead {
             .key_length = C.key_length,
             .nonce_length = C.nonce_length,
+            .tag_length = C.tag_length,
+            .encrypt = encrypt,
+            .decrypt = decrypt,
         };
     };
 };

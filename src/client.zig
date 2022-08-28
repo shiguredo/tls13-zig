@@ -377,12 +377,7 @@ pub const TLSClient = struct {
     }
 
     fn handleFinished(self: *Self, finished: msg.Finished) !void {
-        var hashed: [Sha256.digest_length]u8 = undefined;
-        Sha256.hash(self.msgs_stream.getWritten(), &hashed, .{});
-        var verify: [Sha256.digest_length]u8 = undefined;
-        hmac.Hmac(Sha256).create(&verify, &hashed, &self.ks.s_hs_finished_secret);
-
-        if (!std.mem.eql(u8, &verify, finished.verify_data.slice())) {
+        if (!finished.verify(self.msgs_stream.getWritten(), &self.ks.s_hs_finished_secret, Sha256)) {
             // TODO: Error
             return;
         }
@@ -511,11 +506,7 @@ test "client test with RFC8448" {
     try expectError(error.EndOfStream, readStream2.reader().readByte());
 
     // validate "finished"
-    var s_hs_finished_digest: [Sha256.digest_length]u8 = undefined;
-    var s_hs_hash: [Sha256.digest_length]u8 = undefined;
-    Sha256.hash(msgs_stream.getWritten(), &s_hs_hash, .{});
-    hmac.Hmac(Sha256).create(&s_hs_finished_digest, &s_hs_hash, &ks.s_hs_finished_secret);
-    try expect(std.mem.eql(u8, &s_hs_finished_digest, s_hs_finished.verify_data.slice()));
+    try expect(s_hs_finished.verify(msgs_stream.getWritten(), &ks.s_hs_finished_secret, Sha256));
 
     // add "finished"
     _ = try msgs_stream.write(pt_misc.content[msgs_idx..(msgs_idx + hs_s_hs_finished.length())]);

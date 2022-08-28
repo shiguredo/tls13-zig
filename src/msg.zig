@@ -522,6 +522,14 @@ pub const Finished = struct {
         return res;
     }
 
+    pub fn verify(self: Self, m: []const u8, secret: []const u8, Hash: anytype) bool {
+        var hash: [Hash.digest_length]u8 = undefined;
+        var digest: [Hash.digest_length]u8 = undefined;
+        Hash.hash(m, &hash, .{});
+        hmac.Hmac(Hash).create(&digest, &hash, secret);
+
+        return std.mem.eql(u8, &digest, self.verify_data.slice());
+    }
 };
 
 pub const NewSessionTicket = struct {

@@ -119,11 +119,11 @@ pub fn KeySchedulerImpl(comptime Hash: type, comptime Aead: type) type {
         }
 
         pub fn printKeys(self: Self, random: []const u8) void {
-            std.debug.print("SERVER_HANDSHAKE_TRAFFIC_SECRET {} {}\n", .{std.fmt.fmtSliceHexLower(random), &std.fmt.fmtSliceHexLower(&self.s_hs_secret)});
-            std.debug.print("EXPORTER_SECRET {} {}\n", .{std.fmt.fmtSliceHexLower(random), std.fmt.fmtSliceHexLower(&self.exp_master_secret)});
-            std.debug.print("SERVER_TRAFFIC_SECRET_0 {} {}\n", .{std.fmt.fmtSliceHexLower(random), std.fmt.fmtSliceHexLower(&self.s_ap_secret)});
-            std.debug.print("CLIENT_HANDSHAKE_TRAFFIC_SECRET {} {}\n", .{std.fmt.fmtSliceHexLower(random), std.fmt.fmtSliceHexLower(&self.c_hs_secret)});
-            std.debug.print("CLIENT_TRAFFIC_SECRET_0 {} {}\n", .{std.fmt.fmtSliceHexLower(random), std.fmt.fmtSliceHexLower(&self.c_ap_secret)});
+            std.debug.print("SERVER_HANDSHAKE_TRAFFIC_SECRET {} {}\n", .{ std.fmt.fmtSliceHexLower(random), &std.fmt.fmtSliceHexLower(&self.s_hs_secret) });
+            std.debug.print("EXPORTER_SECRET {} {}\n", .{ std.fmt.fmtSliceHexLower(random), std.fmt.fmtSliceHexLower(&self.exp_master_secret) });
+            std.debug.print("SERVER_TRAFFIC_SECRET_0 {} {}\n", .{ std.fmt.fmtSliceHexLower(random), std.fmt.fmtSliceHexLower(&self.s_ap_secret) });
+            std.debug.print("CLIENT_HANDSHAKE_TRAFFIC_SECRET {} {}\n", .{ std.fmt.fmtSliceHexLower(random), std.fmt.fmtSliceHexLower(&self.c_hs_secret) });
+            std.debug.print("CLIENT_TRAFFIC_SECRET_0 {} {}\n", .{ std.fmt.fmtSliceHexLower(random), std.fmt.fmtSliceHexLower(&self.c_ap_secret) });
         }
     };
 }

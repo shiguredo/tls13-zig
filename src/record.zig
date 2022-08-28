@@ -40,7 +40,7 @@ pub const TLSPlainText = union(ContentType) {
         var fragmentStream = io.fixedBufferStream(fragment);
         var res: Self = undefined;
         switch (t) {
-            ContentType.change_cipher_spec => res = Self{ .change_cipher_spec = try ChangeCipherSpec.decode(fragmentStream.reader(), len)},
+            ContentType.change_cipher_spec => res = Self{ .change_cipher_spec = try ChangeCipherSpec.decode(fragmentStream.reader(), len) },
             ContentType.handshake => res = Self{ .handshake = try Handshake.decode(fragmentStream.reader(), allocator, Hash) },
             else => unreachable,
         }
@@ -58,7 +58,7 @@ pub const TLSPlainText = union(ContentType) {
     }
 
     pub fn encode(self: Self, writer: anytype) !usize {
-        var len:usize = 0;
+        var len: usize = 0;
 
         try writer.writeIntBig(u8, @enumToInt(self));
         len += @sizeOf(u8);
@@ -69,7 +69,7 @@ pub const TLSPlainText = union(ContentType) {
         len += @sizeOf(u16);
         try writer.writeIntBig(u16, @intCast(u16, self.length() - len));
 
-        switch(self) {
+        switch (self) {
             ContentType.handshake => |e| len += try e.encode(writer),
             else => unreachable,
         }
@@ -78,11 +78,11 @@ pub const TLSPlainText = union(ContentType) {
     }
 
     pub fn length(self: Self) usize {
-        var len:usize = 0;
+        var len: usize = 0;
         len += @sizeOf(u8); // content_type
         len += @sizeOf(u16); // protocol_version
         len += @sizeOf(u16); // length
-        switch(self) {
+        switch (self) {
             ContentType.handshake => |e| len += e.length(),
             else => unreachable,
         }
@@ -103,7 +103,7 @@ pub const ChangeCipherSpec = struct {
     const Self = @This();
 
     pub fn decode(reader: anytype, length: usize) !Self {
-        var i:usize = 0;
+        var i: usize = 0;
         while (i < length) : (i += 1) {
             _ = try reader.readByte();
         }

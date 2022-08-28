@@ -80,18 +80,18 @@ pub const TLSClient = struct {
 
         // CipherSuite
         // currently, supported suites are temporary
-        try client_hello.cipher_suites.append(msg.CipherSuite.TLS_AES_128_GCM_SHA256) ;
+        try client_hello.cipher_suites.append(msg.CipherSuite.TLS_AES_128_GCM_SHA256);
 
         // Extension SupportedVresions
         var sv = versions.SupportedVersions.init(msg.HandshakeType.client_hello, self.allocator);
         try sv.versions.append(0x0304); //TLSv1.3
-        try client_hello.extensions.append(.{.supported_versions = sv});
+        try client_hello.extensions.append(.{ .supported_versions = sv });
 
         // Extension SupportedGroups
         // currently, only x25519 and secp256r1 are supported.
         var sg = groups.SupportedGroups.init(self.allocator);
         try sg.groups.append(msg.NamedGroup.x25519);
-        try client_hello.extensions.append(.{.supported_groups = sg});
+        try client_hello.extensions.append(.{ .supported_groups = sg });
 
         // Extension KeyShare
         // currently, only x25519 and secp256r1 are supported
@@ -99,7 +99,7 @@ pub const TLSClient = struct {
         var entry_x25519 = key_share.EntryX25519{};
         std.mem.copy(u8, &entry_x25519.key_exchange, &self.x25519_pub_key);
         try ks.entries.append(.{ .x25519 = entry_x25519 });
-        try client_hello.extensions.append(.{.key_share = ks});
+        try client_hello.extensions.append(.{ .key_share = ks });
 
         // Extension Signature Algorithms
         // currently, supported algorithms are temporary.
@@ -107,7 +107,7 @@ pub const TLSClient = struct {
         try sa.algos.append(signatures.SignatureAlgorithm.ecdsa_secp256r1_sha256);
         try sa.algos.append(signatures.SignatureAlgorithm.ed25519);
         try sa.algos.append(signatures.SignatureAlgorithm.rsa_pss_rsae_sha384);
-        try client_hello.extensions.append(.{.signature_algorithms = sa});
+        try client_hello.extensions.append(.{ .signature_algorithms = sa });
 
         //var msg = tls_msg.TLSRecord{ .content = .{ .handshake = .{ .content = .{ .client_hello = client_hello }}}};
 
@@ -241,12 +241,12 @@ pub const TLSClient = struct {
             const plain_record = try Self.Protector.decrypt(recv_record, self.ks.generateNonce(self.ks.s_ap_iv, self.recv_count), self.ks.s_ap_key, self.allocator);
             defer plain_record.deinit();
             self.recv_count += 1;
-            
+
             if (plain_record.content_type != .alert) {
                 continue;
             }
 
-            const alert_close = [_]u8 {0x01, 0x00};
+            const alert_close = [_]u8{ 0x01, 0x00 };
             if (std.mem.eql(u8, plain_record.content, &alert_close)) {
                 close_recv = true;
             }

@@ -333,12 +333,7 @@ pub const TLSClient = struct {
                 try self.ks.generateApplicationSecrets(self.msgs_stream.getWritten());
 
                 // construct client finished message
-                var c_hs_finished_digest: [Sha256.digest_length]u8 = undefined;
-                var c_hs_hash: [Sha256.digest_length]u8 = undefined;
-                Sha256.hash(self.msgs_stream.getWritten(), &c_hs_hash, .{});
-                hmac.Hmac(Sha256).create(&c_hs_finished_digest, &c_hs_hash, &self.ks.c_hs_finished_secret);
-                var c_finished = try msg.Finished.init(Sha256);
-                std.mem.copy(u8, c_finished.verify_data.slice(), &c_hs_finished_digest);
+                const c_finished = try msg.Finished.fromMessageBytes(self.msgs_stream.getWritten(), &self.ks.c_hs_finished_secret, Sha256);
                 const hs_c_finished = msg.Handshake{ .finished = c_finished };
 
                 var c_finished_inner = try record.TLSInnerPlainText.init(hs_c_finished.length(), self.allocator);

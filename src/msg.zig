@@ -2,6 +2,8 @@ const std = @import("std");
 const log = std.log;
 const io = std.io;
 const assert = std.debug.assert;
+const hmac = std.crypto.auth.hmac;
+
 const ArrayList = std.ArrayList;
 const BoundedArray = std.BoundedArray;
 const Extension = @import("extension.zig").Extension;
@@ -499,6 +501,17 @@ pub const Finished = struct {
     pub fn encode(self: Self, writer: anytype) !usize {
         try writer.writeAll(self.verify_data.slice());
         return self.verify_data.len;
+    }
+
+    pub fn fromMessageBytes(m: []const u8, secret: []const u8, Hash: anytype) !Self {
+        var res = try Self.init(Hash);
+        var hash: [Hash.digest_length]u8 = undefined;
+        var digest: [Hash.digest_length]u8 = undefined;
+        Hash.hash(m, &hash, .{});
+        hmac.Hmac(Hash).create(&digest, &hash, secret);
+        std.mem.copy(u8, res.verify_data.slice(), &digest);
+
+        return res;
     }
 
     pub fn length(self: Self) usize {

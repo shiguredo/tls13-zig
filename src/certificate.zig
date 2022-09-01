@@ -6,6 +6,7 @@ const BoundedArray = std.BoundedArray;
 const msg = @import("msg.zig");
 const Extension = @import("extension.zig").Extension;
 const SignatureAlgorithm = @import("signatures.zig").SignatureAlgorithm;
+const x509 = @import("x509.zig");
 
 pub const Certificate = struct {
     const MAX_CERT_REQ_CTX_LENGTH = 256;
@@ -59,14 +60,14 @@ pub const Certificate = struct {
 };
 
 pub const CertificateEntry = struct {
-    cert_data: ArrayList(u8) = undefined,
+    cert: x509.Certificate = undefined,
+    cert_len: usize = 0, // TODO: remove this
     extensions: ArrayList(Extension) = undefined,
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return .{
-            .cert_data = ArrayList(u8).init(allocator),
             .extensions = ArrayList(Extension).init(allocator),
         };
     }
@@ -76,10 +77,9 @@ pub const CertificateEntry = struct {
         const cert_type = try reader.readIntBig(u8); // CertificateType
         assert(cert_type == 0); // only X.509 certificate is accepted.
         const cert_len = try reader.readIntBig(u16);
-        var i: usize = 0;
-        while (i < cert_len) : (i += 1) {
-            try res.cert_data.append(try reader.readIntBig(u8));
-        }
+
+        res.cert_len = cert_len;
+        res.cert = try x509.Certificate.decode(reader, allocator);
 
         try msg.decodeExtensions(reader, allocator, &res.extensions, .server_hello, false);
 
@@ -91,7 +91,7 @@ pub const CertificateEntry = struct {
         len += 1; // CertificateType
 
         len += @sizeOf(u16); // cert_data length
-        len += self.cert_data.items.len;
+        len += self.cert_len;
 
         len += @sizeOf(u16); // extension length
         for (self.extensions.items) |e| {
@@ -102,7 +102,7 @@ pub const CertificateEntry = struct {
     }
 
     pub fn deinit(self: Self) void {
-        self.cert_data.deinit();
+        self.cert.deinit();
         for (self.extensions.items) |e| {
             e.deinit();
         }

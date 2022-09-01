@@ -371,8 +371,11 @@ pub const TLSClient = struct {
 
     fn handleCertificate(self: *Self, cert: certificate.Certificate) !void {
         _ = self;
-        _ = cert;
-        // TODO: parse certificate
+        for (cert.cert_list.items) |c| {
+            std.log.info("=== CERTIFICATE INFORMATION BEGIN ===", .{});
+            c.cert.print(std.log.info);
+            std.log.info("=== CERTIFICATE INFORMATION END ===", .{});
+        }
 
         self.state = .WAIT_CV;
     }

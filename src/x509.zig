@@ -549,16 +549,20 @@ const CertificateSerialNumber = struct {
 //      algorithm               OBJECT IDENTIFIER,
 //      parameters              ANY DEFINED BY algorithm OPTIONAL  }
 pub const AlgorithmIdentifier = struct {
-    algorithm: []u8,
-    parameters: []u8,
+    algorithm: []u8 = &([_]u8{}),
+    parameters: []u8 = &([_]u8{}),
 
     allocator: std.mem.Allocator,
 
     const Self = @This();
 
     pub fn deinit(self: Self) void {
-        self.allocator.free(self.algorithm);
-        self.allocator.free(self.parameters);
+        if (self.algorithm.len != 0) {
+            self.allocator.free(self.algorithm);
+        }
+        if (self.parameters.len != 0) {
+            self.allocator.free(self.parameters);
+        }
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
@@ -585,10 +589,16 @@ pub const AlgorithmIdentifier = struct {
 
         try content_reader.readNoEof(algorithm);
 
-        const t_param = @intToEnum(ASN1.Tag, try content_reader.readByte());
-        _ = t_param; // Tag is defined by algorithm
-        const param_len = try ASN1.decodeLength(content_reader);
-        var parameters = try allocator.alloc(u8, param_len);
+        // some algorithm do not have parameters
+        if ((try content_stream.getPos()) == (try content_stream.getEndPos())) {
+            return Self{
+                .algorithm = algorithm,
+                .allocator = allocator,
+            };
+        }
+
+        const rest_len = (try content_stream.getEndPos()) - (try content_stream.getPos());
+        var parameters = try allocator.alloc(u8, rest_len);
         errdefer allocator.free(parameters);
 
         try content_reader.readNoEof(parameters);
@@ -912,13 +922,17 @@ const Time = struct {
 //      subjectPublicKey     BIT STRING  }
 const SubjectPublicKeyInfo = struct {
     algorithm: AlgorithmIdentifier,
-    rsaPublicKey: RSAPublicKey,
+    publicKey: PublicKey,
+
+    const Error = error{
+        UnsupportedCurve,
+    };
 
     const Self = @This();
 
     pub fn deinit(self: Self) void {
         self.algorithm.deinit();
-        self.rsaPublicKey.deinit();
+        self.publicKey.deinit();
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
@@ -932,8 +946,36 @@ const SubjectPublicKeyInfo = struct {
         const algorithm = try AlgorithmIdentifier.decode(reader, allocator);
 
         var oid_out: [100]u8 = undefined;
-        const oid_len = ASN1.decodeOID(&oid_out, algorithm.algorithm);
-        if (!std.mem.eql(u8, oid_out[0..oid_len], "1.2.840.113549.1.1.1")) {
+        var oid_len = ASN1.decodeOID(&oid_out, algorithm.algorithm);
+        var pub_key_type: PublicKeyType = undefined;
+        if (std.mem.eql(u8, oid_out[0..oid_len], "1.2.840.113549.1.1.1")) {
+            pub_key_type = PublicKeyType.rsa;
+        } else if (std.mem.eql(u8, oid_out[0..oid_len], "1.2.840.10045.2.1")) {
+            // RFC 5480 Section 2.1.1.1 Named Curve
+            //ECParameters ::= CHOICE {
+            //  namedCurve         OBJECT IDENTIFIER
+            //  -- implicitCurve   NULL
+            //  -- specifiedCurve  SpecifiedECDomain
+            //}
+            var ec_stream = io.fixedBufferStream(algorithm.parameters);
+            const t_ec = @intToEnum(ASN1.Tag, try ec_stream.reader().readByte());
+            if (t_ec != .OBJECT_IDENTIFIER) {
+                return ASN1.Error.InvalidFormat;
+            }
+            const ec_len = try ASN1.decodeLength(ec_stream.reader());
+            if (ec_len == 0) {
+                // imlicitCurve is not supported.
+                return ASN1.Error.InvalidFormat;
+            }
+            const start_idx = algorithm.parameters.len - ec_len;
+            const curve = algorithm.parameters[start_idx..];
+            oid_len = ASN1.decodeOID(&oid_out, curve);
+            if (std.mem.eql(u8, oid_out[0..oid_len], "1.2.840.10045.3.1.7")) {
+                pub_key_type = PublicKeyType.secp256r1;
+            } else {
+                return Error.UnsupportedCurve;
+            }
+        } else {
             //currently, only accepts 'rsaEncryption'
             return ASN1.Error.InvalidFormat;
         }
@@ -943,7 +985,6 @@ const SubjectPublicKeyInfo = struct {
             return ASN1.Error.InvalidType;
         }
         const key_len = try ASN1.decodeLength(reader);
-        _ = key_len;
 
         // the first byte of 'BIT STRING' specifies
         // the number of bits not used in the last of the octets
@@ -953,11 +994,11 @@ const SubjectPublicKeyInfo = struct {
             return ASN1.Error.InvalidFormat;
         }
 
-        const rsaPublicKey = try RSAPublicKey.decode(reader, allocator);
+        const pub_key = try PublicKey.decode(pub_key_type, reader, key_len - 1, allocator);
 
         return Self{
             .algorithm = algorithm,
-            .rsaPublicKey = rsaPublicKey,
+            .publicKey = pub_key,
         };
     }
 
@@ -966,6 +1007,32 @@ const SubjectPublicKeyInfo = struct {
         pf("{s}Algorithm: {s}", .{ prefix, a.display_name });
         pf("{s}RASPublicKey:", .{prefix});
         self.rsaPublicKey.print(pf, prefix ++ " ");
+    }
+};
+
+pub const PublicKeyType = enum(usize) {
+    rsa,
+    secp256r1,
+};
+
+pub const PublicKey = union(PublicKeyType) {
+    rsa: RSAPublicKey,
+    secp256r1: Secp256r1PublicKey,
+
+    const Self = @This();
+
+    pub fn decode(t: PublicKeyType, reader: anytype, len: usize, allocator: std.mem.Allocator) !Self {
+        switch (t) {
+            .rsa => return Self{ .rsa = try RSAPublicKey.decode(reader, allocator) },
+            .secp256r1 => return Self{ .secp256r1 = try Secp256r1PublicKey.decode(reader, len) },
+        }
+    }
+
+    pub fn deinit(self: Self) void {
+        switch (self) {
+            .rsa => |p| p.deinit(),
+            .secp256r1 => |p| p.deinit(),
+        }
     }
 };
 
@@ -1024,6 +1091,37 @@ const RSAPublicKey = struct {
     pub fn print(self: Self, comptime pf: fn ([]const u8, anytype) void, comptime prefix: []const u8) void {
         pf("{s}Modulus:{}", .{ prefix, std.fmt.fmtSliceHexLower(self.modulus) });
         pf("{s}PublicExponent:{}", .{ prefix, std.fmt.fmtSliceHexLower(self.publicExponent) });
+    }
+};
+
+// ECPoint ::= OCTET STRING
+const Secp256r1PublicKey = struct {
+    const P256 = std.crypto.sign.ecdsa.EcdsaP256Sha256;
+
+    key: P256.PublicKey = undefined,
+
+    const Self = @This();
+
+    const Error = error{
+        UnsupportedFormat,
+    };
+
+    pub fn deinit(self: Self) void {
+        _ = self;
+    }
+
+    pub fn decode(reader: anytype, len: usize) !Self {
+        var buf: [100]u8 = undefined;
+        std.log.warn("len={}", .{len});
+        if (len > buf.len) {
+            return Error.UnsupportedFormat;
+        }
+        _ = try reader.readNoEof(buf[0..len]);
+        const key = try P256.PublicKey.fromSec1(buf[0..len]);
+
+        return Self{
+            .key = key,
+        };
     }
 };
 

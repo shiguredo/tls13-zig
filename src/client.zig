@@ -17,9 +17,11 @@ const versions = @import("versions.zig");
 const groups = @import("groups.zig");
 const signatures = @import("signatures.zig");
 const crypto = @import("crypto.zig");
+const x509 = @import("x509.zig");
 
 const Aes128Gcm = std.crypto.aead.aes_gcm.Aes128Gcm;
 const Sha256 = std.crypto.hash.sha2.Sha256;
+const P256 = std.crypto.sign.ecdsa.EcdsaP256Sha256;
 
 pub const TLSClient = struct {
 
@@ -43,6 +45,9 @@ pub const TLSClient = struct {
     protector: record.RecordPayloadProtector,
     recv_count: usize = 0,
     send_count: usize = 0,
+
+    // certificate
+    secp256r1_pubkey: P256.PublicKey = undefined,
 
     // Misc
     allocator: std.mem.Allocator,
@@ -117,8 +122,8 @@ pub const TLSClient = struct {
         // currently, supported algorithms are temporary.
         var sa = signatures.SignatureAlgorithms.init(self.allocator);
         try sa.algos.append(signatures.SignatureAlgorithm.ecdsa_secp256r1_sha256);
-        try sa.algos.append(signatures.SignatureAlgorithm.ed25519);
-        try sa.algos.append(signatures.SignatureAlgorithm.rsa_pss_rsae_sha384);
+        //try sa.algos.append(signatures.SignatureAlgorithm.ed25519);
+        //try sa.algos.append(signatures.SignatureAlgorithm.rsa_pss_rsae_sha384);
         try client_hello.extensions.append(.{ .signature_algorithms = sa });
 
         //var msg = tls_msg.TLSRecord{ .content = .{ .handshake = .{ .content = .{ .client_hello = client_hello }}}};
@@ -385,14 +390,16 @@ pub const TLSClient = struct {
     }
 
     fn handleCertificate(self: *Self, cert: certificate.Certificate) !void {
-        _ = cert;
         for (cert.cert_list.items) |c| {
             std.log.info("=== CERTIFICATE INFORMATION BEGIN ===", .{});
             // Below line causes compiler crash
             // https://github.com/ziglang/zig/issues/12373
             // TODO: FIX
             //c.cert.print(std.log.info);
-            _ = c;
+            const pubkey = c.cert.tbs_certificate.subjectPublicKeyInfo.publicKey;
+            if (pubkey == .secp256r1) {
+                self.secp256r1_pubkey = pubkey.secp256r1.key;
+            }
             std.log.info("=== CERTIFICATE INFORMATION END ===", .{});
         }
 
@@ -400,9 +407,21 @@ pub const TLSClient = struct {
     }
 
     fn handleCertificateVerify(self: *Self, cert_verify: certificate.CertificateVerify) !void {
-        _ = self;
-        _ = cert_verify;
         // TODO: verify certificate
+        const sig = try P256.Signature.fromDer(cert_verify.signature);
+        _ = sig;
+
+        var hash_out: [crypto.Hkdf.MAX_DIGEST_LENGTH]u8 = undefined;
+        self.ks.hkdf.hash(&hash_out, self.msgs_stream.getWritten());
+
+        var verify_bytes: [1000]u8 = undefined;
+        var verify_stream = io.fixedBufferStream(&verify_bytes);
+        _ = try verify_stream.write(&([_]u8{0x20} ** 64));
+        _ = try verify_stream.write("TLS 1.3, server CertificateVerify");
+        _ = try verify_stream.write(&([_]u8{0x00}));
+        _ = try verify_stream.write(hash_out[0..self.ks.hkdf.digest_length]);
+
+        try sig.verify(verify_stream.getWritten(), self.secp256r1_pubkey);
 
         self.state = .WAIT_FINISHED;
     }

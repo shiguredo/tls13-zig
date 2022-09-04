@@ -112,27 +112,25 @@ pub const CertificateEntry = struct {
 
 pub const CertificateVerify = struct {
     algorithm: SignatureAlgorithm = undefined,
-    signature: ArrayList(u8) = undefined,
+    signature: []u8 = &([_]u8{}),
+
+    allocator: std.mem.Allocator,
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator) Self {
-        return .{
-            .signature = ArrayList(u8).init(allocator),
-        };
-    }
-
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
-        var res = Self.init(allocator);
-
-        res.algorithm = @intToEnum(SignatureAlgorithm, try reader.readIntBig(u16));
+        const algorithm = @intToEnum(SignatureAlgorithm, try reader.readIntBig(u16));
         const sig_len = try reader.readIntBig(u16);
-        var i: u16 = 0;
-        while (i < sig_len) : (i += 1) {
-            try res.signature.append(try reader.readIntBig(u8));
-        }
+        var signature = try allocator.alloc(u8, sig_len);
+        errdefer allocator.free(signature);
 
-        return res;
+        try reader.readNoEof(signature);
+
+        return Self{
+            .algorithm = algorithm,
+            .signature = signature,
+            .allocator = allocator,
+        };
     }
 
     pub fn length(self: Self) usize {
@@ -140,13 +138,13 @@ pub const CertificateVerify = struct {
 
         len += @sizeOf(SignatureAlgorithm); // signature algorithm
         len += @sizeOf(u16); // signature length
-        len += self.signature.items.len;
+        len += self.signature.len;
 
         return len;
     }
 
     pub fn deinit(self: Self) void {
-        self.signature.deinit();
+        self.allocator.free(self.signature);
     }
 };
 

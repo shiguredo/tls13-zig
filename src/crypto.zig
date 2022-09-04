@@ -18,10 +18,10 @@ pub const Hkdf = struct {
     hash_type: HashType,
     digest_length: usize,
 
-    hash: fn (out: []u8, m: []const u8) void, // hash
-    create: fn (out: []u8, m: []const u8, k: []const u8) void, // hmac
-    extract: fn (out: []u8, salt: []const u8, ikm: []const u8) void, // hkdf
-    expand: fn (out: []u8, ctx: []const u8, prk: []const u8) void, // hkdf
+    hash: *const fn (out: []u8, m: []const u8) void, // hash
+    create: *const fn (out: []u8, m: []const u8, k: []const u8) void, // hmac
+    extract: *const fn (out: []u8, salt: []const u8, ikm: []const u8) void, // hkdf
+    expand: *const fn (out: []u8, ctx: []const u8, prk: []const u8) void, // hkdf
 
     pub const Self = @This();
 
@@ -50,10 +50,10 @@ pub const Hkdf = struct {
         pub const hkdf = Hkdf{
             .hash_type = .SHA256,
             .digest_length = Hash.digest_length,
-            .hash = hash,
-            .create = create,
-            .extract = extract,
-            .expand = expand,
+            .hash = &hash,
+            .create = &create,
+            .extract = &extract,
+            .expand = &expand,
         };
     };
 
@@ -77,10 +77,10 @@ pub const Hkdf = struct {
     // @param(out) out.len >= digest_length
     // @param(prk) prk.len >= digest_length
     pub fn deriveSecret(self: Self, out: []u8, prk: []const u8, label: []const u8, msg: []const u8) !void {
-        var hash: [MAX_DIGEST_LENGTH]u8 = undefined;
-        self.hash(&hash, msg);
+        var h: [MAX_DIGEST_LENGTH]u8 = undefined;
+        self.hash(&h, msg);
 
-        try self.hkdfExpandLabel(out, prk, label, hash[0..self.digest_length], self.digest_length);
+        try self.hkdfExpandLabel(out, prk, label, h[0..self.digest_length], self.digest_length);
     }
 
     pub fn hkdfExpandLabel(self: Self, out: []u8, prk: []const u8, label: []const u8, ctx: []const u8, len: usize) !void {
@@ -116,8 +116,8 @@ pub const Aead = struct {
     nonce_length: usize,
     tag_length: usize,
 
-    encrypt: fn (c: []u8, tag: []u8, m: []const u8, ad: []const u8, nonce: []const u8, key: []const u8) void,
-    decrypt: fn (m: []u8, c: []const u8, tag: []const u8, ad: []const u8, nonce: []const u8, key: []const u8) AuthenticationError!void,
+    encrypt: *const fn (c: []u8, tag: []u8, m: []const u8, ad: []const u8, nonce: []const u8, key: []const u8) void,
+    decrypt: *const fn (m: []u8, c: []const u8, tag: []const u8, ad: []const u8, nonce: []const u8, key: []const u8) AuthenticationError!void,
 
     pub const Aes128Gcm = struct {
         const C = std.crypto.aead.aes_gcm.Aes128Gcm;
@@ -134,8 +134,8 @@ pub const Aead = struct {
             .key_length = C.key_length,
             .nonce_length = C.nonce_length,
             .tag_length = C.tag_length,
-            .encrypt = encrypt,
-            .decrypt = decrypt,
+            .encrypt = &encrypt,
+            .decrypt = &decrypt,
         };
     };
 };

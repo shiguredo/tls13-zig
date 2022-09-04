@@ -25,7 +25,7 @@ pub const TLSPlainText = union(ContentType) {
 
     /// @param (Hash) is the type of hash function. It is used to decode handshake message.
     /// @param (writer) if not null, fragment is written to the writer (used for KeySchedule etc.)
-    pub fn decode(reader: anytype, t: ContentType, allocator: std.mem.Allocator, Hash: ?type, writer: anytype) !Self {
+    pub fn decode(reader: anytype, t: ContentType, allocator: std.mem.Allocator, comptime Hash: ?type, writer: anytype) !Self {
         const proto_version = try reader.readIntBig(u16);
         if (proto_version != 0x0303) {
             // TODO: return error
@@ -277,19 +277,21 @@ pub const RecordPayloadProtector = struct {
 
     const Self = @This();
 
-    pub fn init(aead: crypto.Aead) !Self {
-        return Self{ .aead = aead };
+    pub fn init(aead: crypto.Aead) Self {
+        return .{ .aead = aead };
     }
 
     pub fn encrypt(self: Self, mt: TLSInnerPlainText, n: []const u8, k: []const u8, allocator: std.mem.Allocator) !TLSCipherText {
         var mt_bytes = try allocator.alloc(u8, mt.length());
         defer allocator.free(mt_bytes);
-        _ = try mt.encode(io.fixedBufferStream(mt_bytes).writer());
+        var stream = io.fixedBufferStream(mt_bytes);
+        _ = try mt.encode(stream.writer());
 
         const tag_length = self.aead.tag_length;
         var ct = try TLSCipherText.init(mt.length() + tag_length, allocator);
         var header: [5]u8 = undefined;
-        _ = try ct.writeHeader(io.fixedBufferStream(&header).writer());
+        stream = io.fixedBufferStream(&header);
+        _ = try ct.writeHeader(stream.writer());
 
         // RFC 8446 5.2 Record Payload Protection(p. 81)
         // additional_data = TLSCiphertext.opaque_tyoe ||
@@ -314,14 +316,16 @@ pub const RecordPayloadProtector = struct {
         defer allocator.free(mt_bytes);
 
         var header: [5]u8 = undefined;
-        _ = try c.writeHeader(io.fixedBufferStream(&header).writer());
+        var stream = io.fixedBufferStream(&header);
+        _ = try c.writeHeader(stream.writer());
         try self.aead.decrypt(mt_bytes, c.record[0 .. c.record.len - tag_length], c.record[(c.record.len - tag_length)..], &header, n, k);
 
         return try TLSInnerPlainText.decode(mt_bytes, allocator);
     }
 
     pub fn decryptFromCipherBytes(self: Self, c: []const u8, n: []const u8, k: []const u8, allocator: std.mem.Allocator) !TLSInnerPlainText {
-        var reader = io.fixedBufferStream(c).reader();
+        var stream = io.fixedBufferStream(c);
+        var reader = stream.reader();
         const t = @intToEnum(ContentType, try reader.readIntBig(u8));
         const ct = try TLSCipherText.decode(reader, t, allocator);
         defer ct.deinit();
@@ -421,13 +425,14 @@ test "RecordPayloadProtector encrypt" {
     mt.content[1] = 0x0;
     mt.content_type = .alert;
 
-    const protector = try RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead);
+    const protector = RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead);
     const ct = try protector.encrypt(mt, &nonce, &key, std.testing.allocator);
     defer ct.deinit();
 
     const c_ans = [_]u8{ 0x17, 0x03, 0x03, 0x00, 0x13, 0xC9, 0x87, 0x27, 0x60, 0x65, 0x56, 0x66, 0xB7, 0x4D, 0x7F, 0xF1, 0x15, 0x3E, 0xFD, 0x6D, 0xB6, 0xD0, 0xB0, 0xE3 };
     var c: [1000]u8 = undefined;
-    const write_len = try ct.encode(io.fixedBufferStream(&c).writer());
+    var stream = io.fixedBufferStream(&c);
+    const write_len = try ct.encode(stream.writer());
     try expect(std.mem.eql(u8, c[0..write_len], &c_ans));
 }
 
@@ -445,7 +450,7 @@ test "RecordPayloadProtector decrypt" {
     const ct = try TLSCipherText.decode(stream.reader(), t, std.testing.allocator);
     defer ct.deinit();
 
-    const protector = try RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead);
+    const protector = RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead);
     const mt = try protector.decrypt(ct, &nonce, &key, std.testing.allocator);
     defer mt.deinit();
 
@@ -465,13 +470,14 @@ test "RecordPayloadProtector encryptFromPlainBytes" {
 
     const content = [_]u8{ 0x01, 0x00 };
 
-    const protector = try RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead);
+    const protector = RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead);
     const ct = try protector.encryptFromPlainBytes(&content, .alert, &nonce, &key, std.testing.allocator);
     defer ct.deinit();
 
     const c_ans = [_]u8{ 0x17, 0x03, 0x03, 0x00, 0x13, 0xC9, 0x87, 0x27, 0x60, 0x65, 0x56, 0x66, 0xB7, 0x4D, 0x7F, 0xF1, 0x15, 0x3E, 0xFD, 0x6D, 0xB6, 0xD0, 0xB0, 0xE3 };
     var c: [1000]u8 = undefined;
-    const write_len = try ct.encode(io.fixedBufferStream(&c).writer());
+    var stream = io.fixedBufferStream(&c);
+    const write_len = try ct.encode(stream.writer());
     try expect(std.mem.eql(u8, c[0..write_len], &c_ans));
 }
 
@@ -485,7 +491,7 @@ test "RecordPayloadProtector decryptFromBytes" {
     }
     const s_alert = [_]u8{ 0x17, 0x03, 0x03, 0x00, 0x13, 0xB5, 0x8F, 0xD6, 0x71, 0x66, 0xEB, 0xF5, 0x99, 0xD2, 0x47, 0x20, 0xCF, 0xBE, 0x7E, 0xFA, 0x7A, 0x88, 0x64, 0xA9 };
 
-    const protector = try RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead);
+    const protector = RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead);
     const mt = try protector.decryptFromCipherBytes(&s_alert, &nonce, &key, std.testing.allocator);
     defer mt.deinit();
 

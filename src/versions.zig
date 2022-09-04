@@ -118,6 +118,7 @@ test "SuppoertedVersions encode" {
     const versions_ans = [_]u8{ 0x02, 0x03, 0x04 };
     var send_bytes: [100]u8 = undefined;
 
-    const write_len = try res.encode(io.fixedBufferStream(&send_bytes).writer());
+    var stream = io.fixedBufferStream(&send_bytes);
+    const write_len = try res.encode(stream.writer());
     try expect(std.mem.eql(u8, send_bytes[0..write_len], &versions_ans));
 }

@@ -24,43 +24,55 @@ const Sha256 = std.crypto.hash.sha2.Sha256;
 pub const TLSClient = struct {
 
     // session related
-    random: [32]u8 = undefined,
-    session_id: msg.SessionID = undefined,
+    random: [32]u8,
+    session_id: msg.SessionID,
 
     // message buffer for KeySchedule
-    msgs_bytes: []u8 = undefined,
-    msgs_stream: io.FixedBufferStream([]u8) = undefined,
+    msgs_bytes: []u8,
+    msgs_stream: io.FixedBufferStream([]u8),
 
     // state machine
     state: State = State.START,
 
     // X25519 DH keys
-    x25519_priv_key: [32]u8 = undefined,
-    x25519_pub_key: [32]u8 = undefined,
+    x25519_priv_key: [32]u8 = [_]u8{0} ** 32,
+    x25519_pub_key: [32]u8 = [_]u8{0} ** 32,
 
     // payload protection
-    ks: key.KeyScheduler = undefined,
-    protector: record.RecordPayloadProtector = undefined,
+    ks: key.KeyScheduler,
+    protector: record.RecordPayloadProtector,
     recv_count: usize = 0,
     send_count: usize = 0,
 
     // Misc
-    allocator: std.mem.Allocator = undefined,
+    allocator: std.mem.Allocator,
 
     const State = enum { START, WAIT_SH, WAIT_EE, WAIT_CERT_CR, WAIT_CERT, WAIT_CV, WAIT_FINISHED, SEND_FINISHED, CONNECTED };
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) !Self {
-        var res = Self{};
-        res.session_id = try msg.SessionID.init(32);
-        res.allocator = allocator;
-        res.msgs_bytes = try res.allocator.alloc(u8, 1024 * 32);
-        res.msgs_stream = io.fixedBufferStream(res.msgs_bytes);
-        random.bytes(&res.random);
-        random.bytes(res.session_id.session_id.slice());
+        var session_id = try msg.SessionID.init(32);
+        var msgs_bytes = try allocator.alloc(u8, 1024 * 32);
+        errdefer allocator.free(msgs_bytes);
 
-        return res;
+        var rand: [32]u8 = undefined;
+        random.bytes(&rand);
+        random.bytes(session_id.session_id.slice());
+
+        var default_ks = try key.KeyScheduler.init(crypto.Hkdf.Sha256.hkdf, crypto.Aead.Aes128Gcm.aead);
+        var default_protector = record.RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead);
+
+        return Self{
+            .random = rand,
+            .session_id = session_id,
+            .msgs_bytes = msgs_bytes,
+            .msgs_stream = io.fixedBufferStream(msgs_bytes),
+            .ks = default_ks,
+            .protector = default_protector,
+
+            .allocator = allocator,
+        };
     }
 
     pub fn deinit(self: Self) void {
@@ -118,6 +130,7 @@ pub const TLSClient = struct {
         var tcpBufferedWriter = io.bufferedWriter(writer);
         const ch = try self.createClientHello();
         defer ch.deinit();
+
         const hs_ch = msg.Handshake{ .client_hello = ch };
         const record_ch = record.TLSPlainText{ .handshake = hs_ch };
         _ = try record_ch.encode(tcpBufferedWriter.writer());
@@ -125,6 +138,7 @@ pub const TLSClient = struct {
 
         _ = try hs_ch.encode(self.msgs_stream.writer());
 
+        _ = reader;
         // ClientHello is already sent.
         self.state = .WAIT_SH;
         while (self.state != .CONNECTED) {
@@ -266,6 +280,8 @@ pub const TLSClient = struct {
             // TODO: Error
             return;
         }
+        self.ks = try key.KeyScheduler.init(crypto.Hkdf.Sha256.hkdf, crypto.Aead.Aes128Gcm.aead);
+        self.protector = record.RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead);
 
         const ks = (try msg.getExtension(sh.extensions, .key_share)).key_share;
         if (ks.entries.items.len != 1) {
@@ -281,9 +297,7 @@ pub const TLSClient = struct {
 
         const server_pubkey = key_entry.x25519.key_exchange;
         const shared_key = try dh.X25519.scalarmult(self.x25519_priv_key, server_pubkey);
-
-        self.ks = try key.KeyScheduler.init(crypto.Hkdf.Sha256.hkdf, crypto.Aead.Aes128Gcm.aead, &shared_key, &([_]u8{0} ** 32), self.allocator);
-        self.protector = try record.RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead);
+        try self.ks.generateEarlySecrets(&shared_key, &([_]u8{0} ** 32));
         try self.ks.generateHandshakeSecrets(self.msgs_stream.getWritten());
 
         // if everythig is ok, go to next state.
@@ -293,6 +307,8 @@ pub const TLSClient = struct {
     fn handleHandshakeInnerPlaintext(self: *Self, t: record.TLSInnerPlainText, writer: anytype) !void {
         var stream = io.fixedBufferStream(t.content);
         var i: usize = 0;
+        _ = i;
+        _ = writer;
         while ((try stream.getPos()) != (try stream.getEndPos())) {
             const recv_msg = try msg.Handshake.decode(stream.reader(), self.allocator, Sha256);
             defer recv_msg.deinit();
@@ -344,7 +360,8 @@ pub const TLSClient = struct {
 
                 var c_finished_inner = try record.TLSInnerPlainText.init(hs_c_finished.length(), self.allocator);
                 defer c_finished_inner.deinit();
-                _ = try hs_c_finished.encode(io.fixedBufferStream(c_finished_inner.content).writer());
+                var inner_stream = io.fixedBufferStream(c_finished_inner.content);
+                _ = try hs_c_finished.encode(inner_stream.writer());
 
                 c_finished_inner.content_type = .handshake;
                 const nonce = try self.ks.generateNonce(self.ks.secret.c_hs_iv.slice(), 0);
@@ -368,10 +385,14 @@ pub const TLSClient = struct {
     }
 
     fn handleCertificate(self: *Self, cert: certificate.Certificate) !void {
-        _ = self;
+        _ = cert;
         for (cert.cert_list.items) |c| {
             std.log.info("=== CERTIFICATE INFORMATION BEGIN ===", .{});
-            c.cert.print(std.log.info);
+            // Below line causes compiler crash
+            // https://github.com/ziglang/zig/issues/12373
+            // TODO: FIX
+            //c.cert.print(std.log.info);
+            _ = c;
             std.log.info("=== CERTIFICATE INFORMATION END ===", .{});
         }
 
@@ -427,7 +448,8 @@ test "client test with RFC8448" {
     // STATE = WAIT_SH
 
     const server_hello_bytes = [_]u8{ 0x16, 0x03, 0x03, 0x00, 0x5a, 0x02, 0x00, 0x00, 0x56, 0x03, 0x03, 0xa6, 0xaf, 0x06, 0xa4, 0x12, 0x18, 0x60, 0xdc, 0x5e, 0x6e, 0x60, 0x24, 0x9c, 0xd3, 0x4c, 0x95, 0x93, 0x0c, 0x8a, 0xc5, 0xcb, 0x14, 0x34, 0xda, 0xc1, 0x55, 0x77, 0x2e, 0xd3, 0xe2, 0x69, 0x28, 0x00, 0x13, 0x01, 0x00, 0x00, 0x2e, 0x00, 0x33, 0x00, 0x24, 0x00, 0x1d, 0x00, 0x20, 0xc9, 0x82, 0x88, 0x76, 0x11, 0x20, 0x95, 0xfe, 0x66, 0x76, 0x2b, 0xdb, 0xf7, 0xc6, 0x72, 0xe1, 0x56, 0xd6, 0xcc, 0x25, 0x3b, 0x83, 0x3d, 0xf1, 0xdd, 0x69, 0xb1, 0xb0, 0x4e, 0x75, 0x1f, 0x0f, 0x00, 0x2b, 0x00, 0x02, 0x03, 0x04 };
-    var sh_reader = io.fixedBufferStream(&server_hello_bytes).reader();
+    var stream = io.fixedBufferStream(&server_hello_bytes);
+    var sh_reader = stream.reader();
     var t = @intToEnum(record.ContentType, try sh_reader.readIntBig(u8));
     const handshake = (try record.TLSPlainText.decode(sh_reader, t, std.testing.allocator, null, msgs_stream.writer())).handshake;
     try expect(handshake == .server_hello);
@@ -442,14 +464,15 @@ test "client test with RFC8448" {
 
     const server_pubkey = k_s.entries.items[0].x25519.key_exchange;
 
-    const protector = try record.RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead);
+    const protector = record.RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead);
 
     const dhe_shared_key_ans = [_]u8{ 0x8b, 0xd4, 0x05, 0x4f, 0xb5, 0x5b, 0x9d, 0x63, 0xfd, 0xfb, 0xac, 0xf9, 0xf0, 0x4b, 0x9f, 0x0d, 0x35, 0xe6, 0xd6, 0x3f, 0x53, 0x75, 0x63, 0xef, 0xd4, 0x62, 0x72, 0x90, 0x0f, 0x89, 0x49, 0x2d };
     const dhe_shared_key = try dh.X25519.scalarmult(client_privkey, server_pubkey);
     try expect(std.mem.eql(u8, &dhe_shared_key, &dhe_shared_key_ans));
 
-    var ks = try key.KeyScheduler.init(crypto.Hkdf.Sha256.hkdf, crypto.Aead.Aes128Gcm.aead, &dhe_shared_key, &([_]u8{0} ** 32), std.testing.allocator);
+    var ks = try key.KeyScheduler.init(crypto.Hkdf.Sha256.hkdf, crypto.Aead.Aes128Gcm.aead);
     defer ks.deinit();
+    try ks.generateEarlySecrets(&dhe_shared_key, &([_]u8{0} ** 32));
     try ks.generateHandshakeSecrets(msgs_stream.getWritten());
 
     // STATE = WAIT_EE
@@ -534,7 +557,8 @@ test "client test with RFC8448" {
     var c_finished_inner = try record.TLSInnerPlainText.init(hs_c_finished.length(), std.testing.allocator);
     c_finished_inner.content_type = .handshake;
     defer c_finished_inner.deinit();
-    _ = try hs_c_finished.encode(io.fixedBufferStream(c_finished_inner.content).writer());
+    var inner_stream = io.fixedBufferStream(c_finished_inner.content);
+    _ = try hs_c_finished.encode(inner_stream.writer());
     try expect(std.mem.eql(u8, c_finished_inner.content, &c_finished_ans));
 
     const c_record_finished_ans = [_]u8{ 0x17, 0x03, 0x03, 0x00, 0x35, 0x75, 0xEC, 0x4D, 0xC2, 0x38, 0xCC, 0xE6, 0x0B, 0x29, 0x80, 0x44, 0xA7, 0x1E, 0x21, 0x9C, 0x56, 0xCC, 0x77, 0xB0, 0x51, 0x7F, 0xE9, 0xB9, 0x3C, 0x7A, 0x4B, 0xFC, 0x44, 0xD8, 0x7F, 0x38, 0xF8, 0x03, 0x38, 0xAC, 0x98, 0xFC, 0x46, 0xDE, 0xB3, 0x84, 0xBD, 0x1C, 0xAE, 0xAC, 0xAB, 0x68, 0x67, 0xD7, 0x26, 0xC4, 0x05, 0x46 };
@@ -542,7 +566,8 @@ test "client test with RFC8448" {
     nonce = try ks.generateNonce(ks.secret.c_hs_iv.slice(), 0);
     const c_record_finished = try protector.encrypt(c_finished_inner, nonce.slice(), ks.secret.c_hs_key.slice(), std.testing.allocator);
     defer c_record_finished.deinit();
-    const c_finished_write_len = try c_record_finished.encode(io.fixedBufferStream(&c_record_finished_bytes).writer());
+    var c_record_finished_stream = io.fixedBufferStream(&c_record_finished_bytes);
+    const c_finished_write_len = try c_record_finished.encode(c_record_finished_stream.writer());
     try expect(std.mem.eql(u8, c_record_finished_bytes[0..c_finished_write_len], &c_record_finished_ans));
 
     // STATE = CONNECTED
@@ -568,7 +593,8 @@ test "client test with RFC8448" {
     const c_app_record = try protector.encryptFromPlainBytes(&c_app_data, .application_data, nonce.slice(), ks.secret.c_ap_key.slice(), std.testing.allocator);
     defer c_app_record.deinit();
     var c_app: [1000]u8 = undefined;
-    const c_app_len = try c_app_record.encode(io.fixedBufferStream(&c_app).writer());
+    var c_app_stream = io.fixedBufferStream(&c_app);
+    const c_app_len = try c_app_record.encode(c_app_stream.writer());
     try expect(std.mem.eql(u8, c_app[0..c_app_len], &c_app_record_ans));
 
     // recv application_data
@@ -585,7 +611,8 @@ test "client test with RFC8448" {
     defer c_alert_record.deinit();
     const c_alert_ans = [_]u8{ 0x17, 0x03, 0x03, 0x00, 0x13, 0xC9, 0x87, 0x27, 0x60, 0x65, 0x56, 0x66, 0xB7, 0x4D, 0x7F, 0xF1, 0x15, 0x3E, 0xFD, 0x6D, 0xB6, 0xD0, 0xB0, 0xE3 };
     var c_alert: [1000]u8 = undefined;
-    const c_alert_len = try c_alert_record.encode(io.fixedBufferStream(&c_alert).writer());
+    var c_alert_stream = io.fixedBufferStream(&c_alert);
+    const c_alert_len = try c_alert_record.encode(c_alert_stream.writer());
     try expect(std.mem.eql(u8, c_alert[0..c_alert_len], &c_alert_ans));
 
     // recv alert

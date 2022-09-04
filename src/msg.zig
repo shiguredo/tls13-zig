@@ -174,7 +174,7 @@ pub const Handshake = union(HandshakeType) {
 
     const Self = @This();
 
-    pub fn decode(reader: anytype, allocator: std.mem.Allocator, Hash: ?type) !Self {
+    pub fn decode(reader: anytype, allocator: std.mem.Allocator, comptime Hash: ?type) !Self {
         const t_raw = try reader.readIntBig(u8);
         const t = @intToEnum(HandshakeType, t_raw);
         const len = try reader.readIntBig(u24);
@@ -616,7 +616,8 @@ test "ClientHello decode & encode" {
     try expect(sa.algos.items[1] == .ed25519);
 
     var send_bytes: [1000]u8 = undefined;
-    const write_len = try res.encode(io.fixedBufferStream(&send_bytes).writer());
+    var stream = io.fixedBufferStream(&send_bytes);
+    const write_len = try res.encode(stream.writer());
     try expect(std.mem.eql(u8, send_bytes[0..write_len], &recv_data));
     try expect(write_len == res.length());
 }
@@ -639,7 +640,8 @@ test "ServerHello decode & encode" {
     try expect(ks.entries.items[0] == .secp256r1);
 
     var send_bytes: [1000]u8 = undefined;
-    const write_len = try res.encode(io.fixedBufferStream(&send_bytes).writer());
+    var stream = io.fixedBufferStream(&send_bytes);
+    const write_len = try res.encode(stream.writer());
     try expect(std.mem.eql(u8, send_bytes[0..write_len], &recv_data));
     try expect(write_len == res.length());
 }

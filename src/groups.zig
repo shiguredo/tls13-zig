@@ -99,6 +99,7 @@ test "SupportedGroups encode" {
     const groups_ans = [_]u8{ 0x00, 0x0a, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x1e, 0x00, 0x19, 0x00, 0x18 };
     var send_bytes: [100]u8 = undefined;
 
-    const write_len = try res.encode(io.fixedBufferStream(&send_bytes).writer());
+    var stream = io.fixedBufferStream(&send_bytes);
+    const write_len = try res.encode(stream.writer());
     try expect(std.mem.eql(u8, send_bytes[0..write_len], &groups_ans));
 }

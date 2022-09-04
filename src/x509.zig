@@ -370,7 +370,7 @@ pub const Certificate = struct {
         };
     }
 
-    pub fn print(self: Self, comptime pf: fn ([]const u8, anytype) void) void {
+    pub fn print(self: Self, pf: *const fn ([]const u8, anytype) void) void {
         pf("-- TBSCertificate --", .{});
         self.tbs_certificate.print(pf, " ");
         pf("-- SignatureAlgorithm --", .{});
@@ -1446,5 +1446,9 @@ test "X.509 decode" {
     oid_len = ASN1.decodeOID(&oid_out, cert.signature_algorithm.algorithm);
     try expect(std.mem.eql(u8, oid_out[0..oid_len], "1.2.840.113549.1.1.11")); // sha256WithRSAEncryption
     //std.log.warn("{}", .{std.fmt.fmtSliceHexLower(cert.signature_value.value)});
+
+    // Below line causes compiler crash
+    // https://github.com/ziglang/zig/issues/12373
+    // TODO: FIX
     //cert.print(std.log.warn);
 }

@@ -200,7 +200,8 @@ test "Extension RecordSizeLimit encode" {
 
     const rsl_ans = [_]u8{ 0x00, 0x1c, 0x00, 0x02, 0x40, 0x01 };
     var send_bytes: [100]u8 = undefined;
-    const write_len = try ext.encode(io.fixedBufferStream(&send_bytes).writer());
+    var stream = io.fixedBufferStream(&send_bytes);
+    const write_len = try ext.encode(stream.writer());
     try expect(std.mem.eql(u8, send_bytes[0..write_len], &rsl_ans));
 }
 
@@ -218,6 +219,7 @@ test "Extension ServerName encode" {
 
     const sn_ans = [_]u8{ 0x00, 0x00, 0x00, 0x00 };
     var send_bytes: [100]u8 = undefined;
-    const write_len = try ext.encode(io.fixedBufferStream(&send_bytes).writer());
+    var stream = io.fixedBufferStream(&send_bytes);
+    const write_len = try ext.encode(stream.writer());
     try expect(std.mem.eql(u8, send_bytes[0..write_len], &sn_ans));
 }

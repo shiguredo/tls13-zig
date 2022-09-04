@@ -32,11 +32,6 @@ pub fn main() !void {
     return;
 }
 
-test "simple test" {
-    _ = @import("msg.zig");
-    _ = @import("extension.zig");
-    _ = @import("groups.zig");
-    _ = @import("key_share.zig");
-    _ = @import("signatures.zig");
-    _ = @import("versions.zig");
+test {
+    std.testing.refAllDecls(@This());
 }

@@ -278,9 +278,7 @@ pub const RecordPayloadProtector = struct {
     const Self = @This();
 
     pub fn init(aead: crypto.Aead) !Self {
-        return Self{
-            .aead = aead
-        };
+        return Self{ .aead = aead };
     }
 
     pub fn encrypt(self: Self, mt: TLSInnerPlainText, n: []const u8, k: []const u8, allocator: std.mem.Allocator) !TLSCipherText {

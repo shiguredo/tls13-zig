@@ -47,7 +47,7 @@ pub const Hkdf = struct {
             H.expand(out, ctx, prk[0..Hmac.mac_length].*);
         }
 
-        pub const hkdf = Hkdf {
+        pub const hkdf = Hkdf{
             .hash_type = .SHA256,
             .digest_length = Hash.digest_length,
             .hash = hash,
@@ -83,7 +83,7 @@ pub const Hkdf = struct {
         try self.hkdfExpandLabel(out, prk, label, hash[0..self.digest_length], self.digest_length);
     }
 
-    pub fn hkdfExpandLabel(self:Self, out: []u8, prk: []const u8, label: []const u8, ctx: []const u8, len: usize) !void {
+    pub fn hkdfExpandLabel(self: Self, out: []u8, prk: []const u8, label: []const u8, ctx: []const u8, len: usize) !void {
         const info = try generateHkdfLabel(@intCast(u16, len), label, ctx);
         self.expand(out, info.slice(), prk);
     }
@@ -130,7 +130,7 @@ pub const Aead = struct {
             try C.decrypt(m, c, tag[0..C.tag_length].*, ad, nonce[0..C.nonce_length].*, key[0..C.key_length].*);
         }
 
-        pub const aead = Aead {
+        pub const aead = Aead{
             .key_length = C.key_length,
             .nonce_length = C.nonce_length,
             .tag_length = C.tag_length,
@@ -226,7 +226,6 @@ test "HKDF-SHA256" {
     hkdf.hash(&hash, "");
 
     try expect(std.mem.eql(u8, hash[0..hkdf.digest_length], &hash_ans));
-
 }
 
 test "HKDF-SHA256 secret deriviation" {

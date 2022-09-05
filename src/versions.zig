@@ -4,10 +4,11 @@ const log = std.log;
 const assert = std.debug.assert;
 const msg = @import("msg.zig");
 const ArrayList = std.ArrayList;
+const HandshakeType = @import("handshake.zig").HandshakeType;
 
 pub const SupportedVersions = struct {
     versions: ArrayList(u16) = undefined,
-    ht: msg.HandshakeType = undefined,
+    ht: HandshakeType = undefined,
 
     const Self = @This();
 
@@ -15,7 +16,7 @@ pub const SupportedVersions = struct {
         InvalidVersionsLength,
     };
 
-    pub fn init(ht: msg.HandshakeType, allocator: std.mem.Allocator) Self {
+    pub fn init(ht: HandshakeType, allocator: std.mem.Allocator) Self {
         return .{
             .versions = ArrayList(u16).init(allocator),
             .ht = ht,
@@ -26,12 +27,12 @@ pub const SupportedVersions = struct {
         self.versions.deinit();
     }
 
-    pub fn decode(reader: anytype, allocator: std.mem.Allocator, ht: msg.HandshakeType) !Self {
+    pub fn decode(reader: anytype, allocator: std.mem.Allocator, ht: HandshakeType) !Self {
         var res = Self.init(ht, allocator);
         errdefer res.deinit();
 
         switch (res.ht) {
-            msg.HandshakeType.client_hello => {
+            .client_hello => {
                 var supported_len = try reader.readIntBig(u8);
 
                 if (supported_len % 2 != 0) {
@@ -43,7 +44,7 @@ pub const SupportedVersions = struct {
                     try res.versions.append(try reader.readIntBig(u16));
                 }
             },
-            msg.HandshakeType.server_hello => {
+            .server_hello => {
                 try res.versions.append(try reader.readIntBig(u16));
             },
             else => unreachable,
@@ -56,7 +57,7 @@ pub const SupportedVersions = struct {
         var len: usize = 0;
 
         switch (self.ht) {
-            msg.HandshakeType.client_hello => {
+            .client_hello => {
                 try writer.writeIntBig(u8, @intCast(u8, self.versions.items.len * @sizeOf(u16)));
                 len += @sizeOf(u8);
 
@@ -65,7 +66,7 @@ pub const SupportedVersions = struct {
                     len += @sizeOf(u16);
                 }
             },
-            msg.HandshakeType.server_hello => {
+            .server_hello => {
                 try writer.writeIntBig(u16, self.versions.items[0]);
                 len += @sizeOf(u16);
             },
@@ -78,11 +79,11 @@ pub const SupportedVersions = struct {
     pub fn length(self: Self) usize {
         var len: usize = 0;
         switch (self.ht) {
-            msg.HandshakeType.client_hello => {
+            .client_hello => {
                 len += @sizeOf(u8); // supported versions length
                 len += self.versions.items.len * @sizeOf(u16);
             },
-            msg.HandshakeType.server_hello => {
+            .server_hello => {
                 len += @sizeOf(u16); // version.cli
             },
             else => unreachable,

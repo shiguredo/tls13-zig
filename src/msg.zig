@@ -3,15 +3,16 @@ const log = std.log;
 const io = std.io;
 const assert = std.debug.assert;
 const hmac = std.crypto.auth.hmac;
-
 const ArrayList = std.ArrayList;
 const BoundedArray = std.BoundedArray;
+
+const crypto = @import("crypto.zig");
 const Extension = @import("extension.zig").Extension;
 const ExtensionType = @import("extension.zig").ExtensionType;
-const Certificate = @import("certificate.zig").Certificate;
-const CertificateVerify = @import("certificate.zig").CertificateVerify;
 const ServerHello = @import("server_hello.zig").ServerHello;
 const ClientHello = @import("client_hello.zig").ClientHello;
+const Handshake = @import("handshake.zig").Handshake;
+const HandshakeType = @import("handshake.zig").HandshakeType;
 
 pub const NamedGroup = enum(u16) {
     x25519 = 0x001D,
@@ -154,97 +155,6 @@ pub fn getExtension(extensions: ArrayList(Extension), ext_type: ExtensionType) !
 
     return ExtensionError.ExtensionNotFound;
 }
-
-pub const HandshakeType = enum(u8) {
-    client_hello = 0x1,
-    server_hello = 0x2,
-    new_session_ticket = 0x04,
-    encrypted_extensions = 0x8,
-    certificate = 0xb,
-    certificate_verify = 0xf,
-    finished = 0x14,
-};
-
-pub const Handshake = union(HandshakeType) {
-    client_hello: ClientHello,
-    server_hello: ServerHello,
-    new_session_ticket: NewSessionTicket,
-    encrypted_extensions: EncryptedExtensions,
-    certificate: Certificate,
-    certificate_verify: CertificateVerify,
-    finished: Finished,
-
-    const Self = @This();
-
-    pub fn decode(reader: anytype, allocator: std.mem.Allocator, comptime Hash: ?type) !Self {
-        const t_raw = try reader.readIntBig(u8);
-        const t = @intToEnum(HandshakeType, t_raw);
-        const len = try reader.readIntBig(u24);
-        _ = len; // TODO: check the length is less than readable size.
-        switch (t) {
-            HandshakeType.client_hello => return Self{ .client_hello = try ClientHello.decode(reader, allocator) },
-            HandshakeType.server_hello => return Self{ .server_hello = try ServerHello.decode(reader, allocator) },
-            HandshakeType.new_session_ticket => return Self{ .new_session_ticket = try NewSessionTicket.decode(reader, allocator) },
-            HandshakeType.encrypted_extensions => return Self{ .encrypted_extensions = try EncryptedExtensions.decode(reader, allocator) },
-            HandshakeType.certificate => return Self{ .certificate = try Certificate.decode(reader, allocator) },
-            HandshakeType.certificate_verify => return Self{ .certificate_verify = try CertificateVerify.decode(reader, allocator) },
-            HandshakeType.finished => if (Hash) |h| {
-                _ = h;
-                return Self{ .finished = try Finished.decode(reader, @import("crypto.zig").Hkdf.Sha256.hkdf) };
-            } else {
-                return DecodeError.HashNotSpecified;
-            },
-        }
-    }
-
-    pub fn encode(self: Self, writer: anytype) !usize {
-        var len: usize = 0;
-
-        try writer.writeIntBig(u8, @enumToInt(self));
-        len += @sizeOf(HandshakeType);
-
-        try writer.writeIntBig(u24, @intCast(u24, self.length() - (@sizeOf(u8) + 3)));
-        len += 3;
-
-        switch (self) {
-            HandshakeType.client_hello => |e| len += try e.encode(writer),
-            HandshakeType.server_hello => |e| len += try e.encode(writer),
-            HandshakeType.finished => |e| len += try e.encode(writer),
-            else => unreachable,
-        }
-
-        return len;
-    }
-
-    pub fn length(self: Self) usize {
-        var len: usize = 0;
-        len += @sizeOf(u8); // type
-        len += 3; // @sizeOf(u24) = 4, so that the length is directly specified;
-        switch (self) {
-            HandshakeType.client_hello => |e| len += e.length(),
-            HandshakeType.server_hello => |e| len += e.length(),
-            HandshakeType.encrypted_extensions => |e| len += e.length(),
-            HandshakeType.certificate => |e| len += e.length(),
-            HandshakeType.certificate_verify => |e| len += e.length(),
-            HandshakeType.finished => |e| len += e.length(),
-            else => unreachable,
-        }
-
-        return len;
-    }
-
-    pub fn deinit(self: Self) void {
-        switch (self) {
-            HandshakeType.client_hello => |e| e.deinit(),
-            HandshakeType.server_hello => |e| e.deinit(),
-            HandshakeType.new_session_ticket => |e| e.deinit(),
-            HandshakeType.encrypted_extensions => |e| e.deinit(),
-            HandshakeType.certificate => |e| e.deinit(),
-            HandshakeType.certificate_verify => |e| e.deinit(),
-            HandshakeType.finished => |e| e.deinit(),
-        }
-    }
-};
 
 pub const EncryptedExtensions = struct {
     extensions: ArrayList(Extension) = undefined,
@@ -399,7 +309,7 @@ test "Finished decode" {
     const recv_data = [_]u8{ 0x14, 0x00, 0x00, 0x20, 0x9b, 0x9b, 0x14, 0x1d, 0x90, 0x63, 0x37, 0xfb, 0xd2, 0xcb, 0xdc, 0xe7, 0x1d, 0xf4, 0xde, 0xda, 0x4a, 0xb4, 0x2c, 0x30, 0x95, 0x72, 0xcb, 0x7f, 0xff, 0xee, 0x54, 0x54, 0xb7, 0x8f, 0x07, 0x18 };
     var readStream = io.fixedBufferStream(&recv_data);
 
-    const res = try Handshake.decode(readStream.reader(), std.testing.allocator, std.crypto.hash.sha2.Sha256);
+    const res = try Handshake.decode(readStream.reader(), std.testing.allocator, crypto.Hkdf.Sha256.hkdf);
     defer res.deinit();
 
     // check all data was read.

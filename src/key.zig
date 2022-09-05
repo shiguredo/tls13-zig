@@ -93,7 +93,7 @@ pub const KeyScheduler = struct {
 };
 
 test "KeyScheduler AES128GCM-SHA256" {
-    const Handshake = @import("msg.zig").Handshake;
+    const Handshake = @import("handshake.zig").Handshake;
     const record = @import("record.zig");
     const protector = record.RecordPayloadProtector.init(@import("crypto.zig").Aead.Aes128Gcm.aead);
 

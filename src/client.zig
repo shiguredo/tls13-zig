@@ -20,6 +20,7 @@ const crypto = @import("crypto.zig");
 const x509 = @import("x509.zig");
 const ServerHello = @import("server_hello.zig").ServerHello;
 const ClientHello = @import("client_hello.zig").ClientHello;
+const Handshake = @import("handshake.zig").Handshake;
 
 const Aes128Gcm = std.crypto.aead.aes_gcm.Aes128Gcm;
 const Sha256 = std.crypto.hash.sha2.Sha256;
@@ -97,10 +98,10 @@ pub const TLSClient = struct {
 
         // CipherSuite
         // currently, supported suites are temporary
-        try client_hello.cipher_suites.append(msg.CipherSuite.TLS_AES_128_GCM_SHA256);
+        try client_hello.cipher_suites.append(.TLS_AES_128_GCM_SHA256);
 
         // Extension SupportedVresions
-        var sv = versions.SupportedVersions.init(msg.HandshakeType.client_hello, self.allocator);
+        var sv = versions.SupportedVersions.init(.client_hello, self.allocator);
         try sv.versions.append(0x0304); //TLSv1.3
         try client_hello.extensions.append(.{ .supported_versions = sv });
 
@@ -112,7 +113,7 @@ pub const TLSClient = struct {
 
         // Extension KeyShare
         // currently, only x25519 and secp256r1 are supported
-        var ks = key_share.KeyShare.init(self.allocator, msg.HandshakeType.client_hello, false);
+        var ks = key_share.KeyShare.init(self.allocator, .client_hello, false);
         var entry_x25519 = key_share.EntryX25519{};
         std.mem.copy(u8, &entry_x25519.key_exchange, &self.x25519_pub_key);
         try ks.entries.append(.{ .x25519 = entry_x25519 });
@@ -136,7 +137,7 @@ pub const TLSClient = struct {
         const ch = try self.createClientHello();
         defer ch.deinit();
 
-        const hs_ch = msg.Handshake{ .client_hello = ch };
+        const hs_ch = Handshake{ .client_hello = ch };
         const record_ch = record.TLSPlainText{ .handshake = hs_ch };
         _ = try record_ch.encode(tcpBufferedWriter.writer());
         try tcpBufferedWriter.flush();
@@ -225,7 +226,7 @@ pub const TLSClient = struct {
             var stream = io.fixedBufferStream(plain_record.content);
             while ((try stream.getPos()) != (try stream.getEndPos())) {
                 if (plain_record.content_type == .handshake) {
-                    const recv_msg = try msg.Handshake.decode(stream.reader(), self.allocator, Sha256);
+                    const recv_msg = try Handshake.decode(stream.reader(), self.allocator, self.ks.hkdf);
                     defer recv_msg.deinit();
                 } else if (plain_record.content_type == .application_data) {
                     // TODO: handle oversized content
@@ -315,7 +316,7 @@ pub const TLSClient = struct {
         _ = i;
         _ = writer;
         while ((try stream.getPos()) != (try stream.getEndPos())) {
-            const recv_msg = try msg.Handshake.decode(stream.reader(), self.allocator, Sha256);
+            const recv_msg = try Handshake.decode(stream.reader(), self.allocator, self.ks.hkdf);
             defer recv_msg.deinit();
             if (self.state == .WAIT_EE) {
                 if (recv_msg != .encrypted_extensions) {
@@ -361,7 +362,7 @@ pub const TLSClient = struct {
 
                 // construct client finished message
                 const c_finished = try msg.Finished.fromMessageBytes(self.msgs_stream.getWritten(), self.ks.secret.c_hs_finished_secret.slice(), crypto.Hkdf.Sha256.hkdf);
-                const hs_c_finished = msg.Handshake{ .finished = c_finished };
+                const hs_c_finished = Handshake{ .finished = c_finished };
 
                 var c_finished_inner = try record.TLSInnerPlainText.init(hs_c_finished.length(), self.allocator);
                 defer c_finished_inner.deinit();
@@ -505,7 +506,7 @@ test "client test with RFC8448" {
 
     // decode EncryptedExtensions
     var readStream2 = io.fixedBufferStream(pt_misc.content);
-    const hs_enc_ext = try msg.Handshake.decode(readStream2.reader(), std.testing.allocator, null);
+    const hs_enc_ext = try Handshake.decode(readStream2.reader(), std.testing.allocator, null);
     defer hs_enc_ext.deinit();
     const enc_ext = hs_enc_ext.encrypted_extensions;
 
@@ -522,7 +523,7 @@ test "client test with RFC8448" {
     // STATE = WAIT_CERT_CR
 
     // decode Certificate
-    const hs_cert = (try msg.Handshake.decode(readStream2.reader(), std.testing.allocator, null));
+    const hs_cert = (try Handshake.decode(readStream2.reader(), std.testing.allocator, null));
     defer hs_cert.deinit();
     const cert = hs_cert.certificate;
 
@@ -538,7 +539,7 @@ test "client test with RFC8448" {
     // WAIT_CV
 
     // decode CertificateVerify
-    const hs_cert_verify = (try msg.Handshake.decode(readStream2.reader(), std.testing.allocator, null));
+    const hs_cert_verify = (try Handshake.decode(readStream2.reader(), std.testing.allocator, null));
     defer hs_cert_verify.deinit();
     const cert_verify = hs_cert_verify.certificate_verify;
 
@@ -551,7 +552,7 @@ test "client test with RFC8448" {
     // STATE = WAIT_FINISHED
 
     // decode Finished
-    const hs_s_hs_finished = (try msg.Handshake.decode(readStream2.reader(), std.testing.allocator, Sha256));
+    const hs_s_hs_finished = (try Handshake.decode(readStream2.reader(), std.testing.allocator, crypto.Hkdf.Sha256.hkdf));
     defer hs_s_hs_finished.deinit();
     const s_hs_finished = hs_s_hs_finished.finished;
 
@@ -570,7 +571,7 @@ test "client test with RFC8448" {
 
     // Construct client finised message
     const c_finished = try msg.Finished.fromMessageBytes(msgs_stream.getWritten(), ks.secret.c_hs_finished_secret.slice(), crypto.Hkdf.Sha256.hkdf);
-    const hs_c_finished = msg.Handshake{ .finished = c_finished };
+    const hs_c_finished = Handshake{ .finished = c_finished };
 
     const c_finished_ans = [_]u8{ 0x14, 0x0, 0x0, 0x20, 0xa8, 0xec, 0x43, 0x6d, 0x67, 0x76, 0x34, 0xae, 0x52, 0x5a, 0xc1, 0xfc, 0xeb, 0xe1, 0x1a, 0x03, 0x9e, 0xc1, 0x76, 0x94, 0xfa, 0xc6, 0xe9, 0x85, 0x27, 0xb6, 0x42, 0xf2, 0xed, 0xd5, 0xce, 0x61 };
     var c_finished_inner = try record.TLSInnerPlainText.init(hs_c_finished.length(), std.testing.allocator);

@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 const msg = @import("msg.zig");
 const ArrayList = std.ArrayList;
 const NamedGroup = msg.NamedGroup;
-const HandshakeType = msg.HandshakeType;
+const HandshakeType = @import("handshake.zig").HandshakeType;
 const Extension = @import("extension.zig").Extension;
 
 pub const KeyShare = struct {

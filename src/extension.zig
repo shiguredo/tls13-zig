@@ -3,7 +3,7 @@ const SupportedGroups = @import("groups.zig").SupportedGroups;
 const SupportedVersions = @import("versions.zig").SupportedVersions;
 const SignatureAlgorithms = @import("signatures.zig").SignatureAlgorithms;
 const KeyShare = @import("key_share.zig").KeyShare;
-const HandshakeType = @import("msg.zig").HandshakeType;
+const HandshakeType = @import("handshake.zig").HandshakeType;
 
 pub const ExtensionType = enum(u16) {
     server_name = 0,

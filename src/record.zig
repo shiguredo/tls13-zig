@@ -1,6 +1,6 @@
 const std = @import("std");
 const io = std.io;
-const Handshake = @import("msg.zig").Handshake;
+const Handshake = @import("handshake.zig").Handshake;
 const DecodeError = @import("msg.zig").DecodeError;
 const crypto = @import("crypto.zig");
 
@@ -25,7 +25,7 @@ pub const TLSPlainText = union(ContentType) {
 
     /// @param (Hash) is the type of hash function. It is used to decode handshake message.
     /// @param (writer) if not null, fragment is written to the writer (used for KeySchedule etc.)
-    pub fn decode(reader: anytype, t: ContentType, allocator: std.mem.Allocator, comptime Hash: ?type, writer: anytype) !Self {
+    pub fn decode(reader: anytype, t: ContentType, allocator: std.mem.Allocator, hkdf: ?crypto.Hkdf, writer: anytype) !Self {
         const proto_version = try reader.readIntBig(u16);
         if (proto_version != 0x0303) {
             // TODO: return error
@@ -42,7 +42,7 @@ pub const TLSPlainText = union(ContentType) {
         var res: Self = undefined;
         switch (t) {
             ContentType.change_cipher_spec => res = Self{ .change_cipher_spec = try ChangeCipherSpec.decode(fragmentStream.reader(), len) },
-            ContentType.handshake => res = Self{ .handshake = try Handshake.decode(fragmentStream.reader(), allocator, Hash) },
+            ContentType.handshake => res = Self{ .handshake = try Handshake.decode(fragmentStream.reader(), allocator, hkdf) },
             else => unreachable,
         }
 

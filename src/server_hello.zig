@@ -98,7 +98,7 @@ pub const ServerHello = struct {
 
     /// encode ServerHello message writing to io.Writer.
     /// @param self   ServerHello to be encoded.
-    /// @param writer io.Writer to be written encodede message.
+    /// @param writer io.Writer to be written encoded message.
     /// @return encoded length.
     pub fn encode(self: Self, writer: anytype) !usize {
         // Verifying ServerHello.

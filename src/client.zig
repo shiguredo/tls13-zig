@@ -18,6 +18,7 @@ const groups = @import("groups.zig");
 const signatures = @import("signatures.zig");
 const crypto = @import("crypto.zig");
 const x509 = @import("x509.zig");
+const ServerHello = @import("server_hello.zig").ServerHello;
 
 const Aes128Gcm = std.crypto.aead.aes_gcm.Aes128Gcm;
 const Sha256 = std.crypto.hash.sha2.Sha256;
@@ -279,7 +280,7 @@ pub const TLSClient = struct {
         std.log.info("connection closed", .{});
     }
 
-    fn handleServerHello(self: *Self, sh: msg.ServerHello) !void {
+    fn handleServerHello(self: *Self, sh: ServerHello) !void {
         // Only TLS_AES_128_GCM_SHA256 is allowed
         if (sh.cipher_suite != .TLS_AES_128_GCM_SHA256) {
             // TODO: Error

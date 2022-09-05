@@ -19,6 +19,7 @@ const signatures = @import("signatures.zig");
 const crypto = @import("crypto.zig");
 const x509 = @import("x509.zig");
 const ServerHello = @import("server_hello.zig").ServerHello;
+const ClientHello = @import("client_hello.zig").ClientHello;
 
 const Aes128Gcm = std.crypto.aead.aes_gcm.Aes128Gcm;
 const Sha256 = std.crypto.hash.sha2.Sha256;
@@ -91,10 +92,8 @@ pub const TLSClient = struct {
         self.x25519_pub_key = try dh.X25519.recoverPublicKey(self.x25519_priv_key);
     }
 
-    fn createClientHello(self: Self) !msg.ClientHello {
-        var client_hello = msg.ClientHello.init(self.allocator);
-        client_hello.random = self.random;
-        client_hello.legacy_session_id = self.session_id;
+    fn createClientHello(self: Self) !ClientHello {
+        var client_hello = ClientHello.init(self.random, self.session_id, self.allocator);
 
         // CipherSuite
         // currently, supported suites are temporary

@@ -147,6 +147,7 @@ pub const ServerHello = struct {
 
     /// get length of encoded ServerHello.
     /// @param self the target ServerHello.
+    /// @return length of encoded ServerHello.
     pub fn length(self: Self) usize {
         var len: usize = 0;
         len += @sizeOf(@TypeOf(self.protocol_version));

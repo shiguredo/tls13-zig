@@ -6,6 +6,7 @@ const ServerHello = @import("server_hello.zig").ServerHello;
 const EncryptedExtensions = @import("encrypted_extensions.zig").EncryptedExtensions;
 const Certificate = @import("certificate.zig").Certificate;
 const CertificateVerify = @import("certificate.zig").CertificateVerify;
+const Finished = @import("finished.zig").Finished;
 const Hkdf = @import("crypto.zig").Hkdf;
 
 /// RFC8446 Secion 4 Handshake Protocol
@@ -64,7 +65,7 @@ pub const Handshake = union(HandshakeType) {
     encrypted_extensions: EncryptedExtensions,
     certificate: Certificate,
     certificate_verify: CertificateVerify,
-    finished: msg.Finished,
+    finished: Finished,
 
     const Self = @This();
 
@@ -92,7 +93,7 @@ pub const Handshake = union(HandshakeType) {
             .certificate => return Self{ .certificate = try Certificate.decode(reader, allocator) },
             .certificate_verify => return Self{ .certificate_verify = try CertificateVerify.decode(reader, allocator) },
             .finished => if (hkdf) |h| {
-                return Self{ .finished = try msg.Finished.decode(reader, h) };
+                return Self{ .finished = try Finished.decode(reader, h) };
             } else {
                 return Error.HkdfNotSpecified;
             },
@@ -154,7 +155,7 @@ pub const Handshake = union(HandshakeType) {
             .encrypted_extensions => |e| e.deinit(),
             .certificate => |e| e.deinit(),
             .certificate_verify => |e| e.deinit(),
-            .finished => |e| e.deinit(),
+            .finished => {},
         }
     }
 };

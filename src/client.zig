@@ -22,6 +22,7 @@ const ServerHello = @import("server_hello.zig").ServerHello;
 const ClientHello = @import("client_hello.zig").ClientHello;
 const Handshake = @import("handshake.zig").Handshake;
 const EncryptedExtensions = @import("encrypted_extensions.zig").EncryptedExtensions;
+const Finished = @import("finished.zig").Finished;
 
 const Aes128Gcm = std.crypto.aead.aes_gcm.Aes128Gcm;
 const Sha256 = std.crypto.hash.sha2.Sha256;
@@ -362,7 +363,7 @@ pub const TLSClient = struct {
                 try self.ks.generateApplicationSecrets(self.msgs_stream.getWritten());
 
                 // construct client finished message
-                const c_finished = try msg.Finished.fromMessageBytes(self.msgs_stream.getWritten(), self.ks.secret.c_hs_finished_secret.slice(), crypto.Hkdf.Sha256.hkdf);
+                const c_finished = try Finished.fromMessageBytes(self.msgs_stream.getWritten(), self.ks.secret.c_hs_finished_secret.slice(), crypto.Hkdf.Sha256.hkdf);
                 const hs_c_finished = Handshake{ .finished = c_finished };
 
                 var c_finished_inner = try record.TLSInnerPlainText.init(hs_c_finished.length(), self.allocator);
@@ -428,7 +429,7 @@ pub const TLSClient = struct {
         self.state = .WAIT_FINISHED;
     }
 
-    fn handleFinished(self: *Self, finished: msg.Finished) !void {
+    fn handleFinished(self: *Self, finished: Finished) !void {
         if (!finished.verify(self.msgs_stream.getWritten(), self.ks.secret.s_hs_finished_secret.slice())) {
             // TODO: Error
             return;
@@ -571,7 +572,7 @@ test "client test with RFC8448" {
     try ks.generateApplicationSecrets(msgs_stream.getWritten());
 
     // Construct client finised message
-    const c_finished = try msg.Finished.fromMessageBytes(msgs_stream.getWritten(), ks.secret.c_hs_finished_secret.slice(), crypto.Hkdf.Sha256.hkdf);
+    const c_finished = try Finished.fromMessageBytes(msgs_stream.getWritten(), ks.secret.c_hs_finished_secret.slice(), crypto.Hkdf.Sha256.hkdf);
     const hs_c_finished = Handshake{ .finished = c_finished };
 
     const c_finished_ans = [_]u8{ 0x14, 0x0, 0x0, 0x20, 0xa8, 0xec, 0x43, 0x6d, 0x67, 0x76, 0x34, 0xae, 0x52, 0x5a, 0xc1, 0xfc, 0xeb, 0xe1, 0x1a, 0x03, 0x9e, 0xc1, 0x76, 0x94, 0xfa, 0xc6, 0xe9, 0x85, 0x27, 0xb6, 0x42, 0xf2, 0xed, 0xd5, 0xce, 0x61 };

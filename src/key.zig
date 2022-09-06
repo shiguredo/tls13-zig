@@ -61,8 +61,8 @@ pub const KeyScheduler = struct {
     }
 
     // RFC8446 Section 5.3 Pre-Record Nonce
-    pub fn generateNonce(self: Self, iv: []const u8, count: u64) !crypto.Secret.NonceBoundedArray {
-        var nonce = try crypto.Secret.NonceBoundedArray.init(self.aead.nonce_length);
+    pub fn generateNonce(self: Self, iv: []const u8, count: u64) !crypto.NonceBoundedArray {
+        var nonce = try crypto.NonceBoundedArray.init(self.aead.nonce_length);
         var i: usize = 0;
 
         // BoundedArray must be 0-initialized.

@@ -140,12 +140,12 @@ pub const Aead = struct {
     };
 };
 
-pub const Secret = struct {
-    // TODO: Is using allocator better in terms of spece efficiency?
-    pub const DigestBoundedArray = BoundedArray(u8, Hkdf.MAX_DIGEST_LENGTH);
-    pub const KeyBoundedArray = BoundedArray(u8, Aead.MAX_KEY_LEGNTH);
-    pub const NonceBoundedArray = BoundedArray(u8, Aead.MAX_NONCE_LENGTH);
+// TODO: Is using allocator better in terms of spece efficiency?
+pub const DigestBoundedArray = BoundedArray(u8, Hkdf.MAX_DIGEST_LENGTH);
+pub const KeyBoundedArray = BoundedArray(u8, Aead.MAX_KEY_LEGNTH);
+pub const NonceBoundedArray = BoundedArray(u8, Aead.MAX_NONCE_LENGTH);
 
+pub const Secret = struct {
     early_secret: DigestBoundedArray,
 
     hs_derived_secret: DigestBoundedArray,

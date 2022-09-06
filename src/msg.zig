@@ -11,6 +11,7 @@ const Extension = @import("extension.zig").Extension;
 const ExtensionType = @import("extension.zig").ExtensionType;
 const ServerHello = @import("server_hello.zig").ServerHello;
 const ClientHello = @import("client_hello.zig").ClientHello;
+const Finished = @import("finished.zig").Finished;
 const Handshake = @import("handshake.zig").Handshake;
 const HandshakeType = @import("handshake.zig").HandshakeType;
 
@@ -156,63 +157,6 @@ pub fn getExtension(extensions: ArrayList(Extension), ext_type: ExtensionType) !
     return ExtensionError.ExtensionNotFound;
 }
 
-pub const Finished = struct {
-    const my_crypto = @import("crypto.zig");
-    const MAX_DIGEST_LENGTH = my_crypto.Hkdf.MAX_DIGEST_LENGTH;
-
-    hkdf: my_crypto.Hkdf,
-    verify_data: BoundedArray(u8, MAX_DIGEST_LENGTH) = undefined,
-
-    const Self = @This();
-
-    pub fn init(hkdf: my_crypto.Hkdf) !Self {
-        return Self{
-            .hkdf = hkdf,
-            .verify_data = try BoundedArray(u8, MAX_DIGEST_LENGTH).init(hkdf.digest_length),
-        };
-    }
-
-    pub fn deinit(self: Self) void {
-        _ = self;
-    }
-
-    pub fn decode(reader: anytype, hkdf: my_crypto.Hkdf) !Self {
-        var res = try Self.init(hkdf);
-        _ = try reader.readAll(res.verify_data.slice());
-
-        return res;
-    }
-
-    pub fn encode(self: Self, writer: anytype) !usize {
-        try writer.writeAll(self.verify_data.slice());
-        return self.verify_data.len;
-    }
-
-    pub fn length(self: Self) usize {
-        return self.verify_data.len;
-    }
-
-    pub fn fromMessageBytes(m: []const u8, secret: []const u8, hkdf: my_crypto.Hkdf) !Self {
-        var res = try Self.init(hkdf);
-        var hash: [MAX_DIGEST_LENGTH]u8 = undefined;
-        var digest: [MAX_DIGEST_LENGTH]u8 = undefined;
-        hkdf.hash(&hash, m);
-        hkdf.create(&digest, &hash, secret);
-        std.mem.copy(u8, res.verify_data.slice(), digest[0..hkdf.digest_length]);
-
-        return res;
-    }
-
-    pub fn verify(self: Self, m: []const u8, secret: []const u8) bool {
-        var hash: [MAX_DIGEST_LENGTH]u8 = undefined;
-        var digest: [MAX_DIGEST_LENGTH]u8 = undefined;
-        self.hkdf.hash(&hash, m);
-        self.hkdf.create(&digest, &hash, secret);
-
-        return std.mem.eql(u8, digest[0..self.hkdf.digest_length], self.verify_data.slice());
-    }
-};
-
 pub const NewSessionTicket = struct {
     const MAX_TICKET_NONCE_LENGTH = 256;
 
@@ -257,19 +201,3 @@ pub const NewSessionTicket = struct {
         self.extensions.deinit();
     }
 };
-
-const expect = std.testing.expect;
-const expectError = std.testing.expectError;
-
-test "Finished decode" {
-    const recv_data = [_]u8{ 0x14, 0x00, 0x00, 0x20, 0x9b, 0x9b, 0x14, 0x1d, 0x90, 0x63, 0x37, 0xfb, 0xd2, 0xcb, 0xdc, 0xe7, 0x1d, 0xf4, 0xde, 0xda, 0x4a, 0xb4, 0x2c, 0x30, 0x95, 0x72, 0xcb, 0x7f, 0xff, 0xee, 0x54, 0x54, 0xb7, 0x8f, 0x07, 0x18 };
-    var readStream = io.fixedBufferStream(&recv_data);
-
-    const res = try Handshake.decode(readStream.reader(), std.testing.allocator, crypto.Hkdf.Sha256.hkdf);
-    defer res.deinit();
-
-    // check all data was read.
-    try expectError(error.EndOfStream, readStream.reader().readByte());
-
-    try expect(res == .finished);
-}

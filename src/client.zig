@@ -21,6 +21,7 @@ const x509 = @import("x509.zig");
 const ServerHello = @import("server_hello.zig").ServerHello;
 const ClientHello = @import("client_hello.zig").ClientHello;
 const Handshake = @import("handshake.zig").Handshake;
+const EncryptedExtensions = @import("encrypted_extensions.zig").EncryptedExtensions;
 
 const Aes128Gcm = std.crypto.aead.aes_gcm.Aes128Gcm;
 const Sha256 = std.crypto.hash.sha2.Sha256;
@@ -382,7 +383,7 @@ pub const TLSClient = struct {
         // done
     }
 
-    fn handleEncryptedExtensions(self: *Self, ee: msg.EncryptedExtensions) !void {
+    fn handleEncryptedExtensions(self: *Self, ee: EncryptedExtensions) !void {
         _ = self;
         _ = ee;
         // TODO: what to do?

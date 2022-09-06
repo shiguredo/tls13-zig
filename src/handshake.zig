@@ -3,6 +3,7 @@ const std = @import("std");
 const msg = @import("msg.zig");
 const ClientHello = @import("client_hello.zig").ClientHello;
 const ServerHello = @import("server_hello.zig").ServerHello;
+const EncryptedExtensions = @import("encrypted_extensions.zig").EncryptedExtensions;
 const Certificate = @import("certificate.zig").Certificate;
 const CertificateVerify = @import("certificate.zig").CertificateVerify;
 const Hkdf = @import("crypto.zig").Hkdf;
@@ -60,7 +61,7 @@ pub const Handshake = union(HandshakeType) {
     client_hello: ClientHello,
     server_hello: ServerHello,
     new_session_ticket: msg.NewSessionTicket,
-    encrypted_extensions: msg.EncryptedExtensions,
+    encrypted_extensions: EncryptedExtensions,
     certificate: Certificate,
     certificate_verify: CertificateVerify,
     finished: msg.Finished,
@@ -87,7 +88,7 @@ pub const Handshake = union(HandshakeType) {
             .client_hello => return Self{ .client_hello = try ClientHello.decode(reader, allocator) },
             .server_hello => return Self{ .server_hello = try ServerHello.decode(reader, allocator) },
             .new_session_ticket => return Self{ .new_session_ticket = try msg.NewSessionTicket.decode(reader, allocator) },
-            .encrypted_extensions => return Self{ .encrypted_extensions = try msg.EncryptedExtensions.decode(reader, allocator) },
+            .encrypted_extensions => return Self{ .encrypted_extensions = try EncryptedExtensions.decode(reader, allocator) },
             .certificate => return Self{ .certificate = try Certificate.decode(reader, allocator) },
             .certificate_verify => return Self{ .certificate_verify = try CertificateVerify.decode(reader, allocator) },
             .finished => if (hkdf) |h| {

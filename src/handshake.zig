@@ -7,6 +7,7 @@ const EncryptedExtensions = @import("encrypted_extensions.zig").EncryptedExtensi
 const Certificate = @import("certificate.zig").Certificate;
 const CertificateVerify = @import("certificate.zig").CertificateVerify;
 const Finished = @import("finished.zig").Finished;
+const NewSessionTicket = @import("new_session_ticket.zig").NewSessionTicket;
 const Hkdf = @import("crypto.zig").Hkdf;
 
 /// RFC8446 Secion 4 Handshake Protocol
@@ -61,7 +62,7 @@ pub const HandshakeType = enum(u8) {
 pub const Handshake = union(HandshakeType) {
     client_hello: ClientHello,
     server_hello: ServerHello,
-    new_session_ticket: msg.NewSessionTicket,
+    new_session_ticket: NewSessionTicket,
     encrypted_extensions: EncryptedExtensions,
     certificate: Certificate,
     certificate_verify: CertificateVerify,
@@ -88,7 +89,7 @@ pub const Handshake = union(HandshakeType) {
         switch (t) {
             .client_hello => return Self{ .client_hello = try ClientHello.decode(reader, allocator) },
             .server_hello => return Self{ .server_hello = try ServerHello.decode(reader, allocator) },
-            .new_session_ticket => return Self{ .new_session_ticket = try msg.NewSessionTicket.decode(reader, allocator) },
+            .new_session_ticket => return Self{ .new_session_ticket = try NewSessionTicket.decode(reader, allocator) },
             .encrypted_extensions => return Self{ .encrypted_extensions = try EncryptedExtensions.decode(reader, allocator) },
             .certificate => return Self{ .certificate = try Certificate.decode(reader, allocator) },
             .certificate_verify => return Self{ .certificate_verify = try CertificateVerify.decode(reader, allocator) },

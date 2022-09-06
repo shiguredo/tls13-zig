@@ -14,7 +14,9 @@ OPENSSL_SERVER_PID=$!
 cd ../
 
 # Let's test!
-zig run src/main.zig
+zig run src/main.zig  2>&1 | grep "HTTP/1.0 200 ok"
+
+set +e
 
 ps aux | grep openssl
 # Stop openssl server

@@ -23,6 +23,7 @@ const ClientHello = @import("client_hello.zig").ClientHello;
 const Handshake = @import("handshake.zig").Handshake;
 const EncryptedExtensions = @import("encrypted_extensions.zig").EncryptedExtensions;
 const Finished = @import("finished.zig").Finished;
+const CertificateVerify = @import("certificate_verify.zig").CertificateVerify;
 
 const Aes128Gcm = std.crypto.aead.aes_gcm.Aes128Gcm;
 const Sha256 = std.crypto.hash.sha2.Sha256;
@@ -409,7 +410,7 @@ pub const TLSClient = struct {
         self.state = .WAIT_CV;
     }
 
-    fn handleCertificateVerify(self: *Self, cert_verify: certificate.CertificateVerify) !void {
+    fn handleCertificateVerify(self: *Self, cert_verify: CertificateVerify) !void {
         // TODO: verify certificate
         const sig = try P256.Signature.fromDer(cert_verify.signature);
         _ = sig;

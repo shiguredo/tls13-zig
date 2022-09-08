@@ -221,7 +221,7 @@ test "ClientHello decode & encode" {
     try expect(res.extensions.items[2] == .key_share);
     const ks = res.extensions.items[2].key_share;
     try expect(ks.entries.items.len == 1);
-    try expect(ks.entries.items[0] == .x25519);
+    try expect(ks.entries.items[0].group == .x25519);
 
     try expect(res.extensions.items[3] == .signature_algorithms);
     const sa = res.extensions.items[3].signature_algorithms;

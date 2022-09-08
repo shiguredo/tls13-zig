@@ -213,7 +213,7 @@ test "ServerHello decode & encode" {
     // check key_share selected group is secp256r1
     const ks = res.extensions.items[1].key_share;
     try expect(ks.entries.items.len == 1);
-    try expect(ks.entries.items[0] == .secp256r1);
+    try expect(ks.entries.items[0].group == .secp256r1);
 
     var send_bytes: [1000]u8 = undefined;
     var stream = io.fixedBufferStream(&send_bytes);

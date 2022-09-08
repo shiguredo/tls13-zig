@@ -118,9 +118,9 @@ pub const TLSClient = struct {
         // Extension KeyShare
         // currently, only x25519 and secp256r1 are supported
         var ks = key_share.KeyShare.init(self.allocator, .client_hello, false);
-        var entry_x25519 = key_share.EntryX25519{};
-        std.mem.copy(u8, &entry_x25519.key_exchange, &self.x25519_pub_key);
-        try ks.entries.append(.{ .x25519 = entry_x25519 });
+        var entry_x25519 = try key_share.KeyShareEntry.init(.x25519, 32, self.allocator);
+        std.mem.copy(u8, entry_x25519.key_exchange, &self.x25519_pub_key);
+        try ks.entries.append(entry_x25519);
         try client_hello.extensions.append(.{ .key_share = ks });
 
         // Extension Signature Algorithms
@@ -300,13 +300,13 @@ pub const TLSClient = struct {
         }
 
         const key_entry = ks.entries.items[0];
-        if (key_entry != .x25519) {
+        if (key_entry.group != .x25519) {
             // TODO: Error
             return;
         }
 
-        const server_pubkey = key_entry.x25519.key_exchange;
-        const shared_key = try dh.X25519.scalarmult(self.x25519_priv_key, server_pubkey);
+        const server_pubkey = key_entry.key_exchange;
+        const shared_key = try dh.X25519.scalarmult(self.x25519_priv_key, server_pubkey[0..32].*);
         try self.ks.generateEarlySecrets(&shared_key, &([_]u8{0} ** 32));
         try self.ks.generateHandshakeSecrets(self.msgs_stream.getWritten());
 
@@ -484,14 +484,14 @@ test "client test with RFC8448" {
     try expect(server_hello.cipher_suite == .TLS_AES_128_GCM_SHA256);
     const k_s = (try msg.getExtension(server_hello.extensions, .key_share)).key_share;
     try expect(k_s.entries.items.len == 1);
-    try expect(k_s.entries.items[0] == .x25519);
+    try expect(k_s.entries.items[0].group == .x25519);
 
-    const server_pubkey = k_s.entries.items[0].x25519.key_exchange;
+    const server_pubkey = k_s.entries.items[0].key_exchange;
 
     const protector = record.RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead);
 
     const dhe_shared_key_ans = [_]u8{ 0x8b, 0xd4, 0x05, 0x4f, 0xb5, 0x5b, 0x9d, 0x63, 0xfd, 0xfb, 0xac, 0xf9, 0xf0, 0x4b, 0x9f, 0x0d, 0x35, 0xe6, 0xd6, 0x3f, 0x53, 0x75, 0x63, 0xef, 0xd4, 0x62, 0x72, 0x90, 0x0f, 0x89, 0x49, 0x2d };
-    const dhe_shared_key = try dh.X25519.scalarmult(client_privkey, server_pubkey);
+    const dhe_shared_key = try dh.X25519.scalarmult(client_privkey, server_pubkey[0..32].*);
     try expect(std.mem.eql(u8, &dhe_shared_key, &dhe_shared_key_ans));
 
     var ks = try key.KeyScheduler.init(crypto.Hkdf.Sha256.hkdf, crypto.Aead.Aes128Gcm.aead);

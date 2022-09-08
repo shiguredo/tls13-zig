@@ -85,7 +85,7 @@ pub const Extension = union(ExtensionType) {
     pub fn decode(reader: anytype, allocator: std.mem.Allocator, ht: HandshakeType, hello_retry: bool) !Self {
         // Decoding ExtensionType.
         const t = @intToEnum(ExtensionType, try reader.readIntBig(u16));
-        
+
         // Decoding extension_data.
         const len = try reader.readIntBig(u16); // TODO: check readable length of reader
         if (len == 0) {
@@ -171,7 +171,6 @@ pub const Extension = union(ExtensionType) {
             .key_share => |e| e.print(),
         }
     }
-
 };
 
 //RFC8449 Record Size Limit Extension for TLS

@@ -42,7 +42,7 @@ pub const Certificate = struct {
         const ctx_len = try reader.readIntBig(u16);
         var res = try Self.init(ctx_len, allocator);
         errdefer res.deinit();
-        
+
         // Decoding certificate_request_context.
         _ = try reader.readAll(res.cert_req_ctx.slice());
 
@@ -93,13 +93,11 @@ pub const Certificate = struct {
 ///     RawPublicKey(2),
 ///     (255)
 /// } CertificateType;
-
 /// struct {
 ///     select (certificate_type) {
 ///         case RawPublicKey:
 ///           /* From RFC 7250 ASN.1_subjectPublicKeyInfo */
 ///           opaque ASN1_subjectPublicKeyInfo<1..2^24-1>;
-
 ///         case X509:
 ///           opaque cert_data<1..2^24-1>;
 ///     };
@@ -113,9 +111,7 @@ pub const CertificateEntry = struct {
 
     const Self = @This();
 
-    const Error = error {
-        UnsupportedCertificate
-    };
+    const Error = error{UnsupportedCertificate};
 
     /// deocde CertificateEntry message reading from io.Reader.
     /// @param reader    io.Reader to read messages.

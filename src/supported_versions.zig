@@ -12,7 +12,6 @@ const HandshakeType = @import("handshake.zig").HandshakeType;
 ///     select (Handshake.msg_type) {
 ///         case client_hello:
 ///              ProtocolVersion versions<2..254>;
-
 ///         case server_hello: /* and HelloRetryRequest */
 ///              ProtocolVersion selected_version;
 ///     };
@@ -32,7 +31,7 @@ pub const SupportedVersions = struct {
     /// initialize SupportedVersions.
     /// @param ht HandshakeType to specify structure of Supportedversions.
     /// @return initialized SupportedVersions.
-    pub fn init(ht: HandshakeType) !Self{
+    pub fn init(ht: HandshakeType) !Self {
         return Self{
             .versions = try BoundedArray(u16, MAX_VERSIONS_LENGTH).init(0),
             .ht = ht,

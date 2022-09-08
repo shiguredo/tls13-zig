@@ -1,7 +1,7 @@
 const std = @import("std");
 const SupportedGroups = @import("groups.zig").SupportedGroups;
 const SupportedVersions = @import("supported_versions.zig").SupportedVersions;
-const SignatureAlgorithms = @import("signatures.zig").SignatureAlgorithms;
+const SignatureSchemeList = @import("signature_scheme.zig").SignatureSchemeList;
 const KeyShare = @import("key_share.zig").KeyShare;
 const HandshakeType = @import("handshake.zig").HandshakeType;
 
@@ -17,7 +17,7 @@ pub const ExtensionType = enum(u16) {
 pub const Extension = union(ExtensionType) {
     server_name: ServerName,
     supported_groups: SupportedGroups,
-    signature_algorithms: SignatureAlgorithms,
+    signature_algorithms: SignatureSchemeList,
     record_size_limit: RecordSizeLimit,
     supported_versions: SupportedVersions,
     key_share: KeyShare,
@@ -36,7 +36,7 @@ pub const Extension = union(ExtensionType) {
             switch (t) {
                 ExtensionType.server_name => return Self{ .server_name = try ServerName.decode(reader) },
                 ExtensionType.supported_groups => return Self{ .supported_groups = try SupportedGroups.decode(reader, allocator) },
-                ExtensionType.signature_algorithms => return Self{ .signature_algorithms = try SignatureAlgorithms.decode(reader, allocator) },
+                ExtensionType.signature_algorithms => return Self{ .signature_algorithms = try SignatureSchemeList.decode(reader, allocator) },
                 ExtensionType.record_size_limit => return Self{ .record_size_limit = try RecordSizeLimit.decode(reader) },
                 ExtensionType.supported_versions => return Self{ .supported_versions = try SupportedVersions.decode(reader, ht) },
                 ExtensionType.key_share => return Self{ .key_share = try KeyShare.decode(reader, allocator, ht, hello_retry) },

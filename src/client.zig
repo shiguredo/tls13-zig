@@ -15,7 +15,7 @@ const certificate = @import("certificate.zig");
 const key_share = @import("key_share.zig");
 const SupportedVersions = @import("supported_versions.zig").SupportedVersions;
 const groups = @import("groups.zig");
-const signatures = @import("signatures.zig");
+const signature_scheme = @import("signature_scheme.zig");
 const crypto = @import("crypto.zig");
 const x509 = @import("x509.zig");
 const ServerHello = @import("server_hello.zig").ServerHello;
@@ -124,8 +124,8 @@ pub const TLSClient = struct {
 
         // Extension Signature Algorithms
         // currently, supported algorithms are temporary.
-        var sa = signatures.SignatureAlgorithms.init(self.allocator);
-        try sa.algos.append(signatures.SignatureAlgorithm.ecdsa_secp256r1_sha256);
+        var sa = signature_scheme.SignatureSchemeList.init(self.allocator);
+        try sa.algos.append(signature_scheme.SignatureScheme.ecdsa_secp256r1_sha256);
         //try sa.algos.append(signatures.SignatureAlgorithm.ed25519);
         //try sa.algos.append(signatures.SignatureAlgorithm.rsa_pss_rsae_sha384);
         try client_hello.extensions.append(.{ .signature_algorithms = sa });

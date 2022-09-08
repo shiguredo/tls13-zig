@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 const expect = std.testing.expect;
 const expectError = std.testing.expectError;
 
-const SignatureAlgorithm = @import("signatures.zig").SignatureAlgorithm;
+const SignatureScheme = @import("signature_scheme.zig").SignatureScheme;
 
 /// RFC8446 Section 4.4.3 Certificate Verify
 ///
@@ -15,7 +15,7 @@ const SignatureAlgorithm = @import("signatures.zig").SignatureAlgorithm;
 /// } CertificateVerify;
 ///
 pub const CertificateVerify = struct {
-    algorithm: SignatureAlgorithm,
+    algorithm: SignatureScheme,
     signature: []u8 = &([_]u8{}),
 
     allocator: std.mem.Allocator,
@@ -28,7 +28,7 @@ pub const CertificateVerify = struct {
     /// @return the result of decoded CertificateVerify.
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
         // Decoding SignatureAlgorithm.
-        const algorithm = @intToEnum(SignatureAlgorithm, try reader.readIntBig(u16));
+        const algorithm = @intToEnum(SignatureScheme, try reader.readIntBig(u16));
 
         // Decoding signature.
         const sig_len = try reader.readIntBig(u16);
@@ -49,7 +49,7 @@ pub const CertificateVerify = struct {
     pub fn length(self: Self) usize {
         var len: usize = 0;
 
-        len += @sizeOf(SignatureAlgorithm); // signature algorithm
+        len += @sizeOf(SignatureScheme); // signature algorithm
         len += @sizeOf(u16); // signature length
         len += self.signature.len;
 

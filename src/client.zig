@@ -13,7 +13,7 @@ const record = @import("record.zig");
 const extension = @import("extension.zig");
 const certificate = @import("certificate.zig");
 const key_share = @import("key_share.zig");
-const versions = @import("versions.zig");
+const SupportedVersions = @import("supported_versions.zig").SupportedVersions;
 const groups = @import("groups.zig");
 const signatures = @import("signatures.zig");
 const crypto = @import("crypto.zig");
@@ -104,7 +104,7 @@ pub const TLSClient = struct {
         try client_hello.cipher_suites.append(.TLS_AES_128_GCM_SHA256);
 
         // Extension SupportedVresions
-        var sv = versions.SupportedVersions.init(.client_hello, self.allocator);
+        var sv = try SupportedVersions.init(.client_hello);
         try sv.versions.append(0x0304); //TLSv1.3
         try client_hello.extensions.append(.{ .supported_versions = sv });
 

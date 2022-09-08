@@ -1,6 +1,6 @@
 const std = @import("std");
 const SupportedGroups = @import("groups.zig").SupportedGroups;
-const SupportedVersions = @import("versions.zig").SupportedVersions;
+const SupportedVersions = @import("supported_versions.zig").SupportedVersions;
 const SignatureAlgorithms = @import("signatures.zig").SignatureAlgorithms;
 const KeyShare = @import("key_share.zig").KeyShare;
 const HandshakeType = @import("handshake.zig").HandshakeType;
@@ -38,7 +38,7 @@ pub const Extension = union(ExtensionType) {
                 ExtensionType.supported_groups => return Self{ .supported_groups = try SupportedGroups.decode(reader, allocator) },
                 ExtensionType.signature_algorithms => return Self{ .signature_algorithms = try SignatureAlgorithms.decode(reader, allocator) },
                 ExtensionType.record_size_limit => return Self{ .record_size_limit = try RecordSizeLimit.decode(reader) },
-                ExtensionType.supported_versions => return Self{ .supported_versions = try SupportedVersions.decode(reader, allocator, ht) },
+                ExtensionType.supported_versions => return Self{ .supported_versions = try SupportedVersions.decode(reader, ht) },
                 ExtensionType.key_share => return Self{ .key_share = try KeyShare.decode(reader, allocator, ht, hello_retry) },
             }
         }
@@ -93,7 +93,7 @@ pub const Extension = union(ExtensionType) {
         switch (self) {
             ExtensionType.supported_groups => |e| e.deinit(),
             ExtensionType.signature_algorithms => |e| e.deinit(),
-            ExtensionType.supported_versions => |e| e.deinit(),
+            ExtensionType.supported_versions => {},
             ExtensionType.key_share => |e| e.deinit(),
             else => {},
         }

@@ -3,12 +3,25 @@ const io = std.io;
 const log = std.log;
 const assert = std.debug.assert;
 const msg = @import("msg.zig");
-const ArrayList = std.ArrayList;
+const BoundedArray = std.BoundedArray;
 const HandshakeType = @import("handshake.zig").HandshakeType;
 
+/// RFC8446 Section 4.2.1 Supported Versions
+///
+/// struct {
+///     select (Handshake.msg_type) {
+///         case client_hello:
+///              ProtocolVersion versions<2..254>;
+
+///         case server_hello: /* and HelloRetryRequest */
+///              ProtocolVersion selected_version;
+///     };
+/// } SupportedVersions;
+///
 pub const SupportedVersions = struct {
-    versions: ArrayList(u16) = undefined,
-    ht: HandshakeType = undefined,
+    const MAX_VERSIONS_LENGTH: usize = 127;
+    versions: BoundedArray(u16, MAX_VERSIONS_LENGTH),
+    ht: HandshakeType,
 
     const Self = @This();
 
@@ -16,25 +29,28 @@ pub const SupportedVersions = struct {
         InvalidVersionsLength,
     };
 
-    pub fn init(ht: HandshakeType, allocator: std.mem.Allocator) Self {
-        return .{
-            .versions = ArrayList(u16).init(allocator),
+    /// initialize SupportedVersions.
+    /// @param ht HandshakeType to specify structure of Supportedversions.
+    /// @return initialized SupportedVersions.
+    pub fn init(ht: HandshakeType) !Self{
+        return Self{
+            .versions = try BoundedArray(u16, MAX_VERSIONS_LENGTH).init(0),
             .ht = ht,
         };
     }
 
-    pub fn deinit(self: Self) void {
-        self.versions.deinit();
-    }
+    /// decode SupportedVersions extension reading from io.Reader.
+    /// @param reader io.Reader to read messages.
+    /// @param ht     HandshakeType to specify structure of SupportedVersions.
+    /// @return the result of decoded SupportedVersions.
+    pub fn decode(reader: anytype, ht: HandshakeType) !Self {
+        var res = try Self.init(ht);
 
-    pub fn decode(reader: anytype, allocator: std.mem.Allocator, ht: HandshakeType) !Self {
-        var res = Self.init(ht, allocator);
-        errdefer res.deinit();
-
-        switch (res.ht) {
+        // Structure of SupportedVersions varies based on HandshakeType.
+        switch (ht) {
             .client_hello => {
+                // Decoding versions
                 var supported_len = try reader.readIntBig(u8);
-
                 if (supported_len % 2 != 0) {
                     return Error.InvalidVersionsLength;
                 }
@@ -53,21 +69,27 @@ pub const SupportedVersions = struct {
         return res;
     }
 
+    /// encode SupportedVersions writing to io.Writer.
+    /// @param self   SupportedVersions to be encoded.
+    /// @param writer io.Writer to write encoded SuppoertedVersions.
+    /// @return length of encoded SupportedVersions.
     pub fn encode(self: Self, writer: anytype) !usize {
         var len: usize = 0;
 
+        // Structure of SupportedVersions varies based on HandshakeType.
         switch (self.ht) {
             .client_hello => {
-                try writer.writeIntBig(u8, @intCast(u8, self.versions.items.len * @sizeOf(u16)));
+                // Encoding versions.
+                try writer.writeIntBig(u8, @intCast(u8, self.versions.len * @sizeOf(u16)));
                 len += @sizeOf(u8);
 
-                for (self.versions.items) |version| {
+                for (self.versions.slice()) |version| {
                     try writer.writeIntBig(u16, version);
                     len += @sizeOf(u16);
                 }
             },
             .server_hello => {
-                try writer.writeIntBig(u16, self.versions.items[0]);
+                try writer.writeIntBig(u16, self.versions.slice()[0]);
                 len += @sizeOf(u16);
             },
             else => unreachable,
@@ -76,12 +98,15 @@ pub const SupportedVersions = struct {
         return len;
     }
 
+    /// get the length of encoded SupportedVersions.
+    /// @param self the target SupportedVersions.
+    /// @return length of encoded SupportedVersions.
     pub fn length(self: Self) usize {
         var len: usize = 0;
         switch (self.ht) {
             .client_hello => {
                 len += @sizeOf(u8); // supported versions length
-                len += self.versions.items.len * @sizeOf(u16);
+                len += self.versions.len * @sizeOf(u16);
             },
             .server_hello => {
                 len += @sizeOf(u16); // version.cli
@@ -104,15 +129,13 @@ test "SupportedVersions decode" {
     const recv_data = [_]u8{ 0x02, 0x03, 0x04 };
     var readStream = io.fixedBufferStream(&recv_data);
 
-    const res = try SupportedVersions.decode(readStream.reader(), std.testing.allocator, .client_hello);
-    defer res.deinit();
+    const res = try SupportedVersions.decode(readStream.reader(), .client_hello);
     try expect(res.ht == .client_hello);
-    try expect(res.versions.items[0] == 0x0304);
+    try expect(res.versions.get(0) == 0x0304);
 }
 
 test "SuppoertedVersions encode" {
-    var res = SupportedVersions.init(.client_hello, std.testing.allocator);
-    defer res.deinit();
+    var res = try SupportedVersions.init(.client_hello);
 
     try res.versions.append(0x0304);
 

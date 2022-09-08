@@ -15,20 +15,6 @@ const Finished = @import("finished.zig").Finished;
 const Handshake = @import("handshake.zig").Handshake;
 const HandshakeType = @import("handshake.zig").HandshakeType;
 
-pub const NamedGroup = enum(u16) {
-    x25519 = 0x001D,
-    x448 = 0x001e,
-    secp256r1 = 0x0017,
-    secp384r1 = 0x0018,
-    secp521r1 = 0x0019,
-
-    ffdhe2048 = 0x0100,
-    ffdhe3072 = 0x0101,
-    ffdhe4096 = 0x0102,
-    ffdhe6144 = 0x0103,
-    ffdhe8192 = 0x0104,
-};
-
 pub const CipherSuite = enum(u16) {
     TLS_AES_128_GCM_SHA256 = 0x1301,
     TLS_AES_256_GCM_SHA384 = 0x1302,

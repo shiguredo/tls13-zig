@@ -4,7 +4,7 @@ const log = std.log;
 const assert = std.debug.assert;
 const msg = @import("msg.zig");
 const ArrayList = std.ArrayList;
-const NamedGroup = msg.NamedGroup;
+const NamedGroup = @import("supported_groups.zig").NamedGroup;
 const HandshakeType = @import("handshake.zig").HandshakeType;
 const Extension = @import("extension.zig").Extension;
 

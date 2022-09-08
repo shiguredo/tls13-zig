@@ -14,7 +14,6 @@ const extension = @import("extension.zig");
 const certificate = @import("certificate.zig");
 const key_share = @import("key_share.zig");
 const SupportedVersions = @import("supported_versions.zig").SupportedVersions;
-const groups = @import("groups.zig");
 const signature_scheme = @import("signature_scheme.zig");
 const crypto = @import("crypto.zig");
 const x509 = @import("x509.zig");
@@ -24,6 +23,8 @@ const Handshake = @import("handshake.zig").Handshake;
 const EncryptedExtensions = @import("encrypted_extensions.zig").EncryptedExtensions;
 const Finished = @import("finished.zig").Finished;
 const CertificateVerify = @import("certificate_verify.zig").CertificateVerify;
+const NamedGroup = @import("supported_groups.zig").NamedGroup;
+const NamedGroupList = @import("supported_groups.zig").NamedGroupList;
 
 const Aes128Gcm = std.crypto.aead.aes_gcm.Aes128Gcm;
 const Sha256 = std.crypto.hash.sha2.Sha256;
@@ -110,8 +111,8 @@ pub const TLSClient = struct {
 
         // Extension SupportedGroups
         // currently, only x25519 and secp256r1 are supported.
-        var sg = groups.SupportedGroups.init(self.allocator);
-        try sg.groups.append(msg.NamedGroup.x25519);
+        var sg = NamedGroupList.init(self.allocator);
+        try sg.groups.append(NamedGroup.x25519);
         try client_hello.extensions.append(.{ .supported_groups = sg });
 
         // Extension KeyShare

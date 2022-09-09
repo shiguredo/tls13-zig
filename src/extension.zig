@@ -94,7 +94,7 @@ pub const Extension = union(ExtensionType) {
         // Decoding extension_data.
         const len = try reader.readIntBig(u16); // TODO: check readable length of reader
 
-        // If the length is 0, return error.
+        // If the length is 0, 'none'.
         if (len == 0) {
             return Self{ .none = [0]u8{} };
         }
@@ -116,6 +116,7 @@ pub const Extension = union(ExtensionType) {
     /// @return length of encoded Extension.
     pub fn encode(self: Self, writer: anytype) !usize {
         if (self == .none) {
+            // do not encode 'none'.
             unreachable;
         }
 

@@ -522,7 +522,7 @@ test "client test with RFC8448" {
     try expect(enc_ext.extensions.items.len == 3);
     try expect(enc_ext.extensions.items[0] == .supported_groups);
     try expect(enc_ext.extensions.items[1] == .record_size_limit);
-    try expect(enc_ext.extensions.items[2] == .server_name);
+    try expect(enc_ext.extensions.items[2] == .none); //server name
 
     // STATE = WAIT_CERT_CR
 

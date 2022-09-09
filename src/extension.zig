@@ -4,6 +4,7 @@ const SupportedVersions = @import("supported_versions.zig").SupportedVersions;
 const SignatureSchemeList = @import("signature_scheme.zig").SignatureSchemeList;
 const KeyShare = @import("key_share.zig").KeyShare;
 const RecordSizeLimit = @import("record_size_limit.zig").RecordSizeLimit;
+const ServerNameList = @import("server_name.zig").ServerNameList;
 const HandshakeType = @import("handshake.zig").HandshakeType;
 
 /// RFC8446 Section 4.2 Extensions
@@ -58,6 +59,7 @@ pub const ExtensionType = enum(u16) {
     // post_handshake_auth = 49,
     // signature_algorithms_cert = 50,
     key_share = 51,
+    none = 65535,
 };
 
 /// RFC8446 Section 4.2 Extensions
@@ -68,14 +70,16 @@ pub const ExtensionType = enum(u16) {
 /// } Extension;
 ///
 pub const Extension = union(ExtensionType) {
-    server_name: ServerName,
+    server_name: ServerNameList,
     supported_groups: NamedGroupList,
     signature_algorithms: SignatureSchemeList,
     record_size_limit: RecordSizeLimit,
     supported_versions: SupportedVersions,
     key_share: KeyShare,
+    none: [0]u8,
 
     const Self = @This();
+    pub const HEADER_LENGTH = @sizeOf(u16) + @sizeOf(u16);
 
     /// decode Extension reading from io.Reader.
     /// @param reader      io.Reader to read messages.
@@ -89,21 +93,20 @@ pub const Extension = union(ExtensionType) {
 
         // Decoding extension_data.
         const len = try reader.readIntBig(u16); // TODO: check readable length of reader
+
+        // If the length is 0, return error.
         if (len == 0) {
-            switch (t) {
-                // server_name may be zero length
-                .server_name => return Self{ .server_name = .{} },
-                else => unreachable,
-            }
-        } else {
-            switch (t) {
-                .server_name => return Self{ .server_name = try ServerName.decode(reader) },
-                .supported_groups => return Self{ .supported_groups = try NamedGroupList.decode(reader, allocator) },
-                .signature_algorithms => return Self{ .signature_algorithms = try SignatureSchemeList.decode(reader, allocator) },
-                .record_size_limit => return Self{ .record_size_limit = try RecordSizeLimit.decode(reader) },
-                .supported_versions => return Self{ .supported_versions = try SupportedVersions.decode(reader, ht) },
-                .key_share => return Self{ .key_share = try KeyShare.decode(reader, allocator, ht, hello_retry) },
-            }
+            return Self{ .none = [0]u8{} };
+        }
+
+        switch (t) {
+            .server_name => return Self{ .server_name = try ServerNameList.decode(reader, allocator) },
+            .supported_groups => return Self{ .supported_groups = try NamedGroupList.decode(reader, allocator) },
+            .signature_algorithms => return Self{ .signature_algorithms = try SignatureSchemeList.decode(reader, allocator) },
+            .record_size_limit => return Self{ .record_size_limit = try RecordSizeLimit.decode(reader) },
+            .supported_versions => return Self{ .supported_versions = try SupportedVersions.decode(reader, ht) },
+            .key_share => return Self{ .key_share = try KeyShare.decode(reader, allocator, ht, hello_retry) },
+            .none => unreachable,
         }
     }
 
@@ -112,6 +115,10 @@ pub const Extension = union(ExtensionType) {
     /// @param writer io.Writer to write encoded Extension.
     /// @return length of encoded Extension.
     pub fn encode(self: Self, writer: anytype) !usize {
+        if (self == .none) {
+            unreachable;
+        }
+
         var len: usize = 0;
 
         // Encoding ExtensionType.
@@ -128,6 +135,7 @@ pub const Extension = union(ExtensionType) {
             .record_size_limit => |e| len += try e.encode(writer),
             .supported_versions => |e| len += try e.encode(writer),
             .key_share => |e| len += try e.encode(writer),
+            .none => unreachable,
         }
 
         return len;
@@ -147,6 +155,7 @@ pub const Extension = union(ExtensionType) {
             .record_size_limit => |e| return e.length() + len,
             .supported_versions => |e| return e.length() + len,
             .key_share => |e| return e.length() + len,
+            .none => return len,
         }
     }
 
@@ -154,6 +163,7 @@ pub const Extension = union(ExtensionType) {
     /// @param self Extension to be deinitialized.
     pub fn deinit(self: Self) void {
         switch (self) {
+            .server_name => |e| e.deinit(),
             .supported_groups => |e| e.deinit(),
             .signature_algorithms => |e| e.deinit(),
             .supported_versions => {},
@@ -173,64 +183,3 @@ pub const Extension = union(ExtensionType) {
         }
     }
 };
-
-//RFC6066 Transport Layer Security (TLS) Extensions: Extension Definitions
-pub const ServerName = struct {
-    init: bool = false,
-
-    const Self = @This();
-
-    pub fn init() Self {
-        return .{
-            .init = true,
-        };
-    }
-
-    pub fn decode(reader: anytype) !Self {
-        _ = reader;
-        unreachable;
-    }
-
-    pub fn encode(self: Self, writer: anytype) !usize {
-        if (!self.init) {
-            return 0;
-        }
-        _ = writer;
-
-        unreachable;
-    }
-
-    pub fn length(self: Self) usize {
-        if (!self.init) {
-            return 0;
-        }
-
-        unreachable;
-    }
-
-    pub fn print(self: Self) void {
-        _ = self;
-    }
-};
-
-const io = std.io;
-const expect = std.testing.expect;
-
-test "Extension ServerName decode" {
-    const recv_data = [_]u8{ 0x00, 0x00, 0x00, 0x00 };
-    var readStream = io.fixedBufferStream(&recv_data);
-
-    const res = try Extension.decode(readStream.reader(), std.testing.allocator, .server_hello, false);
-    try expect(res == .server_name);
-}
-
-test "Extension ServerName encode" {
-    const res = ServerName{};
-    const ext = Extension{ .server_name = res };
-
-    const sn_ans = [_]u8{ 0x00, 0x00, 0x00, 0x00 };
-    var send_bytes: [100]u8 = undefined;
-    var stream = io.fixedBufferStream(&send_bytes);
-    const write_len = try ext.encode(stream.writer());
-    try expect(std.mem.eql(u8, send_bytes[0..write_len], &sn_ans));
-}

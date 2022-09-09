@@ -3,6 +3,7 @@ const NamedGroupList = @import("supported_groups.zig").NamedGroupList;
 const SupportedVersions = @import("supported_versions.zig").SupportedVersions;
 const SignatureSchemeList = @import("signature_scheme.zig").SignatureSchemeList;
 const KeyShare = @import("key_share.zig").KeyShare;
+const RecordSizeLimit = @import("record_size_limit.zig").RecordSizeLimit;
 const HandshakeType = @import("handshake.zig").HandshakeType;
 
 /// RFC8446 Section 4.2 Extensions
@@ -173,45 +174,6 @@ pub const Extension = union(ExtensionType) {
     }
 };
 
-//RFC8449 Record Size Limit Extension for TLS
-pub const RecordSizeLimit = struct {
-    record_size_limit: u16 = undefined,
-
-    const Self = @This();
-
-    pub fn init() Self {
-        return .{};
-    }
-
-    pub fn decode(reader: anytype) !Self {
-        var res = Self.init();
-
-        res.record_size_limit = try reader.readIntBig(u16);
-
-        return res;
-    }
-
-    pub fn encode(self: Self, writer: anytype) !usize {
-        var len: usize = 0;
-
-        try writer.writeIntBig(u16, self.record_size_limit);
-        len += @sizeOf(u16);
-
-        return len;
-    }
-
-    pub fn length(self: Self) usize {
-        _ = self;
-        var len: usize = 0;
-        len += @sizeOf(u16); // size limit
-        return len;
-    }
-
-    pub fn print(self: Self) void {
-        _ = self;
-    }
-};
-
 //RFC6066 Transport Layer Security (TLS) Extensions: Extension Definitions
 pub const ServerName = struct {
     init: bool = false,
@@ -253,30 +215,6 @@ pub const ServerName = struct {
 
 const io = std.io;
 const expect = std.testing.expect;
-
-test "Extension RecordSizeLimit decode" {
-    const recv_data = [_]u8{ 0x00, 0x1c, 0x00, 0x02, 0x40, 0x01 };
-    var readStream = io.fixedBufferStream(&recv_data);
-
-    const res = try Extension.decode(readStream.reader(), std.testing.allocator, .server_hello, false);
-    try expect(res == .record_size_limit);
-
-    const rsl = res.record_size_limit;
-    try expect(rsl.record_size_limit == 16385);
-}
-
-test "Extension RecordSizeLimit encode" {
-    const res = RecordSizeLimit{
-        .record_size_limit = 16385,
-    };
-    const ext = Extension{ .record_size_limit = res };
-
-    const rsl_ans = [_]u8{ 0x00, 0x1c, 0x00, 0x02, 0x40, 0x01 };
-    var send_bytes: [100]u8 = undefined;
-    var stream = io.fixedBufferStream(&send_bytes);
-    const write_len = try ext.encode(stream.writer());
-    try expect(std.mem.eql(u8, send_bytes[0..write_len], &rsl_ans));
-}
 
 test "Extension ServerName decode" {
     const recv_data = [_]u8{ 0x00, 0x00, 0x00, 0x00 };

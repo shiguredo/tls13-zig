@@ -7,7 +7,7 @@
 pub const ChangeCipherSpec = struct {
     const Self = @This();
 
-    const Error = error {
+    const Error = error{
         InvalidFormat,
         InvalidValue,
     };
@@ -30,5 +30,4 @@ pub const ChangeCipherSpec = struct {
 
         return Self{};
     }
-
 };

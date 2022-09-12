@@ -22,6 +22,7 @@ const ClientHello = @import("client_hello.zig").ClientHello;
 const Handshake = @import("handshake.zig").Handshake;
 const EncryptedExtensions = @import("encrypted_extensions.zig").EncryptedExtensions;
 const Finished = @import("finished.zig").Finished;
+const Alert = @import("alert.zig").Alert;
 const CertificateVerify = @import("certificate_verify.zig").CertificateVerify;
 const NamedGroup = @import("supported_groups.zig").NamedGroup;
 const NamedGroupList = @import("supported_groups.zig").NamedGroupList;
@@ -248,9 +249,13 @@ pub const TLSClient = struct {
         var tcpBufferedWriter = io.bufferedWriter(writer);
 
         // close connection
-        const c_alert_data = [_]u8{ 0x01, 0x00 }; // ContentType alert(close notify)
+        var close_buf: [2]u8 = undefined;
+        var close_stream = io.fixedBufferStream(&close_buf);
+        const close_notify = Alert{ .level = .warning, .description = .close_notify };
+        _ = try close_notify.encode(close_stream.writer());
+
         var nonce = try self.ks.generateNonce(self.ks.secret.c_ap_iv.slice(), self.send_count);
-        const c_alert_record = try self.protector.encryptFromPlainBytes(&c_alert_data, .alert, nonce.slice(), self.ks.secret.c_ap_key.slice(), self.allocator);
+        const c_alert_record = try self.protector.encryptFromPlainBytes(close_stream.getWritten(), .alert, nonce.slice(), self.ks.secret.c_ap_key.slice(), self.allocator);
         defer c_alert_record.deinit();
         _ = try c_alert_record.encode(tcpBufferedWriter.writer());
         try tcpBufferedWriter.flush();
@@ -271,14 +276,14 @@ pub const TLSClient = struct {
             defer plain_record.deinit();
             self.recv_count += 1;
 
-            if (plain_record.content_type != .alert) {
-                continue;
-            }
+            var plain_record_stream = io.fixedBufferStream(plain_record.content);
+            const alert = try Alert.decode(plain_record_stream.reader(), plain_record.content.len);
 
-            const alert_close = [_]u8{ 0x01, 0x00 };
-            if (std.mem.eql(u8, plain_record.content, &alert_close)) {
-                close_recv = true;
+            if (alert.level != .warning or alert.description != .close_notify) {
+                std.log.warn("invalid close_notify, level={} description={}", .{ alert.level, alert.description });
+                return;
             }
+            close_recv = true;
         }
 
         std.log.info("connection closed", .{});

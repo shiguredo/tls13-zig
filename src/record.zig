@@ -2,6 +2,7 @@ const std = @import("std");
 const io = std.io;
 const Handshake = @import("handshake.zig").Handshake;
 const ChangeCipherSpec = @import("change_cipher_spec.zig").ChangeCipherSpec;
+const Alert = @import("alert.zig").Alert;
 const DecodeError = @import("msg.zig").DecodeError;
 const crypto = @import("crypto.zig");
 
@@ -18,7 +19,7 @@ const Dummy = struct {};
 pub const TLSPlainText = union(ContentType) {
     invalid: Dummy,
     change_cipher_spec: ChangeCipherSpec,
-    alert: Dummy,
+    alert: Alert,
     handshake: Handshake,
     application_data: Dummy,
 

@@ -262,6 +262,10 @@ pub const RecordPayloadProtector = struct {
 
     const Self = @This();
 
+    const Error = error{
+        EncodeFailed,
+    };
+
     pub fn init(aead: crypto.Aead) Self {
         return .{ .aead = aead };
     }
@@ -293,6 +297,30 @@ pub const RecordPayloadProtector = struct {
         std.mem.copy(u8, mt.content, m);
 
         return try self.encrypt(mt, n, k, allocator);
+    }
+
+    pub fn encryptFromMessage(self: Self, m: anytype, content_type: ContentType, n: []const u8, k: []const u8, allocator: std.mem.Allocator) !TLSCipherText {
+        var mt = try TLSInnerPlainText.init(m.length(), allocator);
+        defer mt.deinit();
+
+        mt.content_type = content_type;
+        var stream = io.fixedBufferStream(mt.content);
+        const written = try m.encode(stream.writer());
+        if (written != (try stream.getPos())) {
+            return Error.EncodeFailed;
+        }
+        if ((try stream.getPos()) != (try stream.getEndPos())) {
+            return Error.EncodeFailed;
+        }
+
+        return try self.encrypt(mt, n, k, allocator);
+    }
+
+    pub fn encryptFromMessageAndWrite(self: Self, m: anytype, content_type: ContentType, n: []const u8, k: []const u8, allocator: std.mem.Allocator, writer: anytype) !usize {
+        const et = try self.encryptFromMessage(m, content_type, n, k, allocator);
+        defer et.deinit();
+
+        return try et.encode(writer);
     }
 
     pub fn decrypt(self: Self, c: TLSCipherText, n: []const u8, k: []const u8, allocator: std.mem.Allocator) !TLSInnerPlainText {

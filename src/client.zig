@@ -249,15 +249,16 @@ pub const TLSClient = struct {
         var tcpBufferedWriter = io.bufferedWriter(writer);
 
         // close connection
-        var close_buf: [2]u8 = undefined;
-        var close_stream = io.fixedBufferStream(&close_buf);
         const close_notify = Alert{ .level = .warning, .description = .close_notify };
-        _ = try close_notify.encode(close_stream.writer());
-
         var nonce = try self.ks.generateNonce(self.ks.secret.c_ap_iv.slice(), self.send_count);
-        const c_alert_record = try self.protector.encryptFromPlainBytes(close_stream.getWritten(), .alert, nonce.slice(), self.ks.secret.c_ap_key.slice(), self.allocator);
-        defer c_alert_record.deinit();
-        _ = try c_alert_record.encode(tcpBufferedWriter.writer());
+        _ = try self.protector.encryptFromMessageAndWrite(
+            close_notify,
+            .alert,
+            nonce.slice(),
+            self.ks.secret.c_ap_key.slice(),
+            self.allocator,
+            tcpBufferedWriter.writer(),
+        );
         try tcpBufferedWriter.flush();
 
         var close_recv = false;

@@ -1,6 +1,7 @@
 const std = @import("std");
 const io = std.io;
 const Handshake = @import("handshake.zig").Handshake;
+const ChangeCipherSpec = @import("change_cipher_spec.zig").ChangeCipherSpec;
 const DecodeError = @import("msg.zig").DecodeError;
 const crypto = @import("crypto.zig");
 
@@ -93,27 +94,10 @@ pub const TLSPlainText = union(ContentType) {
 
     pub fn deinit(self: Self) void {
         switch (self) {
-            ContentType.change_cipher_spec => |e| e.deinit(),
+            ContentType.change_cipher_spec => {},
             ContentType.handshake => |e| e.deinit(),
             else => unreachable,
         }
-    }
-};
-
-pub const ChangeCipherSpec = struct {
-    const Self = @This();
-
-    pub fn decode(reader: anytype, length: usize) !Self {
-        var i: usize = 0;
-        while (i < length) : (i += 1) {
-            _ = try reader.readByte();
-        }
-
-        return Self{};
-    }
-
-    pub fn deinit(self: Self) void {
-        _ = self;
     }
 };
 

@@ -1,18 +1,11 @@
 const std = @import("std");
 const log = std.log;
-const io = std.io;
 const assert = std.debug.assert;
-const hmac = std.crypto.auth.hmac;
 const ArrayList = std.ArrayList;
 const BoundedArray = std.BoundedArray;
 
-const crypto = @import("crypto.zig");
 const Extension = @import("extension.zig").Extension;
 const ExtensionType = @import("extension.zig").ExtensionType;
-const ServerHello = @import("server_hello.zig").ServerHello;
-const ClientHello = @import("client_hello.zig").ClientHello;
-const Finished = @import("finished.zig").Finished;
-const Handshake = @import("handshake.zig").Handshake;
 const HandshakeType = @import("handshake.zig").HandshakeType;
 
 pub const CipherSuite = enum(u16) {

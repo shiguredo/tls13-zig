@@ -1,8 +1,10 @@
 const std = @import("std");
 const io = std.io;
+const ArrayList = std.ArrayList;
 const Handshake = @import("handshake.zig").Handshake;
 const ChangeCipherSpec = @import("change_cipher_spec.zig").ChangeCipherSpec;
 const Alert = @import("alert.zig").Alert;
+const ApplicationData = @import("application_data.zig").ApplicationData;
 const DecodeError = @import("msg.zig").DecodeError;
 const crypto = @import("crypto.zig");
 
@@ -14,14 +16,67 @@ pub const ContentType = enum(u8) {
     application_data = 23,
 };
 
-const Dummy = struct {};
-
-pub const TLSPlainText = union(ContentType) {
+pub const Content = union(ContentType) {
     invalid: Dummy,
     change_cipher_spec: ChangeCipherSpec,
     alert: Alert,
     handshake: Handshake,
-    application_data: Dummy,
+    application_data: ApplicationData,
+
+    const Self = @This();
+
+    const Error = error{
+        InvalidLength,
+    };
+
+    pub fn decode(reader: anytype, t: ContentType, len: usize, allocator: std.mem.Allocator, hkdf: ?crypto.Hkdf) !Self {
+        if (t == .application_data and len == 0) {
+            return Error.InvalidLength;
+        }
+        switch (t) {
+            .invalid => unreachable,
+            .change_cipher_spec => return Self{ .change_cipher_spec = try ChangeCipherSpec.decode(reader) },
+            .alert => return Self{ .alert = try Alert.decode(reader) },
+            .handshake => return Self{ .handshake = try Handshake.decode(reader, allocator, hkdf) },
+            .application_data => return Self{ .application_data = try ApplicationData.decode(reader, len, allocator) },
+        }
+    }
+
+    pub fn encode(self: Self, writer: anytype) !usize {
+        switch (self) {
+            .invalid => unreachable,
+            .change_cipher_spec => |e| return try e.encode(writer),
+            .alert => |e| return try e.encode(writer),
+            .handshake => |e| return try e.encode(writer),
+            .application_data => |e| return try e.encode(writer),
+        }
+    }
+
+    pub fn length(self: Self) usize {
+        switch (self) {
+            .invalid => unreachable,
+            .change_cipher_spec => |e| return e.length(),
+            .alert => |e| return e.length(),
+            .handshake => |e| return e.length(),
+            .application_data => |e| return e.length(),
+        }
+    }
+
+    pub fn deinit(self: Self) void {
+        switch (self) {
+            .invalid => unreachable,
+            .change_cipher_spec => {},
+            .alert => {},
+            .handshake => |e| e.deinit(),
+            .application_data => |e| e.deinit(),
+        }
+    }
+};
+
+const Dummy = struct {};
+
+pub const TLSPlainText = struct {
+    content: Content,
 
     const Self = @This();
 
@@ -41,12 +96,9 @@ pub const TLSPlainText = union(ContentType) {
 
         _ = try reader.readAll(fragment);
         var fragmentStream = io.fixedBufferStream(fragment);
-        var res: Self = undefined;
-        switch (t) {
-            ContentType.change_cipher_spec => res = Self{ .change_cipher_spec = try ChangeCipherSpec.decode(fragmentStream.reader(), len) },
-            ContentType.handshake => res = Self{ .handshake = try Handshake.decode(fragmentStream.reader(), allocator, hkdf) },
-            else => unreachable,
-        }
+
+        const cont = try Content.decode(fragmentStream.reader(), t, len, allocator, hkdf);
+        errdefer cont.deinit();
 
         // check the entire of fragment has been decoded
         if ((try fragmentStream.getPos()) != (try fragmentStream.getEndPos())) {
@@ -57,13 +109,15 @@ pub const TLSPlainText = union(ContentType) {
             try writer.writeAll(fragment);
         }
 
-        return res;
+        return Self{
+            .content = cont,
+        };
     }
 
     pub fn encode(self: Self, writer: anytype) !usize {
         var len: usize = 0;
 
-        try writer.writeIntBig(u8, @enumToInt(self));
+        try writer.writeIntBig(u8, @enumToInt(self.content));
         len += @sizeOf(u8);
 
         try writer.writeIntBig(u16, 0x0303);
@@ -72,10 +126,7 @@ pub const TLSPlainText = union(ContentType) {
         len += @sizeOf(u16);
         try writer.writeIntBig(u16, @intCast(u16, self.length() - len));
 
-        switch (self) {
-            ContentType.handshake => |e| len += try e.encode(writer),
-            else => unreachable,
-        }
+        len += try self.content.encode(writer);
 
         return len;
     }
@@ -85,20 +136,13 @@ pub const TLSPlainText = union(ContentType) {
         len += @sizeOf(u8); // content_type
         len += @sizeOf(u16); // protocol_version
         len += @sizeOf(u16); // length
-        switch (self) {
-            ContentType.handshake => |e| len += e.length(),
-            else => unreachable,
-        }
+        len += self.content.length();
 
         return len;
     }
 
     pub fn deinit(self: Self) void {
-        switch (self) {
-            ContentType.change_cipher_spec => {},
-            ContentType.handshake => |e| e.deinit(),
-            else => unreachable,
-        }
+        self.content.deinit();
     }
 };
 
@@ -179,23 +223,42 @@ pub const TLSCipherText = struct {
 };
 
 pub const TLSInnerPlainText = struct {
-    content: []u8 = undefined,
-    content_type: ContentType = undefined,
+    content: []u8,
+    content_type: ContentType,
     zero_pad_length: usize = 0,
 
-    allocator: std.mem.Allocator = undefined,
+    allocator: std.mem.Allocator,
 
     const Self = @This();
 
     const Error = error{
+        NoContents,
         InvalidData,
+        EncodeFailed,
+        DecodeFailed,
     };
 
-    pub fn init(len: usize, allocator: std.mem.Allocator) !Self {
+    pub fn init(len: usize, content_type: ContentType, allocator: std.mem.Allocator) !Self {
         return Self{
             .content = try allocator.alloc(u8, len),
+            .content_type = content_type,
             .allocator = allocator,
         };
+    }
+
+    pub fn initWithContent(content: Content, allocator: std.mem.Allocator) !Self {
+        var pt = try Self.init(content.length(), content, allocator);
+        errdefer pt.deinit();
+
+        pt.content_type = content;
+
+        var stream = io.fixedBufferStream(pt.content);
+        const enc_len = try content.encode(stream.writer());
+        if (enc_len != pt.content.len) {
+            return Error.EncodeFailed;
+        }
+
+        return pt;
     }
 
     pub fn deinit(self: Self) void {
@@ -218,12 +281,36 @@ pub const TLSInnerPlainText = struct {
         const zero_pad_length = (m.len - 1) - i;
         const content_len = m.len - zero_pad_length - 1;
 
-        var res = try Self.init(content_len, allocator);
+        const content_type = @intToEnum(ContentType, m[content_len]);
+        var res = try Self.init(content_len, content_type, allocator);
         errdefer res.deinit();
 
-        res.content_type = @intToEnum(ContentType, m[content_len]);
         res.zero_pad_length = zero_pad_length;
         std.mem.copy(u8, res.content, m[0..content_len]);
+
+        return res;
+    }
+
+    pub fn decodeContent(self: Self, allocator: std.mem.Allocator, hkdf: ?crypto.Hkdf) !Content {
+        var stream = io.fixedBufferStream(self.content);
+        return try Content.decode(stream.reader(), self.content_type, self.content.len, allocator, hkdf);
+    }
+
+    pub fn decodeContents(self: Self, allocator: std.mem.Allocator, hkdf: ?crypto.Hkdf) !ArrayList(Content) {
+        var res = ArrayList(Content).init(allocator);
+        errdefer res.deinit();
+
+        var stream = io.fixedBufferStream(self.content);
+        while ((try stream.getPos() != (try stream.getEndPos()))) {
+            const rest_size = (try stream.getEndPos()) - (try stream.getPos());
+            const cont = try Content.decode(stream.reader(), self.content_type, rest_size, allocator, hkdf);
+            errdefer cont.deinit();
+            try res.append(cont);
+        }
+
+        if ((try stream.getPos() != (try stream.getEndPos()))) {
+            return Error.DecodeFailed;
+        }
 
         return res;
     }
@@ -245,6 +332,25 @@ pub const TLSInnerPlainText = struct {
         }
 
         return len;
+    }
+
+    pub fn encodeContents(contents: ArrayList(Content), writer: anytype, allocator: std.mem.Allocator) !usize {
+        if (contents.items.len != 0) {
+            return Error.NoContents;
+        }
+        var len: usize = 0;
+        for (contents.items) |c| {
+            len += c.length();
+        }
+
+        var pt = Self.init(len, allocator);
+        defer pt.deinit();
+
+        for (contents.items) |c| {
+            try c.encode(pt.stream.writer());
+        }
+
+        return try pt.encode(writer);
     }
 
     pub fn length(self: Self) usize {
@@ -290,34 +396,15 @@ pub const RecordPayloadProtector = struct {
         return ct;
     }
 
-    pub fn encryptFromPlainBytes(self: Self, m: []const u8, content_type: ContentType, n: []const u8, k: []const u8, allocator: std.mem.Allocator) !TLSCipherText {
-        var mt = try TLSInnerPlainText.init(m.len, allocator);
+    pub fn encryptFromMessage(self: Self, m: Content, n: []const u8, k: []const u8, allocator: std.mem.Allocator) !TLSCipherText {
+        const mt = try TLSInnerPlainText.initWithContent(m, allocator);
         defer mt.deinit();
-        mt.content_type = content_type;
-        std.mem.copy(u8, mt.content, m);
 
         return try self.encrypt(mt, n, k, allocator);
     }
 
-    pub fn encryptFromMessage(self: Self, m: anytype, content_type: ContentType, n: []const u8, k: []const u8, allocator: std.mem.Allocator) !TLSCipherText {
-        var mt = try TLSInnerPlainText.init(m.length(), allocator);
-        defer mt.deinit();
-
-        mt.content_type = content_type;
-        var stream = io.fixedBufferStream(mt.content);
-        const written = try m.encode(stream.writer());
-        if (written != (try stream.getPos())) {
-            return Error.EncodeFailed;
-        }
-        if ((try stream.getPos()) != (try stream.getEndPos())) {
-            return Error.EncodeFailed;
-        }
-
-        return try self.encrypt(mt, n, k, allocator);
-    }
-
-    pub fn encryptFromMessageAndWrite(self: Self, m: anytype, content_type: ContentType, n: []const u8, k: []const u8, allocator: std.mem.Allocator, writer: anytype) !usize {
-        const et = try self.encryptFromMessage(m, content_type, n, k, allocator);
+    pub fn encryptFromMessageAndWrite(self: Self, m: Content, n: []const u8, k: []const u8, allocator: std.mem.Allocator, writer: anytype) !usize {
+        const et = try self.encryptFromMessage(m, n, k, allocator);
         defer et.deinit();
 
         return try et.encode(writer);
@@ -339,7 +426,7 @@ pub const RecordPayloadProtector = struct {
     pub fn decryptFromCipherBytes(self: Self, c: []const u8, n: []const u8, k: []const u8, allocator: std.mem.Allocator) !TLSInnerPlainText {
         var stream = io.fixedBufferStream(c);
         var reader = stream.reader();
-        const t = @intToEnum(ContentType, try reader.readIntBig(u8));
+        const t = try reader.readEnum(ContentType, .Big);
         const ct = try TLSCipherText.decode(reader, t, allocator);
         defer ct.deinit();
 
@@ -354,19 +441,19 @@ test "TLSPlainText ClientHello decode" {
     const recv_data = [_]u8{ 0x16, 0x03, 0x01, 0x00, 0x94, 0x01, 0x00, 0x00, 0x90, 0x03, 0x03, 0xf0, 0x5d, 0x41, 0x2d, 0x24, 0x35, 0x27, 0xfd, 0x90, 0xb5, 0xb4, 0x24, 0x9d, 0x4a, 0x69, 0xf8, 0x97, 0xb5, 0xcf, 0xfe, 0xe3, 0x8d, 0x4c, 0xec, 0xc7, 0x8f, 0xd0, 0x25, 0xc6, 0xeb, 0xe1, 0x33, 0x20, 0x67, 0x7e, 0xb6, 0x52, 0xad, 0x12, 0x51, 0xda, 0x7a, 0xe4, 0x5d, 0x3f, 0x19, 0x2c, 0xd1, 0xbf, 0xaf, 0xca, 0xa8, 0xc5, 0xfe, 0x59, 0x2f, 0x1b, 0x2f, 0x2a, 0x96, 0x1e, 0x12, 0x83, 0x35, 0xae, 0x00, 0x02, 0x13, 0x02, 0x01, 0x00, 0x00, 0x45, 0x00, 0x2b, 0x00, 0x03, 0x02, 0x03, 0x04, 0x00, 0x0a, 0x00, 0x06, 0x00, 0x04, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x33, 0x00, 0x26, 0x00, 0x24, 0x00, 0x1d, 0x00, 0x20, 0x49, 0x51, 0x50, 0xa9, 0x0a, 0x47, 0x82, 0xfe, 0xa7, 0x47, 0xf5, 0xcb, 0x55, 0x19, 0xdc, 0xf0, 0xce, 0x0d, 0xee, 0x9c, 0xdc, 0x04, 0x93, 0xbd, 0x84, 0x9e, 0xea, 0xf7, 0xd3, 0x93, 0x64, 0x2f, 0x00, 0x0d, 0x00, 0x06, 0x00, 0x04, 0x04, 0x03, 0x08, 0x07 };
     var readStream = io.fixedBufferStream(&recv_data);
 
-    const t = @intToEnum(ContentType, try readStream.reader().readIntBig(u8));
+    const t = try readStream.reader().readEnum(ContentType, .Big);
     const res = try TLSPlainText.decode(readStream.reader(), t, std.testing.allocator, null, null);
     defer res.deinit();
 
-    try expect(res == .handshake);
-    try expect(res.handshake == .client_hello);
+    try expect(res.content == .handshake);
+    try expect(res.content.handshake == .client_hello);
 }
 
 test "TLSCipherText decode" {
     const recv_data = [_]u8{ 0x17, 0x03, 0x03, 0x00, 0x13, 0xB5, 0x8F, 0xD6, 0x71, 0x66, 0xEB, 0xF5, 0x99, 0xD2, 0x47, 0x20, 0xCF, 0xBE, 0x7E, 0xFA, 0x7A, 0x88, 0x64, 0xA9 };
     var readStream = io.fixedBufferStream(&recv_data);
 
-    const t = @intToEnum(ContentType, try readStream.reader().readIntBig(u8));
+    const t = try readStream.reader().readEnum(ContentType, .Big);
     const res = try TLSCipherText.decode(readStream.reader(), t, std.testing.allocator);
     defer res.deinit();
 
@@ -395,28 +482,30 @@ test "TLSCipherText encode" {
 test "TLSInnerPlainText decode" {
     const recv_data = [_]u8{ 0x01, 0x00, 0x15, 0x00, 0x00, 0x00 }; // ContentType alert
 
-    const pt = try TLSInnerPlainText.decode(&recv_data, std.testing.allocator);
+    var pt = try TLSInnerPlainText.decode(&recv_data, std.testing.allocator);
     defer pt.deinit();
+    const content = try pt.decodeContent(std.testing.allocator, null);
+    defer content.deinit();
 
-    const content_ans = [_]u8{ 0x01, 0x00 };
-    try expect(std.mem.eql(u8, pt.content, &content_ans));
-    try expect(pt.content_type == .alert);
+    try expect(content == .alert);
+    const alert = content.alert;
+    try expect(alert.level == .warning);
+    try expect(alert.description == .close_notify);
     try expect(pt.zero_pad_length == 3);
 }
 
 test "TLSInnerPlainText encode" {
-    const content = [_]u8{ 0x01, 0x00 };
-
-    var pt = try TLSInnerPlainText.init(content.len, std.testing.allocator);
-    defer pt.deinit();
-
-    std.mem.copy(u8, pt.content, &content);
-    pt.content_type = .alert;
-    pt.zero_pad_length = 2;
+    const alert = Content{ .alert = Alert{
+        .level = .warning,
+        .description = .close_notify,
+    } };
+    var mt = try TLSInnerPlainText.initWithContent(alert, std.testing.allocator);
+    defer mt.deinit();
+    mt.zero_pad_length = 2;
 
     var send_data: [1000]u8 = undefined;
     var sendStream = io.fixedBufferStream(&send_data);
-    const write_len = try pt.encode(sendStream.writer());
+    const write_len = try mt.encode(sendStream.writer());
     try expect(write_len == try sendStream.getPos());
 
     const send_data_ans = [_]u8{ 0x01, 0x00, 0x15, 0x00, 0x00 };
@@ -432,12 +521,12 @@ test "RecordPayloadProtector encrypt" {
         nonce[i] = iv[i] ^ nonce[i];
     }
 
-    var mt = try TLSInnerPlainText.init(2, std.testing.allocator);
+    const alert = Content{ .alert = Alert{
+        .level = .warning,
+        .description = .close_notify,
+    } };
+    const mt = try TLSInnerPlainText.initWithContent(alert, std.testing.allocator);
     defer mt.deinit();
-    mt.content[0] = 0x1;
-    mt.content[1] = 0x0;
-    mt.content_type = .alert;
-
     const protector = RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead);
     const ct = try protector.encrypt(mt, &nonce, &key, std.testing.allocator);
     defer ct.deinit();
@@ -449,7 +538,7 @@ test "RecordPayloadProtector encrypt" {
     try expect(std.mem.eql(u8, c[0..write_len], &c_ans));
 }
 
-test "RecordPayloadProtector decrypt" {
+test "RecordPayloadProtector decryptToContent" {
     const key = [_]u8{ 0x9f, 0x02, 0x28, 0x3b, 0x6c, 0x9c, 0x07, 0xef, 0xc2, 0x6b, 0xb9, 0xf2, 0xac, 0x92, 0xe3, 0x56 };
     const iv = [_]u8{ 0xcf, 0x78, 0x2b, 0x88, 0xdd, 0x83, 0x54, 0x9a, 0xad, 0xf1, 0xe9, 0x84 };
     var nonce = [_]u8{ 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2 }; // increment nonce counter
@@ -459,39 +548,20 @@ test "RecordPayloadProtector decrypt" {
     }
     const s_alert = [_]u8{ 0x17, 0x03, 0x03, 0x00, 0x13, 0xB5, 0x8F, 0xD6, 0x71, 0x66, 0xEB, 0xF5, 0x99, 0xD2, 0x47, 0x20, 0xCF, 0xBE, 0x7E, 0xFA, 0x7A, 0x88, 0x64, 0xA9 };
     var stream = io.fixedBufferStream(&s_alert);
-    const t = @intToEnum(ContentType, try stream.reader().readIntBig(u8));
+    const t = try stream.reader().readEnum(ContentType, .Big);
     const ct = try TLSCipherText.decode(stream.reader(), t, std.testing.allocator);
     defer ct.deinit();
 
     const protector = RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead);
-    const mt = try protector.decrypt(ct, &nonce, &key, std.testing.allocator);
+    var mt = try protector.decrypt(ct, &nonce, &key, std.testing.allocator);
     defer mt.deinit();
+    const content = try mt.decodeContent(std.testing.allocator, null);
+    defer content.deinit();
 
-    const mt_content_ans = [_]u8{ 0x01, 0x00 };
-    try expect(mt.content_type == .alert);
-    try expect(std.mem.eql(u8, mt.content, &mt_content_ans));
-}
-
-test "RecordPayloadProtector encryptFromPlainBytes" {
-    const key = [_]u8{ 0x17, 0x42, 0x2d, 0xda, 0x59, 0x6e, 0xd5, 0xd9, 0xac, 0xd8, 0x90, 0xe3, 0xc6, 0x3f, 0x50, 0x51 };
-    const iv = [_]u8{ 0x5b, 0x78, 0x92, 0x3d, 0xee, 0x08, 0x57, 0x90, 0x33, 0xe5, 0x23, 0xd9 };
-    var nonce = [_]u8{ 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1 };
-    var i: usize = 0;
-    while (i < iv.len) : (i += 1) {
-        nonce[i] = iv[i] ^ nonce[i];
-    }
-
-    const content = [_]u8{ 0x01, 0x00 };
-
-    const protector = RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead);
-    const ct = try protector.encryptFromPlainBytes(&content, .alert, &nonce, &key, std.testing.allocator);
-    defer ct.deinit();
-
-    const c_ans = [_]u8{ 0x17, 0x03, 0x03, 0x00, 0x13, 0xC9, 0x87, 0x27, 0x60, 0x65, 0x56, 0x66, 0xB7, 0x4D, 0x7F, 0xF1, 0x15, 0x3E, 0xFD, 0x6D, 0xB6, 0xD0, 0xB0, 0xE3 };
-    var c: [1000]u8 = undefined;
-    var stream = io.fixedBufferStream(&c);
-    const write_len = try ct.encode(stream.writer());
-    try expect(std.mem.eql(u8, c[0..write_len], &c_ans));
+    try expect(content == .alert);
+    const alert = content.alert;
+    try expect(alert.level == .warning);
+    try expect(alert.description == .close_notify);
 }
 
 test "RecordPayloadProtector decryptFromBytes" {
@@ -505,10 +575,13 @@ test "RecordPayloadProtector decryptFromBytes" {
     const s_alert = [_]u8{ 0x17, 0x03, 0x03, 0x00, 0x13, 0xB5, 0x8F, 0xD6, 0x71, 0x66, 0xEB, 0xF5, 0x99, 0xD2, 0x47, 0x20, 0xCF, 0xBE, 0x7E, 0xFA, 0x7A, 0x88, 0x64, 0xA9 };
 
     const protector = RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead);
-    const mt = try protector.decryptFromCipherBytes(&s_alert, &nonce, &key, std.testing.allocator);
+    var mt = try protector.decryptFromCipherBytes(&s_alert, &nonce, &key, std.testing.allocator);
     defer mt.deinit();
+    const content = try mt.decodeContent(std.testing.allocator, null);
+    defer content.deinit();
 
-    const mt_content_ans = [_]u8{ 0x01, 0x00 };
-    try expect(mt.content_type == .alert);
-    try expect(std.mem.eql(u8, mt.content, &mt_content_ans));
+    try expect(content == .alert);
+    const alert = content.alert;
+    try expect(alert.level == .warning);
+    try expect(alert.description == .close_notify);
 }

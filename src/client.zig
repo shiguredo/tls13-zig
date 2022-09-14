@@ -23,6 +23,7 @@ const Handshake = @import("handshake.zig").Handshake;
 const EncryptedExtensions = @import("encrypted_extensions.zig").EncryptedExtensions;
 const Finished = @import("finished.zig").Finished;
 const Alert = @import("alert.zig").Alert;
+const ApplicationData = @import("application_data.zig").ApplicationData;
 const CertificateVerify = @import("certificate_verify.zig").CertificateVerify;
 const NamedGroup = @import("supported_groups.zig").NamedGroup;
 const NamedGroupList = @import("supported_groups.zig").NamedGroupList;
@@ -43,6 +44,7 @@ pub const TLSClient = struct {
 
     // state machine
     state: State = State.START,
+    crypto_mode: bool = false,
 
     // X25519 DH keys
     x25519_priv_key: [32]u8 = [_]u8{0} ** 32,
@@ -63,6 +65,10 @@ pub const TLSClient = struct {
     const State = enum { START, WAIT_SH, WAIT_EE, WAIT_CERT_CR, WAIT_CERT, WAIT_CV, WAIT_FINISHED, SEND_FINISHED, CONNECTED };
 
     const Self = @This();
+
+    const Error = error{
+        UnsupportedCertificateAlgorithm,
+    };
 
     pub fn init(allocator: std.mem.Allocator) !Self {
         var session_id = try msg.SessionID.init(32);
@@ -140,10 +146,10 @@ pub const TLSClient = struct {
     pub fn connect(self: *Self, reader: anytype, writer: anytype) !void {
         var tcpBufferedWriter = io.bufferedWriter(writer);
         const ch = try self.createClientHello();
-        defer ch.deinit();
-
         const hs_ch = Handshake{ .client_hello = ch };
-        const record_ch = record.TLSPlainText{ .handshake = hs_ch };
+        const record_ch = record.TLSPlainText{ .content = record.Content{ .handshake = hs_ch } };
+        defer record_ch.deinit();
+
         _ = try record_ch.encode(tcpBufferedWriter.writer());
         try tcpBufferedWriter.flush();
 
@@ -153,30 +159,33 @@ pub const TLSClient = struct {
         // ClientHello is already sent.
         self.state = .WAIT_SH;
         while (self.state != .CONNECTED) {
-            const t = @intToEnum(record.ContentType, try reader.readIntBig(u8));
-            if (self.state == .WAIT_SH) {
-                const recv_record = try record.TLSPlainText.decode(reader, t, self.allocator, null, self.msgs_stream.writer());
+            const t = try reader.readEnum(record.ContentType, .Big);
+            if (t == .change_cipher_spec) {
+                const recv_record = (try record.TLSPlainText.decode(reader, t, self.allocator, null, null));
                 defer recv_record.deinit();
-
-                if (recv_record != .handshake) {
-                    // TODO: Error
-                    return;
-                }
-                if (recv_record.handshake != .server_hello) {
-                    // TODO: Error
-                    return;
-                }
-
-                try self.handleServerHello(recv_record.handshake.server_hello);
-            } else if (t == .change_cipher_spec) {
-                const recv_record = try record.TLSPlainText.decode(reader, t, self.allocator, null, null);
+                self.crypto_mode = true;
+            } else if ((t == .handshake) and (!self.crypto_mode)) {
+                const recv_record = (try record.TLSPlainText.decode(reader, t, self.allocator, null, self.msgs_stream.writer())).content;
                 defer recv_record.deinit();
+                if (self.state == .WAIT_SH) {
+                    if (recv_record != .handshake) {
+                        // TODO: Error
+                        return;
+                    }
+                    if (recv_record.handshake != .server_hello) {
+                        // TODO: Error
+                        return;
+                    }
+
+                    try self.handleServerHello(recv_record.handshake.server_hello);
+                    self.crypto_mode = true;
+                }
             } else {
                 const recv_record = try record.TLSCipherText.decode(reader, t, self.allocator);
                 defer recv_record.deinit();
 
                 const nonce = try self.ks.generateNonce(self.ks.secret.s_hs_iv.slice(), self.recv_count);
-                const plain_record = try self.protector.decrypt(recv_record, nonce.slice(), self.ks.secret.s_hs_key.slice(), self.allocator);
+                var plain_record = try self.protector.decrypt(recv_record, nonce.slice(), self.ks.secret.s_hs_key.slice(), self.allocator);
                 defer plain_record.deinit();
                 self.recv_count += 1;
 
@@ -201,7 +210,13 @@ pub const TLSClient = struct {
     pub fn send(self: *Self, b: []const u8, writer: anytype) !usize {
         var tcpBufferedWriter = io.bufferedWriter(writer);
         const nonce = try self.ks.generateNonce(self.ks.secret.c_ap_iv.slice(), self.send_count);
-        const write_enc = try self.protector.encryptFromPlainBytes(b, .application_data, nonce.slice(), self.ks.secret.c_ap_key.slice(), self.allocator);
+
+        var app_data = try ApplicationData.initAsView(b);
+        const app_c = record.Content{ .application_data = app_data };
+        var mt = try record.TLSInnerPlainText.initWithContent(app_c, self.allocator);
+        defer mt.deinit();
+
+        const write_enc = try self.protector.encrypt(mt, nonce.slice(), self.ks.secret.c_ap_key.slice(), self.allocator);
         defer write_enc.deinit();
         _ = try write_enc.encode(tcpBufferedWriter.writer());
         try tcpBufferedWriter.flush();
@@ -214,7 +229,7 @@ pub const TLSClient = struct {
         var ap_recv = false;
         var msg_stream = io.fixedBufferStream(b);
         while (!ap_recv) {
-            const t = @intToEnum(record.ContentType, try reader.readIntBig(u8));
+            const t = try reader.readEnum(record.ContentType, .Big);
             if (t != .application_data) {
                 // TODO: error
                 std.log.err("ERROR!!!", .{});
@@ -228,17 +243,23 @@ pub const TLSClient = struct {
             defer plain_record.deinit();
             self.recv_count += 1;
 
-            var stream = io.fixedBufferStream(plain_record.content);
-            while ((try stream.getPos()) != (try stream.getEndPos())) {
-                if (plain_record.content_type == .handshake) {
-                    const recv_msg = try Handshake.decode(stream.reader(), self.allocator, self.ks.hkdf);
-                    defer recv_msg.deinit();
-                } else if (plain_record.content_type == .application_data) {
-                    // TODO: handle oversized content
-                    _ = try msg_stream.write(plain_record.content);
-                    ap_recv = true;
-                    break;
+            if (plain_record.content_type == .handshake) {
+                continue;
+            }
+
+            std.log.warn("HOGEHOGE", .{});
+            const contents = try plain_record.decodeContents(self.allocator, self.ks.hkdf);
+            defer {
+                for (contents.items) |c| {
+                    c.deinit();
                 }
+                contents.deinit();
+            }
+            for (contents.items) |c| {
+                const app_data = c.application_data;
+                // TODO: handle oversized content
+                _ = try msg_stream.write(app_data.content);
+                ap_recv = true;
             }
         }
 
@@ -249,11 +270,10 @@ pub const TLSClient = struct {
         var tcpBufferedWriter = io.bufferedWriter(writer);
 
         // close connection
-        const close_notify = Alert{ .level = .warning, .description = .close_notify };
+        const close_notify = record.Content{ .alert = Alert{ .level = .warning, .description = .close_notify } };
         var nonce = try self.ks.generateNonce(self.ks.secret.c_ap_iv.slice(), self.send_count);
         _ = try self.protector.encryptFromMessageAndWrite(
             close_notify,
-            .alert,
             nonce.slice(),
             self.ks.secret.c_ap_key.slice(),
             self.allocator,
@@ -263,12 +283,7 @@ pub const TLSClient = struct {
 
         var close_recv = false;
         while (!close_recv) {
-            const t = @intToEnum(record.ContentType, try reader.readIntBig(u8));
-            if (t != .application_data) {
-                // TODO: error
-                std.log.err("ERROR!!!", .{});
-                continue;
-            }
+            const t = try reader.readEnum(record.ContentType, .Big);
             const recv_record = try record.TLSCipherText.decode(reader, t, self.allocator);
             defer recv_record.deinit();
 
@@ -277,8 +292,20 @@ pub const TLSClient = struct {
             defer plain_record.deinit();
             self.recv_count += 1;
 
-            var plain_record_stream = io.fixedBufferStream(plain_record.content);
-            const alert = try Alert.decode(plain_record_stream.reader(), plain_record.content.len);
+            if (plain_record.content_type != .alert) {
+                // TODO: handle messages.
+                continue;
+            }
+
+            const content = try plain_record.decodeContent(self.allocator, self.ks.hkdf);
+            defer content.deinit();
+
+            if (content != .alert) {
+                // the message is broken.
+                continue;
+            }
+
+            const alert = content.alert;
 
             if (alert.level != .warning or alert.description != .close_notify) {
                 std.log.warn("invalid close_notify, level={} description={}", .{ alert.level, alert.description });
@@ -321,13 +348,18 @@ pub const TLSClient = struct {
     }
 
     fn handleHandshakeInnerPlaintext(self: *Self, t: record.TLSInnerPlainText, writer: anytype) !void {
-        var stream = io.fixedBufferStream(t.content);
+        var contents = try t.decodeContents(self.allocator, self.ks.hkdf);
+        defer {
+            for (contents.items) |c| {
+                c.deinit();
+            }
+            contents.deinit();
+        }
+
         var i: usize = 0;
-        _ = i;
         _ = writer;
-        while ((try stream.getPos()) != (try stream.getEndPos())) {
-            const recv_msg = try Handshake.decode(stream.reader(), self.allocator, self.ks.hkdf);
-            defer recv_msg.deinit();
+        for (contents.items) |c| {
+            const recv_msg = c.handshake;
             if (self.state == .WAIT_EE) {
                 if (recv_msg != .encrypted_extensions) {
                     // TODO: Error
@@ -374,7 +406,7 @@ pub const TLSClient = struct {
                 const c_finished = try Finished.fromMessageBytes(self.msgs_stream.getWritten(), self.ks.secret.c_hs_finished_secret.slice(), crypto.Hkdf.Sha256.hkdf);
                 const hs_c_finished = Handshake{ .finished = c_finished };
 
-                var c_finished_inner = try record.TLSInnerPlainText.init(hs_c_finished.length(), self.allocator);
+                var c_finished_inner = try record.TLSInnerPlainText.init(hs_c_finished.length(), .handshake, self.allocator);
                 defer c_finished_inner.deinit();
                 var inner_stream = io.fixedBufferStream(c_finished_inner.content);
                 _ = try hs_c_finished.encode(inner_stream.writer());
@@ -410,6 +442,8 @@ pub const TLSClient = struct {
             const pubkey = c.cert.tbs_certificate.subjectPublicKeyInfo.publicKey;
             if (pubkey == .secp256r1) {
                 self.secp256r1_pubkey = pubkey.secp256r1.key;
+            } else {
+                return Error.UnsupportedCertificateAlgorithm;
             }
             std.log.info("=== CERTIFICATE INFORMATION END ===", .{});
         }
@@ -480,8 +514,8 @@ test "client test with RFC8448" {
     const server_hello_bytes = [_]u8{ 0x16, 0x03, 0x03, 0x00, 0x5a, 0x02, 0x00, 0x00, 0x56, 0x03, 0x03, 0xa6, 0xaf, 0x06, 0xa4, 0x12, 0x18, 0x60, 0xdc, 0x5e, 0x6e, 0x60, 0x24, 0x9c, 0xd3, 0x4c, 0x95, 0x93, 0x0c, 0x8a, 0xc5, 0xcb, 0x14, 0x34, 0xda, 0xc1, 0x55, 0x77, 0x2e, 0xd3, 0xe2, 0x69, 0x28, 0x00, 0x13, 0x01, 0x00, 0x00, 0x2e, 0x00, 0x33, 0x00, 0x24, 0x00, 0x1d, 0x00, 0x20, 0xc9, 0x82, 0x88, 0x76, 0x11, 0x20, 0x95, 0xfe, 0x66, 0x76, 0x2b, 0xdb, 0xf7, 0xc6, 0x72, 0xe1, 0x56, 0xd6, 0xcc, 0x25, 0x3b, 0x83, 0x3d, 0xf1, 0xdd, 0x69, 0xb1, 0xb0, 0x4e, 0x75, 0x1f, 0x0f, 0x00, 0x2b, 0x00, 0x02, 0x03, 0x04 };
     var stream = io.fixedBufferStream(&server_hello_bytes);
     var sh_reader = stream.reader();
-    var t = @intToEnum(record.ContentType, try sh_reader.readIntBig(u8));
-    const handshake = (try record.TLSPlainText.decode(sh_reader, t, std.testing.allocator, null, msgs_stream.writer())).handshake;
+    var t = try sh_reader.readEnum(record.ContentType, .Big);
+    const handshake = (try record.TLSPlainText.decode(sh_reader, t, std.testing.allocator, null, msgs_stream.writer())).content.handshake;
     try expect(handshake == .server_hello);
 
     const server_hello = handshake.server_hello;
@@ -584,7 +618,7 @@ test "client test with RFC8448" {
     const hs_c_finished = Handshake{ .finished = c_finished };
 
     const c_finished_ans = [_]u8{ 0x14, 0x0, 0x0, 0x20, 0xa8, 0xec, 0x43, 0x6d, 0x67, 0x76, 0x34, 0xae, 0x52, 0x5a, 0xc1, 0xfc, 0xeb, 0xe1, 0x1a, 0x03, 0x9e, 0xc1, 0x76, 0x94, 0xfa, 0xc6, 0xe9, 0x85, 0x27, 0xb6, 0x42, 0xf2, 0xed, 0xd5, 0xce, 0x61 };
-    var c_finished_inner = try record.TLSInnerPlainText.init(hs_c_finished.length(), std.testing.allocator);
+    var c_finished_inner = try record.TLSInnerPlainText.init(hs_c_finished.length(), .handshake, std.testing.allocator);
     c_finished_inner.content_type = .handshake;
     defer c_finished_inner.deinit();
     var inner_stream = io.fixedBufferStream(c_finished_inner.content);
@@ -620,7 +654,8 @@ test "client test with RFC8448" {
 
     const c_app_record_ans = [_]u8{ 0x17, 0x03, 0x03, 0x00, 0x43, 0xA2, 0x3F, 0x70, 0x54, 0xB6, 0x2C, 0x94, 0xD0, 0xAF, 0xFA, 0xFE, 0x82, 0x28, 0xBA, 0x55, 0xCB, 0xEF, 0xAC, 0xEA, 0x42, 0xF9, 0x14, 0xAA, 0x66, 0xBC, 0xAB, 0x3F, 0x2B, 0x98, 0x19, 0xA8, 0xA5, 0xB4, 0x6B, 0x39, 0x5B, 0xD5, 0x4A, 0x9A, 0x20, 0x44, 0x1E, 0x2B, 0x62, 0x97, 0x4E, 0x1F, 0x5A, 0x62, 0x92, 0xA2, 0x97, 0x70, 0x14, 0xBD, 0x1E, 0x3D, 0xEA, 0xE6, 0x3A, 0xEE, 0xBB, 0x21, 0x69, 0x49, 0x15, 0xE4 };
     nonce = try ks.generateNonce(ks.secret.c_ap_iv.slice(), 0);
-    const c_app_record = try protector.encryptFromPlainBytes(&c_app_data, .application_data, nonce.slice(), ks.secret.c_ap_key.slice(), std.testing.allocator);
+    const c_app_data_view = record.Content{ .application_data = try ApplicationData.initAsView(&c_app_data) };
+    const c_app_record = try protector.encryptFromMessage(c_app_data_view, nonce.slice(), ks.secret.c_ap_key.slice(), std.testing.allocator);
     defer c_app_record.deinit();
     var c_app: [1000]u8 = undefined;
     var c_app_stream = io.fixedBufferStream(&c_app);
@@ -635,9 +670,12 @@ test "client test with RFC8448" {
     try expect(pt_recv_ap.content_type == .application_data);
 
     // send alert
-    const c_alert_data = [_]u8{ 0x01, 0x00 }; // ContentType alert
+    const c_alert_plain = record.Content{ .alert = Alert{
+        .level = .warning,
+        .description = .close_notify,
+    } };
     nonce = try ks.generateNonce(ks.secret.c_ap_iv.slice(), 1);
-    const c_alert_record = try protector.encryptFromPlainBytes(&c_alert_data, .alert, nonce.slice(), ks.secret.c_ap_key.slice(), std.testing.allocator);
+    const c_alert_record = try protector.encryptFromMessage(c_alert_plain, nonce.slice(), ks.secret.c_ap_key.slice(), std.testing.allocator);
     defer c_alert_record.deinit();
     const c_alert_ans = [_]u8{ 0x17, 0x03, 0x03, 0x00, 0x13, 0xC9, 0x87, 0x27, 0x60, 0x65, 0x56, 0x66, 0xB7, 0x4D, 0x7F, 0xF1, 0x15, 0x3E, 0xFD, 0x6D, 0xB6, 0xD0, 0xB0, 0xE3 };
     var c_alert: [1000]u8 = undefined;

@@ -24,10 +24,10 @@ const Extension = @import("extension.zig").Extension;
 pub const ClientHello = struct {
     protocol_version: u16 = 0x0303, // TLS v1.2 version
     random: [32]u8 = [_]u8{0} ** 32,
-    legacy_session_id: SessionID = undefined,
-    cipher_suites: ArrayList(CipherSuite) = undefined,
+    legacy_session_id: SessionID,
+    cipher_suites: ArrayList(CipherSuite),
     legacy_compression_methods: [2]u8 = [_]u8{ 0x1, 0x0 }, // "null" compression method
-    extensions: ArrayList(Extension) = undefined,
+    extensions: ArrayList(Extension),
 
     const Self = @This();
 

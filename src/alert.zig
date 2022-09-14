@@ -83,22 +83,12 @@ pub const Alert = struct {
     level: AlertLevel,
     description: AlertDescription,
 
-    const Error = error{
-        InvalidFormat,
-    };
-
     const Self = @This();
 
     /// decode Alert reading from io.Reader.
     /// @param reader io.Reader to read messages.
-    /// @param len    the length of readable bytes.
     /// @return decoded Alert.
-    pub fn decode(reader: anytype, len: usize) !Self {
-        // the length of Alert must be 2 bytes.
-        if (len != 2) {
-            return Error.InvalidFormat;
-        }
-
+    pub fn decode(reader: anytype) !Self {
         // Decoding level.
         const level = @intToEnum(AlertLevel, try reader.readByte());
 

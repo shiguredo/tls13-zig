@@ -155,7 +155,6 @@ pub const TLSClient = struct {
 
         _ = try hs_ch.encode(self.msgs_stream.writer());
 
-        _ = reader;
         // ClientHello is already sent.
         self.state = .WAIT_SH;
         while (self.state != .CONNECTED) {
@@ -357,7 +356,6 @@ pub const TLSClient = struct {
         }
 
         var i: usize = 0;
-        _ = writer;
         for (contents.items) |c| {
             const recv_msg = c.handshake;
             if (self.state == .WAIT_EE) {
@@ -425,7 +423,6 @@ pub const TLSClient = struct {
     }
 
     fn handleEncryptedExtensions(self: *Self, ee: EncryptedExtensions) !void {
-        _ = self;
         _ = ee;
         // TODO: what to do?
 
@@ -454,7 +451,6 @@ pub const TLSClient = struct {
     fn handleCertificateVerify(self: *Self, cert_verify: CertificateVerify) !void {
         // TODO: verify certificate
         const sig = try P256.Signature.fromDer(cert_verify.signature);
-        _ = sig;
 
         var hash_out: [crypto.Hkdf.MAX_DIGEST_LENGTH]u8 = undefined;
         self.ks.hkdf.hash(&hash_out, self.msgs_stream.getWritten());

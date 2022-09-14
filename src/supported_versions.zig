@@ -116,7 +116,6 @@ pub const SupportedVersions = struct {
     }
 
     pub fn print(self: Self) void {
-        _ = self;
         log.debug("Extension: SupportedVersions({s})", .{@tagName(self.ht)});
         log.debug("- version = 0x{x:0>2}", .{self.version});
     }

@@ -698,7 +698,6 @@ const RelativeDistinguishedName = struct {
             a.deinit();
         }
         self.attrs.deinit();
-        _ = self;
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
@@ -1144,7 +1143,6 @@ const Extensions = struct {
             return ASN1.Error.InvalidType;
         }
         const len = try ASN1.decodeLength(reader);
-        _ = len;
         var extensions = ArrayList(Extension).init(allocator);
         errdefer extensions.deinit();
 
@@ -1220,7 +1218,6 @@ const Extension = struct {
         var t_default = @intToEnum(ASN1.Tag, try reader.readByte());
         if (t_default == .BOOLEAN) {
             const criti_len = try ASN1.decodeLength(reader);
-            _ = criti_len;
             var i: usize = 0;
             while (i < criti_len) : (i += 1) {
                 _ = try reader.readByte();

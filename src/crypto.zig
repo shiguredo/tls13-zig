@@ -146,6 +146,33 @@ pub const KeyBoundedArray = BoundedArray(u8, Aead.MAX_KEY_LEGNTH);
 pub const NonceBoundedArray = BoundedArray(u8, Aead.MAX_NONCE_LENGTH);
 
 pub const Secret = struct {
+    pub const RecordKeys = struct {
+        key: KeyBoundedArray,
+        iv: NonceBoundedArray,
+
+        pub fn init(aead: Aead) !RecordKeys {
+            const k_len = aead.key_length;
+            const n_len = aead.nonce_length;
+
+            return RecordKeys{
+                .key = try KeyBoundedArray.init(k_len),
+                .iv = try NonceBoundedArray.init(n_len),
+            };
+        }
+
+        pub fn fromBytes(key: []const u8, iv: []const u8) !RecordKeys {
+            var res = RecordKeys{
+                .key = try KeyBoundedArray.init(key.len),
+                .iv = try NonceBoundedArray.init(iv.len),
+            };
+
+            std.mem.copy(u8, res.key.slice(), key);
+            std.mem.copy(u8, res.iv.slice(), iv);
+
+            return res;
+        }
+    };
+
     early_secret: DigestBoundedArray,
 
     hs_derived_secret: DigestBoundedArray,
@@ -156,20 +183,16 @@ pub const Secret = struct {
     master_derived_secret: DigestBoundedArray,
     master_secret: DigestBoundedArray,
 
-    s_hs_key: KeyBoundedArray,
-    s_hs_iv: NonceBoundedArray,
-    c_hs_key: KeyBoundedArray,
-    c_hs_iv: NonceBoundedArray,
+    s_hs_keys: RecordKeys,
+    c_hs_keys: RecordKeys,
 
     s_hs_finished_secret: DigestBoundedArray,
     c_hs_finished_secret: DigestBoundedArray,
     s_ap_secret: DigestBoundedArray,
     c_ap_secret: DigestBoundedArray,
 
-    s_ap_key: KeyBoundedArray,
-    s_ap_iv: NonceBoundedArray,
-    c_ap_key: KeyBoundedArray,
-    c_ap_iv: NonceBoundedArray,
+    s_ap_keys: RecordKeys,
+    c_ap_keys: RecordKeys,
 
     exp_master_secret: DigestBoundedArray,
     res_master_secret: DigestBoundedArray,
@@ -178,10 +201,8 @@ pub const Secret = struct {
 
     pub fn init(hkdf: Hkdf, aead: Aead) !Self {
         const d_len = hkdf.digest_length;
-        const k_len = aead.key_length;
-        const n_len = aead.nonce_length;
 
-        var res = Self{
+        return Self{
             .early_secret = try DigestBoundedArray.init(d_len),
 
             .hs_derived_secret = try DigestBoundedArray.init(d_len),
@@ -192,26 +213,20 @@ pub const Secret = struct {
             .master_derived_secret = try DigestBoundedArray.init(d_len),
             .master_secret = try DigestBoundedArray.init(d_len),
 
-            .s_hs_key = try KeyBoundedArray.init(k_len),
-            .s_hs_iv = try NonceBoundedArray.init(n_len),
-            .c_hs_key = try KeyBoundedArray.init(k_len),
-            .c_hs_iv = try NonceBoundedArray.init(n_len),
+            .s_hs_keys = try RecordKeys.init(aead),
+            .c_hs_keys = try RecordKeys.init(aead),
 
             .s_hs_finished_secret = try DigestBoundedArray.init(d_len),
             .c_hs_finished_secret = try DigestBoundedArray.init(d_len),
             .s_ap_secret = try DigestBoundedArray.init(d_len),
             .c_ap_secret = try DigestBoundedArray.init(d_len),
 
-            .s_ap_key = try KeyBoundedArray.init(k_len),
-            .s_ap_iv = try NonceBoundedArray.init(n_len),
-            .c_ap_key = try KeyBoundedArray.init(k_len),
-            .c_ap_iv = try NonceBoundedArray.init(n_len),
+            .s_ap_keys = try RecordKeys.init(aead),
+            .c_ap_keys = try RecordKeys.init(aead),
 
             .exp_master_secret = try DigestBoundedArray.init(d_len),
             .res_master_secret = try DigestBoundedArray.init(d_len),
         };
-
-        return res;
     }
 };
 

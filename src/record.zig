@@ -1,79 +1,12 @@
 const std = @import("std");
 const io = std.io;
 const ArrayList = std.ArrayList;
-const Handshake = @import("handshake.zig").Handshake;
-const ChangeCipherSpec = @import("change_cipher_spec.zig").ChangeCipherSpec;
+
 const Alert = @import("alert.zig").Alert;
-const ApplicationData = @import("application_data.zig").ApplicationData;
+const Content = @import("content.zig").Content;
+const ContentType = @import("content.zig").ContentType;
 const DecodeError = @import("msg.zig").DecodeError;
 const crypto = @import("crypto.zig");
-
-pub const ContentType = enum(u8) {
-    invalid = 0,
-    change_cipher_spec = 20,
-    alert = 21,
-    handshake = 22,
-    application_data = 23,
-};
-
-pub const Content = union(ContentType) {
-    invalid: Dummy,
-    change_cipher_spec: ChangeCipherSpec,
-    alert: Alert,
-    handshake: Handshake,
-    application_data: ApplicationData,
-
-    const Self = @This();
-
-    const Error = error{
-        InvalidLength,
-    };
-
-    pub fn decode(reader: anytype, t: ContentType, len: usize, allocator: std.mem.Allocator, hkdf: ?crypto.Hkdf) !Self {
-        if (t == .application_data and len == 0) {
-            return Error.InvalidLength;
-        }
-        switch (t) {
-            .invalid => unreachable,
-            .change_cipher_spec => return Self{ .change_cipher_spec = try ChangeCipherSpec.decode(reader) },
-            .alert => return Self{ .alert = try Alert.decode(reader) },
-            .handshake => return Self{ .handshake = try Handshake.decode(reader, allocator, hkdf) },
-            .application_data => return Self{ .application_data = try ApplicationData.decode(reader, len, allocator) },
-        }
-    }
-
-    pub fn encode(self: Self, writer: anytype) !usize {
-        switch (self) {
-            .invalid => unreachable,
-            .change_cipher_spec => |e| return try e.encode(writer),
-            .alert => |e| return try e.encode(writer),
-            .handshake => |e| return try e.encode(writer),
-            .application_data => |e| return try e.encode(writer),
-        }
-    }
-
-    pub fn length(self: Self) usize {
-        switch (self) {
-            .invalid => unreachable,
-            .change_cipher_spec => |e| return e.length(),
-            .alert => |e| return e.length(),
-            .handshake => |e| return e.length(),
-            .application_data => |e| return e.length(),
-        }
-    }
-
-    pub fn deinit(self: Self) void {
-        switch (self) {
-            .invalid => unreachable,
-            .change_cipher_spec => {},
-            .alert => {},
-            .handshake => |e| e.deinit(),
-            .application_data => |e| e.deinit(),
-        }
-    }
-};
-
-const Dummy = struct {};
 
 pub const TLSPlainText = struct {
     content: Content,

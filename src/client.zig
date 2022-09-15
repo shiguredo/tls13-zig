@@ -29,6 +29,9 @@ const NamedGroup = @import("supported_groups.zig").NamedGroup;
 const NamedGroupList = @import("supported_groups.zig").NamedGroupList;
 const RecordPayloadProtector = @import("protector.zig").RecordPayloadProtector;
 
+const Content = @import("content.zig").Content;
+const ContentType = @import("content.zig").ContentType;
+
 const Aes128Gcm = std.crypto.aead.aes_gcm.Aes128Gcm;
 const Sha256 = std.crypto.hash.sha2.Sha256;
 const P256 = std.crypto.sign.ecdsa.EcdsaP256Sha256;
@@ -145,7 +148,7 @@ pub const TLSClient = struct {
         var tcpBufferedWriter = io.bufferedWriter(writer);
         const ch = try self.createClientHello();
         const hs_ch = Handshake{ .client_hello = ch };
-        const record_ch = record.TLSPlainText{ .content = record.Content{ .handshake = hs_ch } };
+        const record_ch = record.TLSPlainText{ .content = Content{ .handshake = hs_ch } };
         defer record_ch.deinit();
 
         _ = try record_ch.encode(tcpBufferedWriter.writer());
@@ -156,7 +159,7 @@ pub const TLSClient = struct {
         // ClientHello is already sent.
         self.state = .WAIT_SH;
         while (self.state != .CONNECTED) {
-            const t = try reader.readEnum(record.ContentType, .Big);
+            const t = try reader.readEnum(ContentType, .Big);
             if (t == .change_cipher_spec) {
                 const recv_record = (try record.TLSPlainText.decode(reader, t, self.allocator, null, null));
                 defer recv_record.deinit();
@@ -203,7 +206,7 @@ pub const TLSClient = struct {
         var tcpBufferedWriter = io.bufferedWriter(writer);
 
         var app_data = try ApplicationData.initAsView(b);
-        const app_c = record.Content{ .application_data = app_data };
+        const app_c = Content{ .application_data = app_data };
         var mt = try record.TLSInnerPlainText.initWithContent(app_c, self.allocator);
         defer mt.deinit();
 
@@ -219,7 +222,7 @@ pub const TLSClient = struct {
         var ap_recv = false;
         var msg_stream = io.fixedBufferStream(b);
         while (!ap_recv) {
-            const t = try reader.readEnum(record.ContentType, .Big);
+            const t = try reader.readEnum(ContentType, .Big);
             if (t != .application_data) {
                 // TODO: error
                 std.log.err("ERROR!!!", .{});
@@ -258,7 +261,7 @@ pub const TLSClient = struct {
         var tcpBufferedWriter = io.bufferedWriter(writer);
 
         // close connection
-        const close_notify = record.Content{ .alert = Alert{ .level = .warning, .description = .close_notify } };
+        const close_notify = Content{ .alert = Alert{ .level = .warning, .description = .close_notify } };
         _ = try self.ap_protector.encryptFromMessageAndWrite(
             close_notify,
             self.allocator,
@@ -268,7 +271,7 @@ pub const TLSClient = struct {
 
         var close_recv = false;
         while (!close_recv) {
-            const t = try reader.readEnum(record.ContentType, .Big);
+            const t = try reader.readEnum(ContentType, .Big);
             const recv_record = try record.TLSCipherText.decode(reader, t, self.allocator);
             defer recv_record.deinit();
 
@@ -388,7 +391,7 @@ pub const TLSClient = struct {
 
                 // construct client finished message
                 const c_finished = try Finished.fromMessageBytes(self.msgs_stream.getWritten(), self.ks.secret.c_hs_finished_secret.slice(), crypto.Hkdf.Sha256.hkdf);
-                const hs_c_finished = record.Content{ .handshake = Handshake{ .finished = c_finished } };
+                const hs_c_finished = Content{ .handshake = Handshake{ .finished = c_finished } };
                 defer hs_c_finished.deinit();
 
                 const c_record_finished = try self.hs_protector.encryptFromMessage(hs_c_finished, self.allocator);
@@ -490,7 +493,7 @@ test "client test with RFC8448" {
     const server_hello_bytes = [_]u8{ 0x16, 0x03, 0x03, 0x00, 0x5a, 0x02, 0x00, 0x00, 0x56, 0x03, 0x03, 0xa6, 0xaf, 0x06, 0xa4, 0x12, 0x18, 0x60, 0xdc, 0x5e, 0x6e, 0x60, 0x24, 0x9c, 0xd3, 0x4c, 0x95, 0x93, 0x0c, 0x8a, 0xc5, 0xcb, 0x14, 0x34, 0xda, 0xc1, 0x55, 0x77, 0x2e, 0xd3, 0xe2, 0x69, 0x28, 0x00, 0x13, 0x01, 0x00, 0x00, 0x2e, 0x00, 0x33, 0x00, 0x24, 0x00, 0x1d, 0x00, 0x20, 0xc9, 0x82, 0x88, 0x76, 0x11, 0x20, 0x95, 0xfe, 0x66, 0x76, 0x2b, 0xdb, 0xf7, 0xc6, 0x72, 0xe1, 0x56, 0xd6, 0xcc, 0x25, 0x3b, 0x83, 0x3d, 0xf1, 0xdd, 0x69, 0xb1, 0xb0, 0x4e, 0x75, 0x1f, 0x0f, 0x00, 0x2b, 0x00, 0x02, 0x03, 0x04 };
     var stream = io.fixedBufferStream(&server_hello_bytes);
     var sh_reader = stream.reader();
-    var t = try sh_reader.readEnum(record.ContentType, .Big);
+    var t = try sh_reader.readEnum(ContentType, .Big);
     const handshake = (try record.TLSPlainText.decode(sh_reader, t, std.testing.allocator, null, msgs_stream.writer())).content.handshake;
     try expect(handshake == .server_hello);
 
@@ -627,7 +630,7 @@ test "client test with RFC8448" {
     }
 
     const c_app_record_ans = [_]u8{ 0x17, 0x03, 0x03, 0x00, 0x43, 0xA2, 0x3F, 0x70, 0x54, 0xB6, 0x2C, 0x94, 0xD0, 0xAF, 0xFA, 0xFE, 0x82, 0x28, 0xBA, 0x55, 0xCB, 0xEF, 0xAC, 0xEA, 0x42, 0xF9, 0x14, 0xAA, 0x66, 0xBC, 0xAB, 0x3F, 0x2B, 0x98, 0x19, 0xA8, 0xA5, 0xB4, 0x6B, 0x39, 0x5B, 0xD5, 0x4A, 0x9A, 0x20, 0x44, 0x1E, 0x2B, 0x62, 0x97, 0x4E, 0x1F, 0x5A, 0x62, 0x92, 0xA2, 0x97, 0x70, 0x14, 0xBD, 0x1E, 0x3D, 0xEA, 0xE6, 0x3A, 0xEE, 0xBB, 0x21, 0x69, 0x49, 0x15, 0xE4 };
-    const c_app_data_view = record.Content{ .application_data = try ApplicationData.initAsView(&c_app_data) };
+    const c_app_data_view = Content{ .application_data = try ApplicationData.initAsView(&c_app_data) };
     const c_app_record = try ap_protector.encryptFromMessage(c_app_data_view, std.testing.allocator);
     defer c_app_record.deinit();
     var c_app: [1000]u8 = undefined;
@@ -642,7 +645,7 @@ test "client test with RFC8448" {
     try expect(pt_recv_ap.content_type == .application_data);
 
     // send alert
-    const c_alert_plain = record.Content{ .alert = Alert{
+    const c_alert_plain = Content{ .alert = Alert{
         .level = .warning,
         .description = .close_notify,
     } };

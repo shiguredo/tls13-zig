@@ -6,8 +6,8 @@ const expect = std.testing.expect;
 
 const TLSInnerPlainText = @import("record.zig").TLSInnerPlainText;
 const TLSCipherText = @import("record.zig").TLSCipherText;
-const Content = @import("record.zig").Content;
-const ContentType = @import("record.zig").ContentType;
+const Content = @import("content.zig").Content;
+const ContentType = @import("content.zig").ContentType;
 const RecordKeys = @import("crypto.zig").Secret.RecordKeys;
 
 /// RFC 8446 Section 5.2 Record Payload Protection

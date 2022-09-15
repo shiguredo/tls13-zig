@@ -82,7 +82,7 @@ pub const TLSClient = struct {
         random.bytes(&rand);
         random.bytes(session_id.session_id.slice());
 
-        return Self{
+        var res = Self{
             .random = rand,
             .session_id = session_id,
             .msgs_bytes = msgs_bytes,
@@ -93,6 +93,11 @@ pub const TLSClient = struct {
 
             .allocator = allocator,
         };
+
+        random.bytes(&res.x25519_priv_key);
+        res.x25519_pub_key = try dh.X25519.recoverPublicKey(res.x25519_priv_key);
+
+        return res;
     }
 
     pub fn deinit(self: Self) void {
@@ -205,14 +210,10 @@ pub const TLSClient = struct {
     pub fn send(self: *Self, b: []const u8, writer: anytype) !usize {
         var tcpBufferedWriter = io.bufferedWriter(writer);
 
-        var app_data = try ApplicationData.initAsView(b);
-        const app_c = Content{ .application_data = app_data };
-        var mt = try record.TLSInnerPlainText.initWithContent(app_c, self.allocator);
-        defer mt.deinit();
+        const app_c = Content{ .application_data = try ApplicationData.initAsView(b) };
+        defer app_c.deinit();
 
-        const write_enc = try self.ap_protector.encrypt(mt, self.allocator);
-        defer write_enc.deinit();
-        _ = try write_enc.encode(tcpBufferedWriter.writer());
+        _ = try self.ap_protector.encryptFromMessageAndWrite(app_c, self.allocator, tcpBufferedWriter.writer());
         try tcpBufferedWriter.flush();
 
         return b.len;
@@ -234,24 +235,15 @@ pub const TLSClient = struct {
             const plain_record = try self.ap_protector.decrypt(recv_record, self.allocator);
             defer plain_record.deinit();
 
-            if (plain_record.content_type == .handshake) {
+            if (plain_record.content_type != .application_data) {
                 continue;
             }
 
-            std.log.warn("HOGEHOGE", .{});
-            const contents = try plain_record.decodeContents(self.allocator, self.ks.hkdf);
-            defer {
-                for (contents.items) |c| {
-                    c.deinit();
-                }
-                contents.deinit();
-            }
-            for (contents.items) |c| {
-                const app_data = c.application_data;
-                // TODO: handle oversized content
-                _ = try msg_stream.write(app_data.content);
-                ap_recv = true;
-            }
+            const content = try plain_record.decodeContent(self.allocator, self.ks.hkdf);
+            defer content.deinit();
+            // TODO: handle oversized content
+            _ = try msg_stream.write(content.application_data.content);
+            ap_recv = true;
         }
 
         return msg_stream.getWritten().len;
@@ -394,9 +386,7 @@ pub const TLSClient = struct {
                 const hs_c_finished = Content{ .handshake = Handshake{ .finished = c_finished } };
                 defer hs_c_finished.deinit();
 
-                const c_record_finished = try self.hs_protector.encryptFromMessage(hs_c_finished, self.allocator);
-                defer c_record_finished.deinit();
-                _ = try c_record_finished.encode(writer);
+                _ = try self.hs_protector.encryptFromMessageAndWrite(hs_c_finished, self.allocator, writer);
 
                 self.state = .CONNECTED;
             }

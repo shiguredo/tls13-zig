@@ -28,6 +28,7 @@ const CertificateVerify = @import("certificate_verify.zig").CertificateVerify;
 const NamedGroup = @import("supported_groups.zig").NamedGroup;
 const NamedGroupList = @import("supported_groups.zig").NamedGroupList;
 const RecordPayloadProtector = @import("protector.zig").RecordPayloadProtector;
+const TLSPlainText = @import("tls_plain.zig").TLSPlainText;
 
 const Content = @import("content.zig").Content;
 const ContentType = @import("content.zig").ContentType;
@@ -151,26 +152,28 @@ pub const TLSClient = struct {
 
     pub fn connect(self: *Self, reader: anytype, writer: anytype) !void {
         var tcpBufferedWriter = io.bufferedWriter(writer);
+
+        // Creating ClientHello.
         const ch = try self.createClientHello();
         const hs_ch = Handshake{ .client_hello = ch };
-        const record_ch = record.TLSPlainText{ .content = Content{ .handshake = hs_ch } };
-        defer record_ch.deinit();
+        _ = try hs_ch.encode(self.msgs_stream.writer());
 
+        // Sending ClientHello.
+        const record_ch = TLSPlainText{ .content = Content{ .handshake = hs_ch } };
+        defer record_ch.deinit();
         _ = try record_ch.encode(tcpBufferedWriter.writer());
         try tcpBufferedWriter.flush();
-
-        _ = try hs_ch.encode(self.msgs_stream.writer());
 
         // ClientHello is already sent.
         self.state = .WAIT_SH;
         while (self.state != .CONNECTED) {
             const t = try reader.readEnum(ContentType, .Big);
             if (t == .change_cipher_spec) {
-                const recv_record = (try record.TLSPlainText.decode(reader, t, self.allocator, null, null));
+                const recv_record = (try TLSPlainText.decode(reader, t, self.allocator, null, null));
                 defer recv_record.deinit();
                 self.crypto_mode = true;
             } else if ((t == .handshake) and (!self.crypto_mode)) {
-                const recv_record = (try record.TLSPlainText.decode(reader, t, self.allocator, null, self.msgs_stream.writer())).content;
+                const recv_record = (try TLSPlainText.decode(reader, t, self.allocator, null, self.msgs_stream.writer())).content;
                 defer recv_record.deinit();
                 if (self.state == .WAIT_SH) {
                     if (recv_record != .handshake) {
@@ -484,7 +487,7 @@ test "client test with RFC8448" {
     var stream = io.fixedBufferStream(&server_hello_bytes);
     var sh_reader = stream.reader();
     var t = try sh_reader.readEnum(ContentType, .Big);
-    const handshake = (try record.TLSPlainText.decode(sh_reader, t, std.testing.allocator, null, msgs_stream.writer())).content.handshake;
+    const handshake = (try TLSPlainText.decode(sh_reader, t, std.testing.allocator, null, msgs_stream.writer())).content.handshake;
     try expect(handshake == .server_hello);
 
     const server_hello = handshake.server_hello;

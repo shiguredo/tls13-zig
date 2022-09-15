@@ -9,7 +9,6 @@ const random = std.crypto.random;
 
 const msg = @import("msg.zig");
 const key = @import("key.zig");
-const record = @import("record.zig");
 const extension = @import("extension.zig");
 const certificate = @import("certificate.zig");
 const key_share = @import("key_share.zig");
@@ -29,6 +28,8 @@ const NamedGroup = @import("supported_groups.zig").NamedGroup;
 const NamedGroupList = @import("supported_groups.zig").NamedGroupList;
 const RecordPayloadProtector = @import("protector.zig").RecordPayloadProtector;
 const TLSPlainText = @import("tls_plain.zig").TLSPlainText;
+const TLSCipherText = @import("tls_cipher.zig").TLSCipherText;
+const TLSInnerPlainText = @import("tls_cipher.zig").TLSInnerPlainText;
 
 const Content = @import("content.zig").Content;
 const ContentType = @import("content.zig").ContentType;
@@ -189,7 +190,7 @@ pub const TLSClient = struct {
                     self.crypto_mode = true;
                 }
             } else {
-                const recv_record = try record.TLSCipherText.decode(reader, t, self.allocator);
+                const recv_record = try TLSCipherText.decode(reader, t, self.allocator);
                 defer recv_record.deinit();
 
                 var plain_record = try self.hs_protector.decrypt(recv_record, self.allocator);
@@ -232,7 +233,7 @@ pub const TLSClient = struct {
                 std.log.err("ERROR!!!", .{});
                 continue;
             }
-            const recv_record = try record.TLSCipherText.decode(reader, t, self.allocator);
+            const recv_record = try TLSCipherText.decode(reader, t, self.allocator);
             defer recv_record.deinit();
 
             const plain_record = try self.ap_protector.decrypt(recv_record, self.allocator);
@@ -267,7 +268,7 @@ pub const TLSClient = struct {
         var close_recv = false;
         while (!close_recv) {
             const t = try reader.readEnum(ContentType, .Big);
-            const recv_record = try record.TLSCipherText.decode(reader, t, self.allocator);
+            const recv_record = try TLSCipherText.decode(reader, t, self.allocator);
             defer recv_record.deinit();
 
             const plain_record = try self.ap_protector.decrypt(recv_record, self.allocator);
@@ -329,7 +330,7 @@ pub const TLSClient = struct {
         self.state = .WAIT_EE;
     }
 
-    fn handleHandshakeInnerPlaintext(self: *Self, t: record.TLSInnerPlainText, writer: anytype) !void {
+    fn handleHandshakeInnerPlaintext(self: *Self, t: TLSInnerPlainText, writer: anytype) !void {
         var contents = try t.decodeContents(self.allocator, self.ks.hkdf);
         defer {
             for (contents.items) |c| {
@@ -590,7 +591,7 @@ test "client test with RFC8448" {
     const hs_c_finished = Handshake{ .finished = c_finished };
 
     const c_finished_ans = [_]u8{ 0x14, 0x0, 0x0, 0x20, 0xa8, 0xec, 0x43, 0x6d, 0x67, 0x76, 0x34, 0xae, 0x52, 0x5a, 0xc1, 0xfc, 0xeb, 0xe1, 0x1a, 0x03, 0x9e, 0xc1, 0x76, 0x94, 0xfa, 0xc6, 0xe9, 0x85, 0x27, 0xb6, 0x42, 0xf2, 0xed, 0xd5, 0xce, 0x61 };
-    var c_finished_inner = try record.TLSInnerPlainText.init(hs_c_finished.length(), .handshake, std.testing.allocator);
+    var c_finished_inner = try TLSInnerPlainText.init(hs_c_finished.length(), .handshake, std.testing.allocator);
     c_finished_inner.content_type = .handshake;
     defer c_finished_inner.deinit();
     var inner_stream = io.fixedBufferStream(c_finished_inner.content);

@@ -4,8 +4,8 @@ const crypto = @import("crypto.zig");
 
 const expect = std.testing.expect;
 
-const TLSInnerPlainText = @import("record.zig").TLSInnerPlainText;
-const TLSCipherText = @import("record.zig").TLSCipherText;
+const TLSInnerPlainText = @import("tls_cipher.zig").TLSInnerPlainText;
+const TLSCipherText = @import("tls_cipher.zig").TLSCipherText;
 const Content = @import("content.zig").Content;
 const ContentType = @import("content.zig").ContentType;
 const RecordKeys = @import("crypto.zig").Secret.RecordKeys;

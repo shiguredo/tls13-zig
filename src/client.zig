@@ -402,16 +402,11 @@ pub const TLSClient = struct {
 
                 // construct client finished message
                 const c_finished = try Finished.fromMessageBytes(self.msgs_stream.getWritten(), self.ks.secret.c_hs_finished_secret.slice(), crypto.Hkdf.Sha256.hkdf);
-                const hs_c_finished = Handshake{ .finished = c_finished };
+                const hs_c_finished = record.Content{ .handshake = Handshake{ .finished = c_finished } };
+                defer hs_c_finished.deinit();
 
-                var c_finished_inner = try record.TLSInnerPlainText.init(hs_c_finished.length(), .handshake, self.allocator);
-                defer c_finished_inner.deinit();
-                var inner_stream = io.fixedBufferStream(c_finished_inner.content);
-                _ = try hs_c_finished.encode(inner_stream.writer());
-
-                c_finished_inner.content_type = .handshake;
                 const nonce = try self.ks.generateNonce(self.ks.secret.c_hs_iv.slice(), 0);
-                const c_record_finished = try self.protector.encrypt(c_finished_inner, nonce.slice(), self.ks.secret.c_hs_key.slice(), self.allocator);
+                const c_record_finished = try self.protector.encryptFromMessage(hs_c_finished, nonce.slice(), self.ks.secret.c_hs_key.slice(), self.allocator);
                 defer c_record_finished.deinit();
                 _ = try c_record_finished.encode(writer);
 

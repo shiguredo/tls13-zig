@@ -2,174 +2,10 @@ const std = @import("std");
 const io = std.io;
 const expect = std.testing.expect;
 const expectError = std.testing.expectError;
+const asn1 = @import("cert/asn1.zig");
 
 const BoundedArray = std.BoundedArray;
 const ArrayList = std.ArrayList;
-
-pub const ASN1 = struct {
-    const Tag = enum(u8) {
-        BOOLEAN = 0x01,
-        INTEGER = 0x02,
-        BIT_STRING = 0x03,
-        OCTET_STRING = 0x04,
-        NULL = 0x05,
-        OBJECT_IDENTIFIER = 0x06,
-        UTCTime = 0x17,
-        GeneralizedTime = 0x18,
-        SEQUENCE = 0x30, // SEQUENCE OF
-        SET = 0x31, // SET OF
-    };
-
-    const Error = error{
-        InvalidType,
-        InvalidLength,
-        InvalidFormat,
-        TooLarge,
-        NotAllDecoded,
-    };
-
-    fn decodeLength(reader: anytype) !u64 {
-        const len = try reader.readByte();
-
-        // Short form
-        if (len & 0x80 == 0) {
-            return len;
-        }
-
-        // Long form
-        const len_size = len & 0x7F;
-
-        // length field larger than u64 is ignored
-        if (len_size > 4) {
-            return Error.TooLarge;
-        }
-
-        var i: usize = 0;
-        var res: u64 = 0;
-        while (i < len_size) : (i += 1) {
-            res = (res << 8) | (try reader.readByte());
-        }
-
-        return res;
-    }
-
-    fn getLengthSize(len: u64) usize {
-        if (len < 0x80) {
-            return 1;
-        }
-
-        var res: usize = 1;
-        var cur = len;
-        while (cur > 0) {
-            cur = cur >> 8;
-            res += 1;
-        }
-
-        return res;
-    }
-
-    // https://docs.microsoft.com/ja-jp/windows/win32/seccertenroll/about-object-identifier
-    fn encodeOID(out: []u8, id: []const u8) !usize {
-        var count: usize = 0;
-        var out_idx: usize = 0;
-        var start_idx: usize = 0;
-        for (id) |c, i| {
-            if (i != (id.len - 1) and c != '.') {
-                continue;
-            }
-            var end_idx = i;
-            if (i == (id.len - 1)) {
-                end_idx = id.len;
-            }
-
-            const code = try std.fmt.parseInt(usize, id[start_idx..end_idx], 10);
-            if (count == 0) {
-                out[out_idx] = @intCast(u8, code);
-                count += 1;
-            } else if (count == 1) {
-                out[out_idx] = @intCast(u8, out[out_idx] * 40 + code);
-                out_idx += 1;
-                count += 1;
-            } else {
-                out_idx += encodeOIDInt(out[out_idx..], code);
-            }
-            start_idx = i + 1;
-        }
-
-        return out_idx;
-    }
-
-    fn decodeOID(out: []u8, id: []const u8) usize {
-        var start_idx: usize = 0;
-        var cur_idx: usize = 0;
-        var out_idx: usize = 0;
-        while (start_idx < id.len) {
-            if (start_idx == 0) {
-                out[out_idx] = (id[0] / 40) + '0';
-                out_idx += 1;
-                out[out_idx] = '.';
-                out_idx += 1;
-                out[out_idx] = (id[0] % 40) + '0';
-                out_idx += 1;
-                start_idx += 1;
-            } else {
-                cur_idx = start_idx;
-                while (id[cur_idx] > 0x80) {
-                    cur_idx += 1;
-                }
-                cur_idx += 1;
-
-                const code = decodeOIDInt(id[start_idx..cur_idx]);
-                start_idx = cur_idx;
-
-                const s = std.fmt.bufPrintIntToSlice(out[out_idx..], code, 10, .lower, .{});
-                out_idx += s.len;
-            }
-
-            if (start_idx != id.len) {
-                out[out_idx] = '.';
-                out_idx += 1;
-            }
-        }
-
-        return out_idx;
-    }
-
-    fn encodeOIDInt(out: []u8, i: usize) usize {
-        var tmp: [100]u8 = undefined;
-        var idx: usize = 0;
-        var cur = i;
-        while (cur > 0) {
-            tmp[idx] = @intCast(u8, cur % 128);
-            if (idx > 0) {
-                tmp[idx] += 0x80;
-            }
-            cur = cur / 128;
-            idx += 1;
-        }
-
-        var rev_i: usize = 0;
-        while (rev_i < idx) : (rev_i += 1) {
-            out[rev_i] = tmp[idx - rev_i - 1];
-        }
-
-        return idx;
-    }
-
-    fn decodeOIDInt(bytes: []const u8) usize {
-        var res: usize = 0;
-        for (bytes) |b, i| {
-            res *= 128;
-            if (i == bytes.len - 1) {
-                res += b;
-            } else {
-                res += (b - 0x80);
-            }
-        }
-
-        return res;
-    }
-};
 
 const OIDEntry = struct {
     oid: []const u8,
@@ -272,7 +108,7 @@ const OIDMap = struct {
 
     fn getEntryByBytes(oid_bytes: []const u8) !OIDEntry {
         var oid_c: [100]u8 = undefined;
-        const oid_len = ASN1.decodeOID(&oid_c, oid_bytes);
+        const oid_len = asn1.Decoder.decodeOID(&oid_c, oid_bytes);
         const oid = oid_c[0..oid_len];
         for (map) |e| {
             if (std.mem.eql(u8, oid, e.oid)) {
@@ -283,39 +119,6 @@ const OIDMap = struct {
         return Error.NotFound;
     }
 };
-
-test "encodeOIDInt & decodeOIDInt 1" {
-    var res: [100]u8 = undefined;
-    const len = ASN1.encodeOIDInt(&res, 311);
-    try expect(std.mem.eql(u8, res[0..len], &([_]u8{ 0x82, 0x37 })));
-    try expect(ASN1.decodeOIDInt(res[0..len]) == 311);
-}
-
-test "encodeOIDInt & decodeOIDInt 2" {
-    var res: [100]u8 = undefined;
-    const len = ASN1.encodeOIDInt(&res, 56789);
-    try expect(std.mem.eql(u8, res[0..len], &([_]u8{ 0x83, 0xbb, 0x55 })));
-    try expect(ASN1.decodeOIDInt(res[0..len]) == 56789);
-}
-
-test "encodeOIDInt & decodeOIDInt 3" {
-    var res: [100]u8 = undefined;
-    const len = ASN1.encodeOIDInt(&res, 113549);
-    try expect(std.mem.eql(u8, res[0..len], &([_]u8{ 0x86, 0xf7, 0x0d })));
-    try expect(ASN1.decodeOIDInt(res[0..len]) == 113549);
-}
-
-test "encodeOID" {
-    var res: [100]u8 = undefined;
-    const len = try ASN1.encodeOID(&res, "1.3.6.1.4.1.311.21.20");
-    try expect(std.mem.eql(u8, res[0..len], &([_]u8{ 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x15, 0x14 })));
-}
-
-test "decodeOID" {
-    var res: [100]u8 = undefined;
-    const len = ASN1.decodeOID(&res, &([_]u8{ 0x2b, 0x06, 0x1, 0x04, 0x01, 0x82, 0x37, 0x15, 0x14 }));
-    try expect(std.mem.eql(u8, res[0..len], "1.3.6.1.4.1.311.21.20"));
-}
 
 // From RFC5280 Section-4.1 (p. 16)
 // Certificate  ::=  SEQUENCE  {
@@ -336,32 +139,19 @@ pub const Certificate = struct {
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
-        const t = @intToEnum(ASN1.Tag, try reader.readByte());
-        if (t != .SEQUENCE) {
-            return ASN1.Error.InvalidType;
-        }
-        const len = try ASN1.decodeLength(reader);
-        var content = try allocator.alloc(u8, len);
-        defer allocator.free(content);
+        return try asn1.Decoder.decodeSEQUENCE(reader, allocator, Self);
+    }
 
-        // read all content
-        try reader.readNoEof(content);
-
-        var content_stream = io.fixedBufferStream(content);
-        var content_reader = content_stream.reader();
-
-        const tbs_certificate = try TBSCertificate.decode(content_reader, allocator);
+    pub fn decodeContent(stream: *asn1.Stream, allocator: std.mem.Allocator) !Self {
+        const reader = stream.reader();
+        const tbs_certificate = try TBSCertificate.decode(reader, allocator);
         errdefer tbs_certificate.deinit();
 
-        const signature_algorithm = try AlgorithmIdentifier.decode(content_reader, allocator);
+        const signature_algorithm = try AlgorithmIdentifier.decode(reader, allocator);
         errdefer signature_algorithm.deinit();
 
-        const signature_value = try SignatureValue.decode(content_reader, allocator);
+        const signature_value = try SignatureValue.decode(reader, allocator);
         errdefer signature_value.deinit();
-
-        if ((try content_stream.getPos()) != (try content_stream.getEndPos())) {
-            return ASN1.Error.NotAllDecoded;
-        }
 
         return Self{
             .tbs_certificate = tbs_certificate,
@@ -417,57 +207,46 @@ pub const TBSCertificate = struct {
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
-        const t = @intToEnum(ASN1.Tag, try reader.readByte());
-        if (t != .SEQUENCE) {
-            return ASN1.Error.InvalidType;
-        }
-        const len = try ASN1.decodeLength(reader);
-        var content = try allocator.alloc(u8, len);
-        defer allocator.free(content);
+        return try asn1.Decoder.decodeSEQUENCE(reader, allocator, Self);
+    }
 
-        // read all content
-        try reader.readNoEof(content);
-        var content_stream = io.fixedBufferStream(content);
-        var content_reader = content_stream.reader();
-
-        const v = try content_reader.readByte();
+    pub fn decodeContent(stream: *asn1.Stream, allocator: std.mem.Allocator) !Self {
+        const reader = stream.reader();
+        const v = try reader.readByte();
         if (v != 0xA0) { // [0] EXPLICIT
-            return ASN1.Error.InvalidType;
+            return asn1.Decoder.Error.InvalidType;
         }
-        const v_len = try content_reader.readByte();
+        const v_len = try reader.readByte();
         if (v_len != 0x03) { // length is assumed to be 3
-            return ASN1.Error.InvalidLength;
+            return asn1.Decoder.Error.InvalidLength;
         }
-        const version = try Version.decode(content_reader);
+        const version = try Version.decode(reader);
 
-        const serial_number = try CertificateSerialNumber.decode(content_reader);
+        const serial_number = try CertificateSerialNumber.decode(reader);
 
-        const signature = try AlgorithmIdentifier.decode(content_reader, allocator);
+        const signature = try AlgorithmIdentifier.decode(reader, allocator);
         errdefer signature.deinit();
 
-        const issuer = try Name.decode(content_reader, allocator);
+        const issuer = try Name.decode(reader, allocator);
         errdefer issuer.deinit();
 
-        const validity = try Validity.decode(content_reader);
+        const validity = try Validity.decode(reader, allocator);
+        errdefer validity.deinit();
 
-        const subject = try Name.decode(content_reader, allocator);
+        const subject = try Name.decode(reader, allocator);
         errdefer subject.deinit();
 
-        const subjectPublicKeyInfo = try SubjectPublicKeyInfo.decode(content_reader, allocator);
+        const subjectPublicKeyInfo = try SubjectPublicKeyInfo.decode(reader, allocator);
         errdefer subjectPublicKeyInfo.deinit();
 
-        if ((try content_reader.readByte()) != 0xA3) { // [3] EXPLICIT
-            return ASN1.Error.InvalidType;
+        if ((try reader.readByte()) != 0xA3) { // [3] EXPLICIT
+            return asn1.Decoder.Error.InvalidType;
         }
-        const exts_len = try ASN1.decodeLength(content_reader);
+        const exts_len = try asn1.Decoder.decodeLength(reader);
         _ = exts_len;
 
-        const extensions = try Extensions.decode(content_reader, allocator);
+        const extensions = try Extensions.decode(reader, allocator);
         errdefer extensions.deinit();
-
-        if ((try content_stream.getPos()) != (try content_stream.getEndPos())) {
-            return ASN1.Error.NotAllDecoded;
-        }
 
         return Self{
             .version = version,
@@ -506,13 +285,13 @@ pub const Version = enum(u8) {
 
     const Self = @This();
     pub fn decode(reader: anytype) !Self {
-        const t = @intToEnum(ASN1.Tag, try reader.readByte());
+        const t = @intToEnum(asn1.Tag, try reader.readByte());
         if (t != .INTEGER) {
-            return ASN1.Error.InvalidType;
+            return asn1.Decoder.Error.InvalidType;
         }
         const t_len = try reader.readByte();
         if (t_len != 0x01) { // length is assumed to be 1(u8)
-            return ASN1.Error.InvalidLength;
+            return asn1.Decoder.Error.InvalidLength;
         }
 
         return @intToEnum(Self, try reader.readByte());
@@ -533,11 +312,11 @@ const CertificateSerialNumber = struct {
     }
 
     pub fn decode(reader: anytype) !Self {
-        const t = @intToEnum(ASN1.Tag, try reader.readByte());
+        const t = @intToEnum(asn1.Tag, try reader.readByte());
         if (t != .INTEGER) {
-            return ASN1.Error.InvalidType;
+            return asn1.Decoder.Error.InvalidType;
         }
-        const len = try ASN1.decodeLength(reader);
+        const len = try asn1.Decoder.decodeLength(reader);
         var res = try Self.init(len);
 
         try reader.readNoEof(res.serial.slice());
@@ -549,7 +328,7 @@ const CertificateSerialNumber = struct {
 //      algorithm               OBJECT IDENTIFIER,
 //      parameters              ANY DEFINED BY algorithm OPTIONAL  }
 pub const AlgorithmIdentifier = struct {
-    algorithm: []u8 = &([_]u8{}),
+    algorithm: asn1.ObjectIdentifier,
     parameters: []u8 = &([_]u8{}),
 
     allocator: std.mem.Allocator,
@@ -557,55 +336,35 @@ pub const AlgorithmIdentifier = struct {
     const Self = @This();
 
     pub fn deinit(self: Self) void {
-        if (self.algorithm.len != 0) {
-            self.allocator.free(self.algorithm);
-        }
+        self.algorithm.deinit();
         if (self.parameters.len != 0) {
             self.allocator.free(self.parameters);
         }
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
-        const t = @intToEnum(ASN1.Tag, try reader.readByte());
-        if (t != .SEQUENCE) {
-            return ASN1.Error.InvalidType;
-        }
-        const len = try ASN1.decodeLength(reader);
-        var content = try allocator.alloc(u8, len);
-        defer allocator.free(content);
+        return try asn1.Decoder.decodeSEQUENCE(reader, allocator, Self);
+    }
 
-        // read all content
-        try reader.readNoEof(content);
-        var content_stream = io.fixedBufferStream(content);
-        var content_reader = content_stream.reader();
+    pub fn decodeContent(stream: *asn1.Stream, allocator: std.mem.Allocator) !Self {
+        const reader = stream.reader();
 
-        const t_algo = @intToEnum(ASN1.Tag, try content_reader.readByte());
-        if (t_algo != .OBJECT_IDENTIFIER) {
-            return ASN1.Error.InvalidType;
-        }
-        const algo_len = try ASN1.decodeLength(content_reader);
-        var algorithm = try allocator.alloc(u8, algo_len);
-        errdefer allocator.free(algorithm);
-
-        try content_reader.readNoEof(algorithm);
+        const algorithm = try asn1.ObjectIdentifier.decode(reader, allocator);
+        errdefer algorithm.deinit();
 
         // some algorithm do not have parameters
-        if ((try content_stream.getPos()) == (try content_stream.getEndPos())) {
+        if ((try stream.getPos()) == (try stream.getEndPos())) {
             return Self{
                 .algorithm = algorithm,
                 .allocator = allocator,
             };
         }
 
-        const rest_len = (try content_stream.getEndPos()) - (try content_stream.getPos());
+        const rest_len = (try stream.getEndPos()) - (try stream.getPos());
         var parameters = try allocator.alloc(u8, rest_len);
         errdefer allocator.free(parameters);
 
-        try content_reader.readNoEof(parameters);
-
-        if ((try content_stream.getPos()) != (try content_stream.getEndPos())) {
-            return ASN1.Error.NotAllDecoded;
-        }
+        try reader.readNoEof(parameters);
 
         return Self{
             .algorithm = algorithm,
@@ -616,7 +375,7 @@ pub const AlgorithmIdentifier = struct {
 
     pub fn print(self: Self, comptime pf: fn ([]const u8, anytype) void, comptime prefix: []const u8) void {
         var oid: [100]u8 = undefined;
-        const oid_len = ASN1.decodeOID(&oid, self.algorithm);
+        const oid_len = asn1.Decoder.decodeOID(&oid, self.algorithm);
         if (OIDMap.getEntryByBytes(self.algorithm)) |e| {
             pf("{s}Algorithm = {s}", .{ prefix, e.display_name });
         } else |e| {
@@ -625,28 +384,28 @@ pub const AlgorithmIdentifier = struct {
     }
 };
 
-// Name ::= CHOICE { -- only one possibility for now --
-//   rdnSequence  RDNSequence }
-
-// RDNSequence ::= SEQUENCE OF RelativeDistinguishedName
-
-// RelativeDistinguishedName ::=
-//   SET SIZE (1..MAX) OF AttributeTypeAndValue
-
-// AttributeTypeAndValue ::= SEQUENCE {
-//   type     AttributeType,
-//   value    AttributeValue }
-
-// AttributeType ::= OBJECT IDENTIFIER
-
-// AttributeValue ::= ANY -- DEFINED BY AttributeType
-
-// DirectoryString ::= CHOICE {
-//       teletexString           TeletexString (SIZE (1..MAX)),
-//       printableString         PrintableString (SIZE (1..MAX)),
-//       universalString         UniversalString (SIZE (1..MAX)),
-//       utf8String              UTF8String (SIZE (1..MAX)),
-//       bmpString               BMPString (SIZE (1..MAX)) }
+/// Name ::= CHOICE { -- only one possibility for now --
+///   rdnSequence  RDNSequence }
+///
+/// RDNSequence ::= SEQUENCE OF RelativeDistinguishedName
+///
+/// RelativeDistinguishedName ::=
+///   SET SIZE (1..MAX) OF AttributeTypeAndValue
+///
+/// AttributeTypeAndValue ::= SEQUENCE {
+///   type     AttributeType,
+///   value    AttributeValue }
+///
+/// AttributeType ::= OBJECT IDENTIFIER
+///
+/// AttributeValue ::= ANY -- DEFINED BY AttributeType
+///
+/// DirectoryString ::= CHOICE {
+///       teletexString           TeletexString (SIZE (1..MAX)),
+///       printableString         PrintableString (SIZE (1..MAX)),
+///       universalString         UniversalString (SIZE (1..MAX)),
+///       utf8String              UTF8String (SIZE (1..MAX)),
+///       bmpString               BMPString (SIZE (1..MAX)) }
 const Name = struct {
     rdn_sequence: ArrayList(RelativeDistinguishedName),
 
@@ -660,14 +419,15 @@ const Name = struct {
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
-        const t = @intToEnum(ASN1.Tag, try reader.readByte());
-        if (t != .SEQUENCE) { // currently RDNSequence(SEQUENCE OF) only
-            return ASN1.Error.InvalidType;
-        }
-        const len = try ASN1.decodeLength(reader);
+        return try asn1.Decoder.decodeSEQUENCE(reader, allocator, Self);
+    }
+
+    pub fn decodeContent(stream: *asn1.Stream, allocator: std.mem.Allocator) !Self {
+        const reader = stream.reader();
         var rdn_seq = ArrayList(RelativeDistinguishedName).init(allocator);
         errdefer rdn_seq.deinit();
 
+        const len = try stream.getEndPos();
         var cur: usize = 0;
         while (cur < len) {
             const r = try RelativeDistinguishedName.decode(reader, allocator);
@@ -701,11 +461,11 @@ const RelativeDistinguishedName = struct {
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
-        const t = @intToEnum(ASN1.Tag, try reader.readByte());
+        const t = @intToEnum(asn1.Tag, try reader.readByte());
         if (t != .SET) {
-            return ASN1.Error.InvalidType;
+            return asn1.Decoder.Error.InvalidType;
         }
-        const len = try ASN1.decodeLength(reader);
+        const len = try asn1.Decoder.decodeLength(reader);
         var attrs = ArrayList(AttributeTypeAndValue).init(allocator);
         var cur: usize = 0;
         while (cur < len) {
@@ -720,7 +480,7 @@ const RelativeDistinguishedName = struct {
     }
 
     pub fn length(self: Self) usize {
-        return self.len + 1 + ASN1.getLengthSize(self.len);
+        return self.len + 1 + asn1.Decoder.getLengthSize(self.len);
     }
 
     pub fn print(self: Self, comptime pf: fn ([]const u8, anytype) void, comptime prefix: []const u8) void {
@@ -732,7 +492,7 @@ const RelativeDistinguishedName = struct {
 };
 
 const AttributeTypeAndValue = struct {
-    attr_type: []u8,
+    attr_type: asn1.ObjectIdentifier,
     attr_value: []u8,
     len: usize = 0,
 
@@ -741,29 +501,24 @@ const AttributeTypeAndValue = struct {
     const Self = @This();
 
     pub fn deinit(self: Self) void {
-        self.allocator.free(self.attr_type);
+        self.attr_type.deinit();
         self.allocator.free(self.attr_value);
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
-        const t = @intToEnum(ASN1.Tag, try reader.readByte());
-        if (t != .SEQUENCE) {
-            return ASN1.Error.InvalidType;
-        }
-        const len = try ASN1.decodeLength(reader);
+        return try asn1.Decoder.decodeSEQUENCE(reader, allocator, Self);
+    }
 
-        const t_type = @intToEnum(ASN1.Tag, try reader.readByte());
-        if (t_type != .OBJECT_IDENTIFIER) {
-            return ASN1.Error.InvalidType;
-        }
-        const type_len = try ASN1.decodeLength(reader);
-        var attr_type = try allocator.alloc(u8, type_len);
-        errdefer allocator.free(attr_type);
-        try reader.readNoEof(attr_type);
+    pub fn decodeContent(stream: *asn1.Stream, allocator: std.mem.Allocator) !Self {
+        const len = try stream.getEndPos();
+        const reader = stream.reader();
+
+        const attr_type = try asn1.ObjectIdentifier.decode(reader, allocator);
+        errdefer attr_type.deinit();
 
         const t_value = try reader.readByte(); // TODO: check value type defined by attr_type
         _ = t_value;
-        const value_len = try ASN1.decodeLength(reader);
+        const value_len = try asn1.Decoder.decodeLength(reader);
         var attr_value = try allocator.alloc(u8, value_len);
         errdefer allocator.free(attr_value);
         try reader.readNoEof(attr_value);
@@ -777,12 +532,12 @@ const AttributeTypeAndValue = struct {
     }
 
     pub fn length(self: Self) usize {
-        return self.len + 1 + ASN1.getLengthSize(self.len);
+        return self.len + 1 + asn1.Decoder.getLengthSize(self.len);
     }
 
     pub fn print(self: Self, comptime pf: fn ([]const u8, anytype) void, comptime prefix: []const u8) void {
         var oid: [100]u8 = undefined;
-        const oid_len = ASN1.decodeOID(&oid, self.attr_type);
+        const oid_len = asn1.Decoder.decodeOID(&oid, self.attr_type);
         if (OIDMap.getEntryByBytes(self.attr_type)) |e| {
             pf("{s}{s} = {s}", .{ prefix, e.display_name, self.attr_value });
         } else |e| {
@@ -804,14 +559,17 @@ const Validity = struct {
 
     const Self = @This();
 
-    pub fn decode(reader: anytype) !Self {
-        const t = @intToEnum(ASN1.Tag, try reader.readByte());
-        if (t != .SEQUENCE) {
-            return ASN1.Error.InvalidType;
-        }
-        const len = try ASN1.decodeLength(reader);
-        _ = len; //TODO: validate
+    pub fn deinit(self: Self) void {
+        _ = self;
+    }
 
+    pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
+        return try asn1.Decoder.decodeSEQUENCE(reader, allocator, Self);
+    }
+
+    pub fn decodeContent(stream: *asn1.Stream, allocator: std.mem.Allocator) !Self {
+        _ = allocator;
+        const reader = stream.reader();
         const notBefore = try Time.decode(reader);
         const notAfter = try Time.decode(reader);
         return Self{
@@ -827,7 +585,7 @@ const Validity = struct {
 };
 
 const Time = struct {
-    time_type: ASN1.Tag,
+    time_type: asn1.Tag,
 
     year: usize = 0,
     month: usize = 0,
@@ -842,11 +600,11 @@ const Time = struct {
     const Self = @This();
 
     pub fn decode(reader: anytype) !Self {
-        const time_type = @intToEnum(ASN1.Tag, try reader.readByte());
+        const time_type = @intToEnum(asn1.Tag, try reader.readByte());
         var res = Self{
             .time_type = time_type,
         };
-        const len = try ASN1.decodeLength(reader);
+        const len = try asn1.Decoder.decodeLength(reader);
         _ = len;
 
         if (res.time_type == .UTCTime) {
@@ -893,7 +651,7 @@ const Time = struct {
         } else if (s == '-') {
             self.plus = false;
         } else {
-            return ASN1.Error.InvalidFormat;
+            return asn1.Decoder.Error.InvalidFormat;
         }
 
         // hhmm
@@ -935,21 +693,18 @@ const SubjectPublicKeyInfo = struct {
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
-        const t = @intToEnum(ASN1.Tag, try reader.readByte());
-        if (t != .SEQUENCE) {
-            return ASN1.Error.InvalidType;
-        }
-        const len = try ASN1.decodeLength(reader);
-        _ = len;
+        return try asn1.Decoder.decodeSEQUENCE(reader, allocator, Self);
+    }
 
+    pub fn decodeContent(stream: *asn1.Stream, allocator: std.mem.Allocator) !Self {
+        const reader = stream.reader();
         const algorithm = try AlgorithmIdentifier.decode(reader, allocator);
+        errdefer algorithm.deinit();
 
-        var oid_out: [100]u8 = undefined;
-        var oid_len = ASN1.decodeOID(&oid_out, algorithm.algorithm);
         var pub_key_type: PublicKeyType = undefined;
-        if (std.mem.eql(u8, oid_out[0..oid_len], "1.2.840.113549.1.1.1")) {
+        if (std.mem.eql(u8, algorithm.algorithm.id, "1.2.840.113549.1.1.1")) {
             pub_key_type = PublicKeyType.rsa;
-        } else if (std.mem.eql(u8, oid_out[0..oid_len], "1.2.840.10045.2.1")) {
+        } else if (std.mem.eql(u8, algorithm.algorithm.id, "1.2.840.10045.2.1")) {
             // RFC 5480 Section 2.1.1.1 Named Curve
             //ECParameters ::= CHOICE {
             //  namedCurve         OBJECT IDENTIFIER
@@ -957,40 +712,33 @@ const SubjectPublicKeyInfo = struct {
             //  -- specifiedCurve  SpecifiedECDomain
             //}
             var ec_stream = io.fixedBufferStream(algorithm.parameters);
-            const t_ec = @intToEnum(ASN1.Tag, try ec_stream.reader().readByte());
-            if (t_ec != .OBJECT_IDENTIFIER) {
-                return ASN1.Error.InvalidFormat;
-            }
-            const ec_len = try ASN1.decodeLength(ec_stream.reader());
-            if (ec_len == 0) {
-                // imlicitCurve is not supported.
-                return ASN1.Error.InvalidFormat;
-            }
-            const start_idx = algorithm.parameters.len - ec_len;
-            const curve = algorithm.parameters[start_idx..];
-            oid_len = ASN1.decodeOID(&oid_out, curve);
-            if (std.mem.eql(u8, oid_out[0..oid_len], "1.2.840.10045.3.1.7")) {
+
+            // Currently, only 'namedCurve' is supported.
+            const named_curve = try asn1.ObjectIdentifier.decode(ec_stream.reader(), allocator);
+            defer named_curve.deinit();
+
+            if (std.mem.eql(u8, named_curve.id, "1.2.840.10045.3.1.7")) {
                 pub_key_type = PublicKeyType.secp256r1;
             } else {
                 return Error.UnsupportedCurve;
             }
         } else {
             //currently, only accepts 'rsaEncryption'
-            return ASN1.Error.InvalidFormat;
+            return asn1.Decoder.Error.InvalidFormat;
         }
 
-        const t_key = @intToEnum(ASN1.Tag, try reader.readByte());
+        const t_key = @intToEnum(asn1.Tag, try reader.readByte());
         if (t_key != .BIT_STRING) {
-            return ASN1.Error.InvalidType;
+            return asn1.Decoder.Error.InvalidType;
         }
-        const key_len = try ASN1.decodeLength(reader);
+        const key_len = try asn1.Decoder.decodeLength(reader);
 
         // the first byte of 'BIT STRING' specifies
         // the number of bits not used in the last of the octets
         const b = try reader.readByte();
         if (b != 0x00) {
             // TODO: handle this
-            return ASN1.Error.InvalidFormat;
+            return asn1.Decoder.Error.InvalidFormat;
         }
 
         const pub_key = try PublicKey.decode(pub_key_type, reader, key_len - 1, allocator);
@@ -1053,32 +801,17 @@ const RSAPublicKey = struct {
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
-        const t = @intToEnum(ASN1.Tag, try reader.readByte());
-        if (t != .SEQUENCE) {
-            return ASN1.Error.InvalidType;
-        }
-        const len = try ASN1.decodeLength(reader);
-        _ = len;
+        return try asn1.Decoder.decodeSEQUENCE(reader, allocator, Self);
+    }
 
-        const t_modu = @intToEnum(ASN1.Tag, try reader.readByte());
-        if (t_modu != .INTEGER) {
-            return ASN1.Error.InvalidType;
-        }
-        const modu_len = try ASN1.decodeLength(reader);
-        var modulus = try allocator.alloc(u8, modu_len);
+    pub fn decodeContent(stream: *asn1.Stream, allocator: std.mem.Allocator) !Self {
+        const reader = stream.reader();
+
+        const modulus = try asn1.Decoder.decodeINTEGER(reader, allocator);
         errdefer allocator.free(modulus);
 
-        try reader.readNoEof(modulus);
-
-        const t_exp = @intToEnum(ASN1.Tag, try reader.readByte());
-        if (t_exp != .INTEGER) {
-            return ASN1.Error.InvalidType;
-        }
-        const exp_len = try ASN1.decodeLength(reader);
-        var publicExponent = try allocator.alloc(u8, exp_len);
+        const publicExponent = try asn1.Decoder.decodeINTEGER(reader, allocator);
         errdefer allocator.free(publicExponent);
-
-        try reader.readNoEof(publicExponent);
 
         return Self{
             .modulus = modulus,
@@ -1111,7 +844,6 @@ const Secp256r1PublicKey = struct {
 
     pub fn decode(reader: anytype, len: usize) !Self {
         var buf: [100]u8 = undefined;
-        std.log.warn("len={}", .{len});
         if (len > buf.len) {
             return Error.UnsupportedFormat;
         }
@@ -1138,11 +870,12 @@ const Extensions = struct {
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
-        const t = @intToEnum(ASN1.Tag, try reader.readByte());
-        if (t != .SEQUENCE) {
-            return ASN1.Error.InvalidType;
-        }
-        const len = try ASN1.decodeLength(reader);
+        return asn1.Decoder.decodeSEQUENCE(reader, allocator, Self);
+    }
+
+    pub fn decodeContent(stream: *asn1.Stream, allocator: std.mem.Allocator) !Self {
+        const reader = stream.reader();
+        const len = try stream.getEndPos();
         var extensions = ArrayList(Extension).init(allocator);
         errdefer extensions.deinit();
 
@@ -1186,7 +919,7 @@ const ExtensionType = enum {
 
 const Extension = struct {
     len: usize,
-    oid: []u8,
+    oid: asn1.ObjectIdentifier,
     ciritcal: bool = false,
     value: ExtensionValue,
 
@@ -1195,44 +928,37 @@ const Extension = struct {
     const Self = @This();
 
     pub fn deinit(self: Self) void {
-        self.allocator.free(self.oid);
+        self.oid.deinit();
         self.value.deinit();
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
-        const t = @intToEnum(ASN1.Tag, try reader.readByte());
-        if (t != .SEQUENCE) {
-            return ASN1.Error.InvalidType;
-        }
-        const len = try ASN1.decodeLength(reader);
+        return try asn1.Decoder.decodeSEQUENCE(reader, allocator, Self);
+    }
 
-        if (@intToEnum(ASN1.Tag, try reader.readByte()) != .OBJECT_IDENTIFIER) {
-            return ASN1.Error.InvalidType;
-        }
-        var oid_len = try ASN1.decodeLength(reader);
-        var oid = try allocator.alloc(u8, oid_len);
-        errdefer allocator.free(oid);
+    pub fn decodeContent(stream: *asn1.Stream, allocator: std.mem.Allocator) !Self {
+        const reader = stream.reader();
+        const len = try stream.getEndPos();
 
-        try reader.readNoEof(oid);
+        const oid = try asn1.ObjectIdentifier.decode(reader, allocator);
+        errdefer oid.deinit();
 
-        var t_default = @intToEnum(ASN1.Tag, try reader.readByte());
+        var t_default = @intToEnum(asn1.Tag, try reader.readByte());
         if (t_default == .BOOLEAN) {
-            const criti_len = try ASN1.decodeLength(reader);
+            const criti_len = try asn1.Decoder.decodeLength(reader);
             var i: usize = 0;
             while (i < criti_len) : (i += 1) {
                 _ = try reader.readByte();
             }
-            t_default = @intToEnum(ASN1.Tag, try reader.readByte());
+            t_default = @intToEnum(asn1.Tag, try reader.readByte());
         }
 
         if (t_default != .OCTET_STRING) {
-            return ASN1.Error.InvalidType;
+            return asn1.Decoder.Error.InvalidType;
         }
-        const value_len = try ASN1.decodeLength(reader);
+        const value_len = try asn1.Decoder.decodeLength(reader);
 
-        var oid_out: [100]u8 = undefined;
-        oid_len = ASN1.decodeOID(&oid_out, oid);
-        const value = try ExtensionValue.decode(reader, oid_out[0..oid_len], value_len, allocator);
+        const value = try ExtensionValue.decode(reader, oid.id, value_len, allocator);
 
         return Self{
             .len = len,
@@ -1243,12 +969,12 @@ const Extension = struct {
     }
 
     pub fn length(self: Self) usize {
-        return self.len + 1 + ASN1.getLengthSize(self.len);
+        return self.len + 1 + asn1.Decoder.getLengthSize(self.len);
     }
 
     pub fn print(self: Self, comptime pf: fn ([]const u8, anytype) void, comptime prefix: []const u8) void {
         var oid: [100]u8 = undefined;
-        const oid_len = ASN1.decodeOID(&oid, self.oid);
+        const oid_len = asn1.Decoder.decodeOID(&oid, self.oid);
         if (OIDMap.getEntryByBytes(self.oid)) |e| {
             pf("{s}ExtensionName = {s}", .{ prefix, e.display_name });
         } else |e| {
@@ -1290,18 +1016,18 @@ pub const SignatureValue = struct {
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
-        const t = @intToEnum(ASN1.Tag, try reader.readByte());
+        const t = @intToEnum(asn1.Tag, try reader.readByte());
         if (t != .BIT_STRING) {
-            return ASN1.Error.InvalidType;
+            return asn1.Decoder.Error.InvalidType;
         }
-        const len = try ASN1.decodeLength(reader);
+        const len = try asn1.Decoder.decodeLength(reader);
 
         // the first byte of 'BIT STRING' specifies
         // the number of bits not used in the last of the octets
         const b = try reader.readByte();
         if (b != 0x00) {
             // TODO: handle this
-            return ASN1.Error.InvalidFormat;
+            return asn1.Decoder.Error.InvalidFormat;
         }
 
         var value = try allocator.alloc(u8, len - 1);
@@ -1331,11 +1057,11 @@ const Dummy = struct {
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
-        const t = @intToEnum(ASN1.Tag, try reader.readByte());
+        const t = @intToEnum(asn1.Tag, try reader.readByte());
         if (t != .SEQUENCE) {
-            return ASN1.Error.InvalidType;
+            return asn1.Error.InvalidType;
         }
-        const len = try ASN1.decodeLength(reader);
+        const len = try asn1.Decoder.decodeLength(reader);
         _ = len;
 
         return Self{
@@ -1483,9 +1209,7 @@ test "X.509 decode" {
     const serial_number_ans = [_]u8{ 0x68, 0x16, 0x04, 0xdf, 0xf3, 0x34, 0xf1, 0x71, 0xd8, 0x0a, 0x73, 0x55, 0x99, 0xc1, 0x41, 0x72 };
     try expect(std.mem.eql(u8, tbs.serial_number.serial.slice(), &serial_number_ans));
 
-    var oid_out: [100]u8 = undefined;
-    var oid_len = ASN1.decodeOID(&oid_out, tbs.signature.algorithm);
-    try expect(std.mem.eql(u8, oid_out[0..oid_len], "1.2.840.113549.1.1.11")); // sha256WithRSAEncryption
+    try expect(std.mem.eql(u8, tbs.signature.algorithm.id, "1.2.840.113549.1.1.11")); // sha256WithRSAEncryption
     const rd_seq = tbs.issuer.rdn_sequence.items;
 
     try expect(rd_seq.len == 5);
@@ -1513,33 +1237,22 @@ test "X.509 decode" {
     try expect(std.mem.eql(u8, rd_seq2[7].attrs.items[0].attr_value, "Nevada"));
     try expect(std.mem.eql(u8, rd_seq2[8].attrs.items[0].attr_value, "US"));
 
-    oid_len = ASN1.decodeOID(&oid_out, tbs.subjectPublicKeyInfo.algorithm.algorithm);
-    try expect(std.mem.eql(u8, oid_out[0..oid_len], "1.2.840.113549.1.1.1")); // rsaEncryption
+    try expect(std.mem.eql(u8, tbs.subjectPublicKeyInfo.algorithm.algorithm.id, "1.2.840.113549.1.1.1")); // rsaEncryption
 
     const exts = tbs.extensions.extensions.items;
     try expect(exts.len == 9);
 
-    oid_len = ASN1.decodeOID(&oid_out, exts[0].oid);
-    try expect(std.mem.eql(u8, oid_out[0..oid_len], "2.5.29.35")); // authorityKeyIdentifier
-    oid_len = ASN1.decodeOID(&oid_out, exts[1].oid);
-    try expect(std.mem.eql(u8, oid_out[0..oid_len], "1.3.6.1.5.5.7.1.1")); // authorityInfoAccess
-    oid_len = ASN1.decodeOID(&oid_out, exts[2].oid);
-    try expect(std.mem.eql(u8, oid_out[0..oid_len], "2.5.29.17")); // subjectAltName
-    oid_len = ASN1.decodeOID(&oid_out, exts[3].oid);
-    try expect(std.mem.eql(u8, oid_out[0..oid_len], "2.5.29.32")); // certificatePolicies
-    oid_len = ASN1.decodeOID(&oid_out, exts[4].oid);
-    try expect(std.mem.eql(u8, oid_out[0..oid_len], "2.5.29.37")); // extKeyUsage
-    oid_len = ASN1.decodeOID(&oid_out, exts[5].oid);
-    try expect(std.mem.eql(u8, oid_out[0..oid_len], "2.5.29.31")); // cRLDistributionPoints
-    oid_len = ASN1.decodeOID(&oid_out, exts[6].oid);
-    try expect(std.mem.eql(u8, oid_out[0..oid_len], "2.5.29.14")); // subjectKeyIdentifier
-    oid_len = ASN1.decodeOID(&oid_out, exts[7].oid);
-    try expect(std.mem.eql(u8, oid_out[0..oid_len], "2.5.29.15")); // keyUsage
-    oid_len = ASN1.decodeOID(&oid_out, exts[8].oid);
-    try expect(std.mem.eql(u8, oid_out[0..oid_len], "1.3.6.1.4.1.11129.2.4.2")); // Extended validation certificates
+    try expect(std.mem.eql(u8, exts[0].oid.id, "2.5.29.35")); // authorityKeyIdentifier
+    try expect(std.mem.eql(u8, exts[1].oid.id, "1.3.6.1.5.5.7.1.1")); // authorityInfoAccess
+    try expect(std.mem.eql(u8, exts[2].oid.id, "2.5.29.17")); // subjectAltName
+    try expect(std.mem.eql(u8, exts[3].oid.id, "2.5.29.32")); // certificatePolicies
+    try expect(std.mem.eql(u8, exts[4].oid.id, "2.5.29.37")); // extKeyUsage
+    try expect(std.mem.eql(u8, exts[5].oid.id, "2.5.29.31")); // cRLDistributionPoints
+    try expect(std.mem.eql(u8, exts[6].oid.id, "2.5.29.14")); // subjectKeyIdentifier
+    try expect(std.mem.eql(u8, exts[7].oid.id, "2.5.29.15")); // keyUsage
+    try expect(std.mem.eql(u8, exts[8].oid.id, "1.3.6.1.4.1.11129.2.4.2")); // Extended validation certificates
 
-    oid_len = ASN1.decodeOID(&oid_out, cert.signature_algorithm.algorithm);
-    try expect(std.mem.eql(u8, oid_out[0..oid_len], "1.2.840.113549.1.1.11")); // sha256WithRSAEncryption
+    try expect(std.mem.eql(u8, cert.signature_algorithm.algorithm.id, "1.2.840.113549.1.1.11")); // sha256WithRSAEncryption
     //std.log.warn("{}", .{std.fmt.fmtSliceHexLower(cert.signature_value.value)});
 
     // Below line causes compiler crash

@@ -67,6 +67,9 @@ pub const TLSClient = struct {
     // Misc
     allocator: std.mem.Allocator,
 
+    // logoutput
+    print_keys: bool = false,
+
     const State = enum { START, WAIT_SH, WAIT_EE, WAIT_CERT_CR, WAIT_CERT, WAIT_CV, WAIT_FINISHED, SEND_FINISHED, CONNECTED };
 
     const Self = @This();
@@ -206,7 +209,9 @@ pub const TLSClient = struct {
             try tcpBufferedWriter.flush();
         }
 
-        self.ks.printKeys(&self.random);
+        if (self.print_keys) {
+            self.ks.printKeys(&self.random);
+        }
 
         std.log.info("connected\n", .{});
     }

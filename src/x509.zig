@@ -12,7 +12,7 @@ const OIDEntry = struct {
     display_name: []const u8,
 };
 
-const OIDMap = struct {
+pub const OIDMap = struct {
     const map: [24]OIDEntry = [_]OIDEntry{ OIDEntry{
         .oid = "2.5.4.3",
         .display_name = "CN",
@@ -106,7 +106,7 @@ const OIDMap = struct {
         return Error.NotFound;
     }
 
-    fn getEntryByName(name: []const u8) !OIDEntry {
+    pub fn getEntryByName(name: []const u8) !OIDEntry {
         for (map) |e| {
             if (std.mem.eql(u8, name, e.display_name)) {
                 return e;

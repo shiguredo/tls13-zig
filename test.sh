@@ -22,4 +22,5 @@ ps aux | grep openssl
 # Stop openssl server
 # NOTE: openssl s_server does not its kill child processes when it is killed.
 kill $(ps ho pid --ppid=$OPENSSL_SERVER_PID)
-ps aux | grep openssl
+
+sleep 1

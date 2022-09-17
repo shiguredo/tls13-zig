@@ -297,7 +297,13 @@ pub const TLSClient = struct {
 
         var close_recv = false;
         while (!close_recv) {
-            const t = try reader.readEnum(ContentType, .Big);
+            const t = reader.readEnum(ContentType, .Big) catch |err| {
+                switch (err) {
+                    // sometimes the tcp connection is closed after sending close_notify.
+                    error.EndOfStream => return,
+                    else => return err,
+                }
+            };
             const recv_record = try TLSCipherText.decode(reader, t, self.allocator);
             defer recv_record.deinit();
 

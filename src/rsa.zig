@@ -5,9 +5,9 @@ const bigInt = math.big.int;
 
 const expect = std.testing.expect;
 
-const Rsa1024 = Rsa(1024);
-const Rsa2048 = Rsa(2048);
-const Rsa4096 = Rsa(4096);
+pub const Rsa1024 = Rsa(1024);
+pub const Rsa2048 = Rsa(2048);
+pub const Rsa4096 = Rsa(4096);
 
 pub fn Rsa(comptime modulus_bits: usize) type {
     const modulus_length = modulus_bits / 8;
@@ -173,7 +173,12 @@ pub fn Rsa(comptime modulus_bits: usize) type {
 
             const Self = @This();
 
-            pub fn Sign(msg: []const u8, secret_key: SecretKey, comptime Hash: type, allocator: std.mem.Allocator) !Self {
+            const Error = error{
+                EncodingError,
+                InvalidSignature,
+            };
+
+            pub fn sign(msg: []const u8, secret_key: SecretKey, comptime Hash: type, allocator: std.mem.Allocator) !Self {
                 const mod_bits = try countBits(secret_key.n.toConst(), allocator);
 
                 var out: [modulus_length]u8 = undefined;
@@ -184,11 +189,19 @@ pub fn Rsa(comptime modulus_bits: usize) type {
                 };
             }
 
-            pub fn Verify(self: Self, msg: []const u8, public_key: PublicKey, comptime Hash: type, allocator: std.mem.Allocator) !bool {
+            pub fn fromBytes(msg: []const u8) Self {
+                var res = Self{
+                    .signature = [_]u8{0} ** modulus_length,
+                };
+                std.mem.copy(u8, &res.signature, msg);
+                return res;
+            }
+
+            pub fn verify(self: Self, msg: []const u8, public_key: PublicKey, comptime Hash: type, allocator: std.mem.Allocator) !void {
                 const mod_bits = try countBits(public_key.n.toConst(), allocator);
                 const em_dec = try encrypt(self.signature, public_key, allocator);
 
-                return try EMSA_PSS_VERIFY(msg, &em_dec, mod_bits - 1, Hash.digest_length, Hash, allocator);
+                try EMSA_PSS_VERIFY(msg, &em_dec, mod_bits - 1, Hash.digest_length, Hash, allocator);
             }
 
             fn MGF1(out: []u8, seed: []const u8, len: usize, comptime Hash: type, allocator: std.mem.Allocator) ![]u8 {
@@ -243,7 +256,7 @@ pub fn Rsa(comptime modulus_bits: usize) type {
 
                 // 3.   If emLen < hLen + sLen + 2, output "encoding error" and stop.
                 if (emLen < Hash.digest_length + sLen + 2) {
-                    return Error.EncodingError;
+                    return Self.Error.EncodingError;
                 }
 
                 // 4.   Generate a random octet string salt of length sLen; if sLen =
@@ -323,7 +336,7 @@ pub fn Rsa(comptime modulus_bits: usize) type {
                 return out[0..i];
             }
 
-            fn EMSA_PSS_VERIFY(msg: []const u8, em: []const u8, emBit: usize, sLen: usize, comptime Hash: type, allocator: std.mem.Allocator) !bool {
+            fn EMSA_PSS_VERIFY(msg: []const u8, em: []const u8, emBit: usize, sLen: usize, comptime Hash: type, allocator: std.mem.Allocator) !void {
                 // TODO
                 // 1.   If the length of M is greater than the input limitation for
                 //      the hash function (2^61 - 1 octets for SHA-1), output
@@ -339,13 +352,13 @@ pub fn Rsa(comptime modulus_bits: usize) type {
 
                 // 3.   If emLen < hLen + sLen + 2, output "inconsistent" and stop.
                 if (emLen < Hash.digest_length + sLen + 2) {
-                    return false;
+                    return Self.Error.InvalidSignature;
                 }
 
                 // 4.   If the rightmost octet of EM does not have hexadecimal value
                 //      0xbc, output "inconsistent" and stop.
                 if (em[em.len - 1] != 0xbc) {
-                    return false;
+                    return Self.Error.InvalidSignature;
                 }
 
                 // 5.   Let maskedDB be the leftmost emLen - hLen - 1 octets of EM,
@@ -363,7 +376,7 @@ pub fn Rsa(comptime modulus_bits: usize) type {
                     mask = mask >> 1;
                 }
                 if (mask != 0) {
-                    return false;
+                    return Self.Error.InvalidSignature;
                 }
 
                 // 7.   Let dbMask = MGF(H, emLen - hLen - 1).
@@ -393,11 +406,11 @@ pub fn Rsa(comptime modulus_bits: usize) type {
                 //      leftmost position is "position 1") does not have hexadecimal
                 //      value 0x01, output "inconsistent" and stop.
                 if (dbMask[mgf_len - sLen - 2] != 0x00) {
-                    return false;
+                    return Self.Error.InvalidSignature;
                 }
 
                 if (dbMask[mgf_len - sLen - 1] != 0x01) {
-                    return false;
+                    return Self.Error.InvalidSignature;
                 }
 
                 // 11.  Let salt be the last sLen octets of DB.
@@ -419,7 +432,9 @@ pub fn Rsa(comptime modulus_bits: usize) type {
 
                 // 14.  If H = H', output "consistent".  Otherwise, output
                 //      "inconsistent".
-                return std.mem.eql(u8, h, &h_p);
+                if (!std.mem.eql(u8, h, &h_p)) {
+                    return Self.Error.InvalidSignature;
+                }
             }
         };
 
@@ -639,7 +654,7 @@ test "EMSA_PSS_ENCODE" {
     const em = try Rsa1024.PSSSignature.EMSA_PSS_ENCODE(&out, &msg, 1024, salt.len, Hash, std.testing.allocator, &salt);
 
     try expect(std.mem.eql(u8, em, &em_ans));
-    try expect(try Rsa1024.PSSSignature.EMSA_PSS_VERIFY(&msg, em, 1024, salt.len, Hash, std.testing.allocator));
+    try Rsa1024.PSSSignature.EMSA_PSS_VERIFY(&msg, em, 1024, salt.len, Hash, std.testing.allocator);
 }
 
 // from http://cryptomanager.com/tv.html
@@ -725,7 +740,7 @@ test "2048-bit RSA PKCS1 v1.5" {
     try expect(try sig.Verify(msg, public_key, std.crypto.hash.sha2.Sha256, std.testing.allocator));
 }
 
-test "2048-bit RSA PSS Sign & Verify" {
+test "2048-bit RSA PSS Sign" {
     const n = "23919682004983319653113024109510798927190730483459155114124635852511683171702990071714179227838542975507400881419965032168292173145626910251896686359830368225942857209995228220809900272395494813989889087736537901064753969683151039818892990656012074606394135983145065401832175387153987481974888128780363024001465382365089020018667469572784508021139027094627097811559996317936508250029452373223388611875825585628651809429434775232528424381140872224720066194500370441280449656053417312065616112716063994984412819781068240997277634109127329059805468681621385058680389516782842964092223178451517822636463417183878014509981";
     const priv_key = "1486654023327254936555573576057263251753660419942170126319608358427197056306196565445622786209215331415620498958510041156590873770014263884272062769354395950017879108451913626659961949502341414026951427844162122244106521613926407570415274946817846146306588864204123436349129627473411653126542458009286566176552129970046811837701765340557994069410882942701121486471145988540096901826278540244413249604872804226780677276938685017701419235603015806653407321564847148984500582927127427146187517633208784284960396011662843170868728284448114027499723814587749054791910184390948448899927688162118497912308347570322628907705";
     const pub_key = "65537";
@@ -737,12 +752,12 @@ test "2048-bit RSA PSS Sign & Verify" {
     defer public_key.deinit();
 
     const msg = "test data 16byte";
-    const sig = try Rsa2048.PSSSignature.Sign(msg, secret_key, std.crypto.hash.sha2.Sha256, std.testing.allocator);
+    const sig = try Rsa2048.PSSSignature.sign(msg, secret_key, std.crypto.hash.sha2.Sha256, std.testing.allocator);
 
-    try expect(try sig.Verify(msg, public_key, std.crypto.hash.sha2.Sha256, std.testing.allocator));
+    try sig.verify(msg, public_key, std.crypto.hash.sha2.Sha256, std.testing.allocator);
 }
 
-test "2048-bit RSA PSS Sign & Verify" {
+test "2048-bit RSA PSS Verify" {
     const n = "23919682004983319653113024109510798927190730483459155114124635852511683171702990071714179227838542975507400881419965032168292173145626910251896686359830368225942857209995228220809900272395494813989889087736537901064753969683151039818892990656012074606394135983145065401832175387153987481974888128780363024001465382365089020018667469572784508021139027094627097811559996317936508250029452373223388611875825585628651809429434775232528424381140872224720066194500370441280449656053417312065616112716063994984412819781068240997277634109127329059805468681621385058680389516782842964092223178451517822636463417183878014509981";
     const pub_key = "65537";
 
@@ -778,5 +793,5 @@ test "2048-bit RSA PSS Sign & Verify" {
 
     const msg = "test data 16byte";
 
-    try expect(try sig.Verify(msg, public_key, std.crypto.hash.sha2.Sha256, std.testing.allocator));
+    try sig.verify(msg, public_key, std.crypto.hash.sha2.Sha256, std.testing.allocator);
 }

@@ -885,7 +885,7 @@ const RSAPublicKey = struct {
 const Secp256r1PublicKey = struct {
     const P256 = std.crypto.sign.ecdsa.EcdsaP256Sha256;
 
-    key: P256.PublicKey = undefined,
+    key: P256.PublicKey,
 
     const Self = @This();
 
@@ -899,7 +899,8 @@ const Secp256r1PublicKey = struct {
 
     pub fn decode(reader: anytype, len: usize) !Self {
         var buf: [100]u8 = undefined;
-        if (len > buf.len) {
+        // Currently, only uncompressed format supported.
+        if (len != P256.PublicKey.uncompressed_sec1_encoded_length) {
             return Error.UnsupportedFormat;
         }
         _ = try reader.readNoEof(buf[0..len]);
@@ -909,6 +910,34 @@ const Secp256r1PublicKey = struct {
             .key = key,
         };
     }
+
+    pub fn encode(self: Self, writer: anytype) !usize {
+        const uncomp = self.key.toUncompressedSec1();
+        try writer.writeAll(&uncomp);
+
+        return uncomp.len;
+    }
+
+    pub fn length(self: Self) usize {
+        _ = self;
+        return P256.PublicKey.uncompressed_sec1_encoded_length;
+    }
+
+    pub fn copy(self: Self, allocator: std.mem.Allocator) !Self{
+        var buf = try allocator.alloc(u8, self.length());
+        defer allocator.free(buf);
+        var stream = io.fixedBufferStream(buf);
+
+        _ = try self.encode(stream.writer());
+        stream.reset();
+
+        return try decode(stream.reader(),self.length());
+    }
+
+    pub fn eql(a: Self, b: Self) bool {
+        return std.mem.eql(u8, &(a.key.toUncompressedSec1()), &(b.key.toUncompressedSec1()));
+    }
+
 };
 
 // Extensions  ::=  SEQUENCE SIZE (1..MAX) OF Extension
@@ -1640,4 +1669,24 @@ test "RSAPublicKey copy" {
     defer rsa2.deinit();
 
     try expect(rsa.eql(rsa2));
+}
+
+test "Secp256r1PublicKey copy" {
+    const secp_bytes = [_]u8 {
+    0x04, 0x9d, 0x92, 0x3d,
+    0x57, 0xe4, 0xb8, 0xfc, 0xb1, 0x7b, 0x92, 0x1b, 0x66, 0x07, 0x82, 0xd7, 0x5f,
+    0x93, 0x75, 0x37, 0xbe, 0xfb, 0x08, 0xdc, 0xc5, 0x2d, 0x5b, 0x10, 0x65, 0xcf,
+    0x6a, 0xc3, 0xbe, 0xb2, 0x0d, 0x82, 0x9f, 0x47, 0xfc, 0x68, 0xed, 0xb6, 0xcf,
+    0xfa, 0xfa, 0xd5, 0x8c, 0x2a, 0xc8, 0xce, 0xd2, 0xb6, 0xed, 0x1f, 0xbd, 0x08,
+    0xd8, 0x65, 0x16, 0x3a, 0x3e, 0x69, 0x22, 0x4a, 0x84
+    };
+
+    var stream = io.fixedBufferStream(&secp_bytes);
+    const secp = try Secp256r1PublicKey.decode(stream.reader(), secp_bytes.len);
+    defer secp.deinit();
+
+    const secp2 = try secp.copy(std.testing.allocator);
+    defer secp2.deinit();
+
+    try expect(secp.eql(secp2));
 }

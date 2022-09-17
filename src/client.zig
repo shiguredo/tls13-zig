@@ -62,7 +62,7 @@ pub const TLSClient = struct {
     ap_protector: RecordPayloadProtector,
 
     // certificate
-    secp256r1_pubkey: P256.PublicKey = undefined,
+    cert_pubkey: ?x509.PublicKey = null,
 
     // Misc
     allocator: std.mem.Allocator,
@@ -75,7 +75,11 @@ pub const TLSClient = struct {
     const Self = @This();
 
     const Error = error{
+        InvalidServerHello,
         UnsupportedCertificateAlgorithm,
+        UnsupportedCipherSuite,
+        UnsupportedKeyShareAlgorithm,
+        FailedToConnect,
     };
 
     pub fn init(allocator: std.mem.Allocator) !Self {
@@ -107,6 +111,9 @@ pub const TLSClient = struct {
 
     pub fn deinit(self: Self) void {
         self.allocator.free(self.msgs_bytes);
+        if (self.cert_pubkey) |c| {
+            c.deinit();
+        }
         self.ks.deinit();
     }
 
@@ -146,7 +153,7 @@ pub const TLSClient = struct {
         var sa = signature_scheme.SignatureSchemeList.init(self.allocator);
         try sa.algos.append(signature_scheme.SignatureScheme.ecdsa_secp256r1_sha256);
         //try sa.algos.append(signatures.SignatureAlgorithm.ed25519);
-        //try sa.algos.append(signatures.SignatureAlgorithm.rsa_pss_rsae_sha384);
+        //try sa.algos.append(signature_scheme.SignatureScheme.rsa_pss_rsae_sha384);
         try client_hello.extensions.append(.{ .signature_algorithms = sa });
 
         //var msg = tls_msg.TLSRecord{ .content = .{ .handshake = .{ .content = .{ .client_hello = client_hello }}}};
@@ -199,6 +206,13 @@ pub const TLSClient = struct {
                 var plain_record = try self.hs_protector.decrypt(recv_record, self.allocator);
                 defer plain_record.deinit();
 
+                if (plain_record.content_type == .alert) {
+                    const alert = (try plain_record.decodeContent(self.allocator, null)).alert;
+                    std.log.err("alert = {}", .{alert});
+                    return Error.FailedToConnect;
+                }
+
+                std.log.info("{}", .{plain_record.content_type});
                 if (plain_record.content_type == .handshake) {
                     try self.handleHandshakeInnerPlaintext(plain_record, tcpBufferedWriter.writer());
                 } else {
@@ -307,21 +321,18 @@ pub const TLSClient = struct {
     fn handleServerHello(self: *Self, sh: ServerHello) !void {
         // Only TLS_AES_128_GCM_SHA256 is allowed
         if (sh.cipher_suite != .TLS_AES_128_GCM_SHA256) {
-            // TODO: Error
-            return;
+            return Error.UnsupportedCipherSuite;
         }
         self.ks = try key.KeyScheduler.init(crypto.Hkdf.Sha256.hkdf, crypto.Aead.Aes128Gcm.aead);
 
         const ks = (try msg.getExtension(sh.extensions, .key_share)).key_share;
         if (ks.entries.items.len != 1) {
-            // TODO: Error
-            return;
+            return Error.InvalidServerHello;
         }
 
         const key_entry = ks.entries.items[0];
         if (key_entry.group != .x25519) {
-            // TODO: Error
-            return;
+            return Error.UnsupportedKeyShareAlgorithm;
         }
 
         const server_pubkey = key_entry.key_exchange;
@@ -419,8 +430,8 @@ pub const TLSClient = struct {
             // TODO: FIX
             //c.cert.print(std.log.info);
             const pubkey = c.cert.tbs_certificate.subjectPublicKeyInfo.publicKey;
-            if (pubkey == .secp256r1) {
-                self.secp256r1_pubkey = pubkey.secp256r1.key;
+            if (pubkey == .secp256r1 or pubkey == .rsa) {
+                self.cert_pubkey = try pubkey.copy(self.allocator);
             } else {
                 return Error.UnsupportedCertificateAlgorithm;
             }
@@ -431,8 +442,6 @@ pub const TLSClient = struct {
     }
 
     fn handleCertificateVerify(self: *Self, cert_verify: CertificateVerify) !void {
-        // TODO: verify certificate
-        const sig = try P256.Signature.fromDer(cert_verify.signature);
 
         var hash_out: [crypto.Hkdf.MAX_DIGEST_LENGTH]u8 = undefined;
         self.ks.hkdf.hash(&hash_out, self.msgs_stream.getWritten());
@@ -444,7 +453,18 @@ pub const TLSClient = struct {
         _ = try verify_stream.write(&([_]u8{0x00}));
         _ = try verify_stream.write(hash_out[0..self.ks.hkdf.digest_length]);
 
-        try sig.verify(verify_stream.getWritten(), self.secp256r1_pubkey);
+        if (self.cert_pubkey) |c| {
+            switch(c) {
+                .secp256r1 => |p| {
+                    // TODO: verify certificate itself.
+                    const sig = try P256.Signature.fromDer(cert_verify.signature);
+                    try sig.verify(verify_stream.getWritten(), p.key);
+                },
+                .rsa => unreachable,
+            }
+        } else {
+            unreachable;
+        }
 
         self.state = .WAIT_FINISHED;
     }

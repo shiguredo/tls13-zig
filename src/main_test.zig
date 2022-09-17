@@ -8,23 +8,20 @@ const client = @import("client.zig");
 
 pub fn main() !void {
     log.info("started.", .{});
-    const endpoint = try net.Address.parseIp("127.0.0.1", 8443);
-    var tls_client = try client.TLSClient.init(allocator);
+    var tls_client = try client.TLSClientTCP.init(allocator);
     defer tls_client.deinit();
     tls_client.print_keys = true;
 
-    var tcpStream = try net.tcpConnectToAddress(endpoint);
-
-    try tls_client.connect(tcpStream.reader(), tcpStream.writer());
+    try tls_client.connect("localhost", 8443);
 
     const http_req = "GET / HTTP/1.1\r\nHost: localhost\r\nUser-Agent: tls13-zig\r\nAccept: */*\r\n\r\n";
-    _ = try tls_client.send(http_req, tcpStream.writer());
+    _ = try tls_client.send(http_req);
 
     var recv_bytes: [4096]u8 = undefined;
-    const recv_size = try tls_client.recv(&recv_bytes, tcpStream.reader());
+    const recv_size = try tls_client.recv(&recv_bytes);
     log.info("RECV=\n {s}", .{recv_bytes[0..recv_size]});
 
-    try tls_client.close(tcpStream.reader(), tcpStream.writer());
+    try tls_client.close();
     log.info("finished.", .{});
 
     return;

@@ -6,6 +6,7 @@ const hkdf = std.crypto.kdf.hkdf;
 const expect = std.testing.expect;
 const expectError = std.testing.expectError;
 const random = std.crypto.random;
+const ArrayList = std.ArrayList;
 
 const msg = @import("msg.zig");
 const key = @import("key.zig");
@@ -38,6 +39,8 @@ const Aes128Gcm = std.crypto.aead.aes_gcm.Aes128Gcm;
 const Sha256 = std.crypto.hash.sha2.Sha256;
 const P256 = std.crypto.sign.ecdsa.EcdsaP256Sha256;
 
+const rsa = @import("rsa.zig");
+
 pub const TLSClient = struct {
 
     // session related
@@ -62,6 +65,7 @@ pub const TLSClient = struct {
     ap_protector: RecordPayloadProtector,
 
     // certificate
+    signature_schems: ArrayList(signature_scheme.SignatureScheme),
     cert_pubkey: ?x509.PublicKey = null,
 
     // Misc
@@ -79,6 +83,7 @@ pub const TLSClient = struct {
         UnsupportedCertificateAlgorithm,
         UnsupportedCipherSuite,
         UnsupportedKeyShareAlgorithm,
+        UnsupportedSignatureScheme,
         FailedToConnect,
     };
 
@@ -99,12 +104,16 @@ pub const TLSClient = struct {
             .ks = undefined,
             .hs_protector = undefined,
             .ap_protector = undefined,
+            .signature_schems = ArrayList(signature_scheme.SignatureScheme).init(allocator),
 
             .allocator = allocator,
         };
 
         random.bytes(&res.x25519_priv_key);
         res.x25519_pub_key = try dh.X25519.recoverPublicKey(res.x25519_priv_key);
+
+        try res.signature_schems.append(.ecdsa_secp256r1_sha256);
+        try res.signature_schems.append(.rsa_pss_rsae_sha256);
 
         return res;
     }
@@ -115,6 +124,7 @@ pub const TLSClient = struct {
             c.deinit();
         }
         self.ks.deinit();
+        self.signature_schems.deinit();
     }
 
     pub fn configureX25519Keys(self: *Self, priv_key: [32]u8) !void {
@@ -151,9 +161,10 @@ pub const TLSClient = struct {
         // Extension Signature Algorithms
         // currently, supported algorithms are temporary.
         var sa = signature_scheme.SignatureSchemeList.init(self.allocator);
-        try sa.algos.append(signature_scheme.SignatureScheme.ecdsa_secp256r1_sha256);
-        //try sa.algos.append(signatures.SignatureAlgorithm.ed25519);
-        //try sa.algos.append(signature_scheme.SignatureScheme.rsa_pss_rsae_sha384);
+        for (self.signature_schems.items) |sc| {
+            try sa.algos.append(sc);
+        }
+
         try client_hello.extensions.append(.{ .signature_algorithms = sa });
 
         //var msg = tls_msg.TLSRecord{ .content = .{ .handshake = .{ .content = .{ .client_hello = client_hello }}}};
@@ -455,11 +466,41 @@ pub const TLSClient = struct {
         if (self.cert_pubkey) |c| {
             switch (c) {
                 .secp256r1 => |p| {
+                    if (cert_verify.algorithm != .ecdsa_secp256r1_sha256) {
+                        return Error.UnsupportedSignatureScheme;
+                    }
                     // TODO: verify certificate itself.
                     const sig = try P256.Signature.fromDer(cert_verify.signature);
                     try sig.verify(verify_stream.getWritten(), p.key);
                 },
-                .rsa => unreachable,
+                .rsa => |p| {
+                    if (cert_verify.algorithm != .rsa_pss_rsae_sha256) {
+                        return Error.UnsupportedSignatureScheme;
+                    }
+                    var modulus_len = p.modulus.len;
+                    var i: usize = 0;
+                    while (i < modulus_len) : (i += 1) {
+                        if (p.modulus[i] != 0) {
+                            break;
+                        }
+                        modulus_len -= 1;
+                    }
+                    const modulus = p.modulus[i..];
+                    const modulus_bits = modulus.len * 8;
+                    if (modulus_bits == 2048) {
+                        var p_key = try rsa.Rsa2048.PublicKey.fromBytes(p.publicExponent, modulus, self.allocator);
+                        defer p_key.deinit();
+
+                        const sig = rsa.Rsa2048.PSSSignature.fromBytes(cert_verify.signature);
+                        try sig.verify(verify_stream.getWritten(), p_key, Sha256, self.allocator);
+                    } else if (modulus_bits == 4096) {
+                        std.log.info("RSA-4096", .{});
+                        unreachable;
+                    } else {
+                        std.log.err("unsupported modulus length: {d} bits", .{modulus_bits});
+                        return Error.UnsupportedSignatureScheme;
+                    }
+                },
             }
         } else {
             unreachable;

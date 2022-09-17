@@ -778,6 +778,13 @@ pub const PublicKey = union(PublicKeyType) {
             .secp256r1 => |p| p.deinit(),
         }
     }
+
+    pub fn copy(self: Self, allocator: std.mem.Allocator) !Self {
+        switch (self) {
+            .rsa => |p| return Self{ .rsa = try p.copy(allocator) },
+            .secp256r1 => |p| return Self{ .secp256r1 = try p.copy(allocator) },
+        }
+    }
 };
 
 // RFC3279 Section-2.3.1 (p. 8)
@@ -1689,4 +1696,26 @@ test "Secp256r1PublicKey copy" {
     defer secp2.deinit();
 
     try expect(secp.eql(secp2));
+}
+
+test "PublicKey copy" {
+    const secp_bytes = [_]u8 {
+    0x04, 0x9d, 0x92, 0x3d,
+    0x57, 0xe4, 0xb8, 0xfc, 0xb1, 0x7b, 0x92, 0x1b, 0x66, 0x07, 0x82, 0xd7, 0x5f,
+    0x93, 0x75, 0x37, 0xbe, 0xfb, 0x08, 0xdc, 0xc5, 0x2d, 0x5b, 0x10, 0x65, 0xcf,
+    0x6a, 0xc3, 0xbe, 0xb2, 0x0d, 0x82, 0x9f, 0x47, 0xfc, 0x68, 0xed, 0xb6, 0xcf,
+    0xfa, 0xfa, 0xd5, 0x8c, 0x2a, 0xc8, 0xce, 0xd2, 0xb6, 0xed, 0x1f, 0xbd, 0x08,
+    0xd8, 0x65, 0x16, 0x3a, 0x3e, 0x69, 0x22, 0x4a, 0x84
+    };
+
+    var stream = io.fixedBufferStream(&secp_bytes);
+    const secp = try Secp256r1PublicKey.decode(stream.reader(), secp_bytes.len);
+    const pub_key = PublicKey{ .secp256r1 = secp };
+    defer pub_key.deinit();
+
+    
+    const pub_key2 = try pub_key.copy(std.testing.allocator);
+    defer pub_key2.deinit();
+
+    try expect(secp.eql(pub_key2.secp256r1));
 }

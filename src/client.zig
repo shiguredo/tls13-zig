@@ -892,3 +892,23 @@ test "connect e2e with secp256r1" {
     try tls_client.connect("localhost", 443);
     try expect(std.mem.eql(u8, &client_ans, test_send_stream.getWritten()));
 }
+
+test "connect to www.google.com" {
+    var tls_client = try TLSClientTCP.init(std.testing.allocator);
+    defer tls_client.deinit();
+
+    try tls_client.connect("www.google.com", 443);
+
+    const http_req = "GET / HTTP/1.1\r\nHost: www.google.com\r\nUser-Agent: tls13-zig\r\nAccept: */*\r\n\r\n";
+    _ = try tls_client.send(http_req);
+
+    var recv_bytes: [4096]u8 = undefined;
+    _ = try tls_client.recv(&recv_bytes);
+
+    const ans_bytes = "HTTP/1.1 200 OK";
+    try expect(std.mem.eql(u8, recv_bytes[0..ans_bytes.len], ans_bytes));
+
+    try tls_client.close();
+
+    return;
+}

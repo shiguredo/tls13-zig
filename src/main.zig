@@ -8,7 +8,7 @@ const client = @import("client.zig");
 
 pub fn main() !void {
     log.info("started.", .{});
-    const endpoint = try net.Address.parseIp("127.0.0.1", 8443);
+    const endpoint = try net.Address.parseIp("142.250.76.142", 443);
     var tls_client = try client.TLSClient.init(allocator);
     defer tls_client.deinit();
     tls_client.print_keys = true;
@@ -17,7 +17,7 @@ pub fn main() !void {
 
     try tls_client.connect(tcpStream.reader(), tcpStream.writer());
 
-    const http_req = "GET / HTTP/1.1\r\nHost: localhost\r\nUser-Agent: tls13-zig\r\nAccept: */*\r\n\r\n";
+    const http_req = "GET / HTTP/1.1\r\nHost: google.com\r\nUser-Agent: tls13-zig\r\nAccept: */*\r\n\r\n";
     _ = try tls_client.send(http_req, tcpStream.writer());
 
     var recv_bytes: [4096]u8 = undefined;
@@ -58,6 +58,9 @@ test "connect e2e with secp256r1" {
 
     tls_client.random = dummy;
     std.mem.copy(u8, tls_client.session_id.session_id.slice(), &dummy);
+
+    tls_client.signature_schems.clearAndFree();
+    try tls_client.signature_schems.append(.ecdsa_secp256r1_sha256);
 
     var test_send_bytes: [2000]u8 = undefined;
     var test_send_stream = io.fixedBufferStream(&test_send_bytes);

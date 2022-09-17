@@ -442,7 +442,6 @@ pub const TLSClient = struct {
     }
 
     fn handleCertificateVerify(self: *Self, cert_verify: CertificateVerify) !void {
-
         var hash_out: [crypto.Hkdf.MAX_DIGEST_LENGTH]u8 = undefined;
         self.ks.hkdf.hash(&hash_out, self.msgs_stream.getWritten());
 
@@ -454,7 +453,7 @@ pub const TLSClient = struct {
         _ = try verify_stream.write(hash_out[0..self.ks.hkdf.digest_length]);
 
         if (self.cert_pubkey) |c| {
-            switch(c) {
+            switch (c) {
                 .secp256r1 => |p| {
                     // TODO: verify certificate itself.
                     const sig = try P256.Signature.fromDer(cert_verify.signature);

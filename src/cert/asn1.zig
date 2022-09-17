@@ -39,7 +39,7 @@ pub const Decoder = struct {
         const len_size = len & 0x7F;
 
         // length field larger than u64 is ignored
-        if (len_size > 4) {
+        if (len_size > 8) {
             return Error.TooLarge;
         }
 
@@ -192,6 +192,39 @@ pub const ObjectIdentifier = struct {
 };
 
 pub const Encoder = struct {
+    const Error = error{
+        SomethingWrong,
+    };
+
+    pub fn encodeLength(len: u64, writer: anytype) !usize {
+        if (len < 0x80) {
+            try writer.writeByte(@intCast(u8, len));
+            return 1;
+        }
+
+        var tmp = len;
+        var end_idx: usize = 0;
+        var res: [8]u8 = undefined;
+        while (tmp > 0) {
+            if (end_idx >= res.len) {
+                return Error.SomethingWrong;
+            }
+
+            res[end_idx] = @intCast(u8, tmp & 0xFF);
+            tmp = tmp >> 8;
+            end_idx += 1;
+        }
+
+        const len_len = end_idx + 1;
+        try writer.writeByte(@intCast(u8, (end_idx & 0x7F) | 0x80));
+        while (end_idx > 0) {
+            end_idx -= 1;
+            try writer.writeByte(res[end_idx]);
+        }
+
+        return len_len;
+    }
+
     // https://docs.microsoft.com/ja-jp/windows/win32/seccertenroll/about-object-identifier
     fn encodeOID(out: []u8, id: []const u8) !usize {
         var count: usize = 0;

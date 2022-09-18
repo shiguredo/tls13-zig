@@ -276,7 +276,6 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         return Error.FailedToConnect;
                     }
 
-                    std.log.info("CONTENT_TYPE={}", .{plain_record.content_type});
                     if (plain_record.content_type == .handshake) {
                         try self.handleHandshakeInnerPlaintext(plain_record, self.writeBuffer.writer());
                     } else {

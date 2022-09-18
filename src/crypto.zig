@@ -13,7 +13,7 @@ fn max(comptime T: type, comptime a: T, comptime b: T) T {
 
 // abstraction struct for Hkdf functions
 pub const Hkdf = struct {
-    pub const MAX_DIGEST_LENGTH = Sha256.Hash.digest_length;
+    pub const MAX_DIGEST_LENGTH = Sha384.Hash.digest_length;
 
     hash_type: HashType,
     digest_length: usize,
@@ -27,6 +27,38 @@ pub const Hkdf = struct {
 
     pub const Sha256 = struct {
         const Hash = std.crypto.hash.sha2.Sha256;
+        const Hmac = std.crypto.auth.hmac.Hmac(Hash);
+        const H = std.crypto.kdf.hkdf.Hkdf(Hmac);
+
+        fn hash(out: []u8, m: []const u8) void {
+            Hash.hash(m, out[0..Hash.digest_length], .{});
+        }
+
+        fn create(out: []u8, m: []const u8, k: []const u8) void {
+            Hmac.create(out[0..Hmac.mac_length], m, k);
+        }
+
+        fn extract(out: []u8, salt: []const u8, ikm: []const u8) void {
+            const res = H.extract(salt, ikm);
+            std.mem.copy(u8, out, &res);
+        }
+
+        fn expand(out: []u8, ctx: []const u8, prk: []const u8) void {
+            H.expand(out, ctx, prk[0..Hmac.mac_length].*);
+        }
+
+        pub const hkdf = Hkdf{
+            .hash_type = .SHA256,
+            .digest_length = Hash.digest_length,
+            .hash = &hash,
+            .create = &create,
+            .extract = &extract,
+            .expand = &expand,
+        };
+    };
+
+    pub const Sha384 = struct {
+        const Hash = std.crypto.hash.sha2.Sha384;
         const Hmac = std.crypto.auth.hmac.Hmac(Hash);
         const H = std.crypto.kdf.hkdf.Hkdf(Hmac);
 
@@ -109,8 +141,8 @@ const AuthenticationError = std.crypto.errors.AuthenticationError;
 
 // abstraction struct for Aead functions
 pub const Aead = struct {
-    const MAX_KEY_LEGNTH = Aes128Gcm.C.key_length;
-    const MAX_NONCE_LENGTH = Aes128Gcm.C.nonce_length;
+    const MAX_KEY_LEGNTH = Aes256Gcm.C.key_length;
+    const MAX_NONCE_LENGTH = Aes256Gcm.C.nonce_length;
 
     key_length: usize,
     nonce_length: usize,
@@ -121,6 +153,26 @@ pub const Aead = struct {
 
     pub const Aes128Gcm = struct {
         const C = std.crypto.aead.aes_gcm.Aes128Gcm;
+
+        fn encrypt(c: []u8, tag: []u8, m: []const u8, ad: []const u8, nonce: []const u8, key: []const u8) void {
+            C.encrypt(c, tag[0..C.tag_length], m, ad, nonce[0..C.nonce_length].*, key[0..C.key_length].*);
+        }
+
+        fn decrypt(m: []u8, c: []const u8, tag: []const u8, ad: []const u8, nonce: []const u8, key: []const u8) AuthenticationError!void {
+            try C.decrypt(m, c, tag[0..C.tag_length].*, ad, nonce[0..C.nonce_length].*, key[0..C.key_length].*);
+        }
+
+        pub const aead = Aead{
+            .key_length = C.key_length,
+            .nonce_length = C.nonce_length,
+            .tag_length = C.tag_length,
+            .encrypt = &encrypt,
+            .decrypt = &decrypt,
+        };
+    };
+
+    pub const Aes256Gcm = struct {
+        const C = std.crypto.aead.aes_gcm.Aes256Gcm;
 
         fn encrypt(c: []u8, tag: []u8, m: []const u8, ad: []const u8, nonce: []const u8, key: []const u8) void {
             C.encrypt(c, tag[0..C.tag_length], m, ad, nonce[0..C.nonce_length].*, key[0..C.key_length].*);

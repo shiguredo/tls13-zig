@@ -2,8 +2,6 @@ const std = @import("std");
 const io = std.io;
 const net = std.net;
 const dh = std.crypto.dh;
-const hmac = std.crypto.auth.hmac;
-const hkdf = std.crypto.kdf.hkdf;
 const expect = std.testing.expect;
 const expectError = std.testing.expectError;
 const random = std.crypto.random;
@@ -72,6 +70,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         x25519_pub_key: [32]u8 = [_]u8{0} ** 32,
 
         // payload protection
+        cipher_suites: ArrayList(msg.CipherSuite),
         ks: key.KeyScheduler,
         hs_protector: RecordPayloadProtector,
         ap_protector: RecordPayloadProtector,
@@ -115,6 +114,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 .session_id = session_id,
                 .msgs_bytes = msgs_bytes,
                 .msgs_stream = io.fixedBufferStream(msgs_bytes),
+                .cipher_suites = ArrayList(msg.CipherSuite).init(allocator),
                 .ks = undefined,
                 .hs_protector = undefined,
                 .ap_protector = undefined,
@@ -126,6 +126,9 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
             random.bytes(&res.x25519_priv_key);
             res.x25519_pub_key = try dh.X25519.recoverPublicKey(res.x25519_priv_key);
+
+            try res.cipher_suites.append(.TLS_AES_128_GCM_SHA256);
+            try res.cipher_suites.append(.TLS_AES_256_GCM_SHA384);
 
             try res.signature_schems.append(.ecdsa_secp256r1_sha256);
             try res.signature_schems.append(.rsa_pss_rsae_sha256);
@@ -151,6 +154,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 self.allocator.free(self.host);
             }
             self.cert_pubkeys.deinit();
+            self.cipher_suites.deinit();
             self.ks.deinit();
             self.signature_schems.deinit();
         }
@@ -164,8 +168,9 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             var client_hello = ClientHello.init(self.random, self.session_id, self.allocator);
 
             // CipherSuite
-            // currently, supported suites are temporary
-            try client_hello.cipher_suites.append(.TLS_AES_128_GCM_SHA256);
+            for (self.cipher_suites.items) |ch| {
+                try client_hello.cipher_suites.append(ch);
+            }
 
             // Extension SupportedVresions
             var sv = try SupportedVersions.init(.client_hello);
@@ -271,7 +276,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         return Error.FailedToConnect;
                     }
 
-                    std.log.info("{}", .{plain_record.content_type});
+                    std.log.info("CONTENT_TYPE={}", .{plain_record.content_type});
                     if (plain_record.content_type == .handshake) {
                         try self.handleHandshakeInnerPlaintext(plain_record, self.writeBuffer.writer());
                     } else {
@@ -386,11 +391,23 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         }
 
         fn handleServerHello(self: *Self, sh: ServerHello) !void {
+            var hkdf: crypto.Hkdf = undefined;
+            var aead: crypto.Aead = undefined;
+
             // Only TLS_AES_128_GCM_SHA256 is allowed
-            if (sh.cipher_suite != .TLS_AES_128_GCM_SHA256) {
-                return Error.UnsupportedCipherSuite;
+            switch (sh.cipher_suite) {
+                .TLS_AES_128_GCM_SHA256 => {
+                    hkdf = crypto.Hkdf.Sha256.hkdf;
+                    aead = crypto.Aead.Aes128Gcm.aead;
+                },
+                .TLS_AES_256_GCM_SHA384 => {
+                    hkdf = crypto.Hkdf.Sha384.hkdf;
+                    aead = crypto.Aead.Aes256Gcm.aead;
+                },
+                else => return Error.UnsupportedCipherSuite,
             }
-            self.ks = try key.KeyScheduler.init(crypto.Hkdf.Sha256.hkdf, crypto.Aead.Aes128Gcm.aead);
+
+            self.ks = try key.KeyScheduler.init(hkdf, aead);
 
             const ks = (try msg.getExtension(sh.extensions, .key_share)).key_share;
             if (ks.entries.items.len != 1) {
@@ -404,10 +421,11 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
             const server_pubkey = key_entry.key_exchange;
             const shared_key = try dh.X25519.scalarmult(self.x25519_priv_key, server_pubkey[0..32].*);
-            try self.ks.generateEarlySecrets(&shared_key, &([_]u8{0} ** 32));
+            const zero_bytes = &([_]u8{0} ** 64);
+            try self.ks.generateEarlySecrets(&shared_key, zero_bytes[0..self.ks.hkdf.digest_length]);
             try self.ks.generateHandshakeSecrets(self.msgs_stream.getWritten());
 
-            self.hs_protector = RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead, self.ks.secret.c_hs_keys, self.ks.secret.s_hs_keys);
+            self.hs_protector = RecordPayloadProtector.init(self.ks.aead, self.ks.secret.c_hs_keys, self.ks.secret.s_hs_keys);
 
             // if everythig is ok, go to next state.
             self.state = .WAIT_EE;
@@ -469,7 +487,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     self.ap_protector = RecordPayloadProtector.init(self.hs_protector.aead, self.ks.secret.c_ap_keys, self.ks.secret.s_ap_keys);
 
                     // construct client finished message
-                    const c_finished = try Finished.fromMessageBytes(self.msgs_stream.getWritten(), self.ks.secret.c_hs_finished_secret.slice(), crypto.Hkdf.Sha256.hkdf);
+                    const c_finished = try Finished.fromMessageBytes(self.msgs_stream.getWritten(), self.ks.secret.c_hs_finished_secret.slice(), self.ks.hkdf);
                     const hs_c_finished = Content{ .handshake = Handshake{ .finished = c_finished } };
                     defer hs_c_finished.deinit();
 
@@ -906,6 +924,9 @@ test "connect e2e with secp256r1" {
 
     tls_client.random = dummy;
     std.mem.copy(u8, tls_client.session_id.session_id.slice(), &dummy);
+
+    tls_client.cipher_suites.clearAndFree();
+    try tls_client.cipher_suites.append(.TLS_AES_128_GCM_SHA256);
 
     try tls_client.connect("localhost", 443);
     try expect(std.mem.eql(u8, &client_ans, test_send_stream.getWritten()));

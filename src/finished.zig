@@ -69,7 +69,7 @@ pub const Finished = struct {
         //        Transcript-Hash(Handshake Context,
         //                        Certificate*, CertificateVerify*))
         hkdf.hash(&hash, m);
-        hkdf.create(&digest, &hash, secret);
+        hkdf.create(&digest, hash[0..hkdf.digest_length], secret);
         std.mem.copy(u8, res.verify_data.slice(), digest[0..hkdf.digest_length]);
 
         return res;
@@ -89,7 +89,7 @@ pub const Finished = struct {
         //        Transcript-Hash(Handshake Context,
         //                        Certificate*, CertificateVerify*))
         self.hkdf.hash(&hash, m);
-        self.hkdf.create(&digest, &hash, secret);
+        self.hkdf.create(&digest, hash[0..self.hkdf.digest_length], secret);
 
         // Checking the computed verify_data is equal to Finished one.
         return std.mem.eql(u8, digest[0..self.hkdf.digest_length], self.verify_data.slice());

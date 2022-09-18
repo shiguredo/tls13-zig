@@ -33,10 +33,11 @@ pub const KeyScheduler = struct {
     }
 
     pub fn generateHandshakeSecrets(self: *Self, msgs: []const u8) !void {
+        const zero_bytes = &([_]u8{0} ** 64);
         try self.hkdf.deriveSecret(self.secret.s_hs_secret.slice(), self.secret.hs_secret.slice(), "s hs traffic", msgs);
         try self.hkdf.deriveSecret(self.secret.c_hs_secret.slice(), self.secret.hs_secret.slice(), "c hs traffic", msgs);
         try self.hkdf.deriveSecret(self.secret.master_derived_secret.slice(), self.secret.hs_secret.slice(), "derived", "");
-        self.hkdf.extract(self.secret.master_secret.slice(), self.secret.master_derived_secret.slice(), &([_]u8{0} ** 32));
+        self.hkdf.extract(self.secret.master_secret.slice(), self.secret.master_derived_secret.slice(), zero_bytes[0..self.hkdf.digest_length]);
         try self.generateRecordKeys(&self.secret.s_hs_keys, self.secret.s_hs_secret.slice());
         try self.generateRecordKeys(&self.secret.c_hs_keys, self.secret.c_hs_secret.slice());
         try self.hkdf.hkdfExpandLabel(self.secret.s_hs_finished_secret.slice(), self.secret.s_hs_secret.slice(), "finished", "", self.hkdf.digest_length);

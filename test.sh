@@ -5,19 +5,7 @@ TEST_CIPHER_SUITES=(
     "TLS_AES_256_GCM_SHA384"
 )
 
-function kill_openssl() {
-    set +e
-
-    ps aux | grep openssl
-    # Stop openssl server
-    # NOTE: openssl s_server does not its kill child processes when it is killed.
-    PIDS=$(ps ho pid --ppid=$1)
-    kill $PIDS
-
-    set -e
-}
-
-set -eux
+set -eu
 
 cd $(dirname $0)
 
@@ -29,18 +17,28 @@ cd ../
 
 for SUITE in "${TEST_CIPHER_SUITES[@]}"
 do
+    echo "Testing $SUITE."
     cd test
 
     # Run openssl server
     openssl s_server -tls1_3 -accept 8443 -cert cert.pem -key prikey.pem -www  -ciphersuites $SUITE &
-    OPENSSL_SERVER_PID=$!
 
     cd ../
 
+    set +e
+
     # Let's test!
     zig run src/main_test.zig  2>&1 | grep "HTTP/1.0 200 ok"
+    if [ $? -ne 0 ]; then
+        echo "failed."
+        pkill -SIGKILL openssl
+        exit 1
+    fi
+    echo "OK."
 
-    kill_openssl $OPENSSL_SERVER_PID
+    set -e
+
+    pkill -SIGKILL openssl
 
     sleep 1
 done

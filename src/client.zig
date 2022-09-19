@@ -129,6 +129,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
             try res.cipher_suites.append(.TLS_AES_128_GCM_SHA256);
             try res.cipher_suites.append(.TLS_AES_256_GCM_SHA384);
+            try res.cipher_suites.append(.TLS_CHACHA20_POLY1305_SHA256);
 
             try res.signature_schems.append(.ecdsa_secp256r1_sha256);
             try res.signature_schems.append(.rsa_pss_rsae_sha256);
@@ -402,6 +403,10 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 .TLS_AES_256_GCM_SHA384 => {
                     hkdf = crypto.Hkdf.Sha384.hkdf;
                     aead = crypto.Aead.Aes256Gcm.aead;
+                },
+                .TLS_CHACHA20_POLY1305_SHA256 => {
+                    hkdf = crypto.Hkdf.Sha256.hkdf;
+                    aead = crypto.Aead.ChaCha20Poly1305.aead;
                 },
                 else => return Error.UnsupportedCipherSuite,
             }

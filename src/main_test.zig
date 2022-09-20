@@ -11,7 +11,6 @@ pub fn main() !void {
     var tls_client = try client.TLSClientTCP.init(allocator);
     defer tls_client.deinit();
     tls_client.print_keys = true;
-
     try tls_client.connect("localhost", 8443);
 
     const http_req = "GET / HTTP/1.1\r\nHost: localhost\r\nUser-Agent: tls13-zig\r\nAccept: */*\r\n\r\n";

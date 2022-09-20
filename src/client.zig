@@ -63,11 +63,18 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         // state machine
         state: State = State.START,
-        crypto_mode: bool = false,
+        already_recv_hrr: bool = false,
+
+        // key_share
+        supported_groups: ArrayList(NamedGroup),
+        key_shares: ArrayList(NamedGroup),
 
         // X25519 DH keys
         x25519_priv_key: [32]u8 = [_]u8{0} ** 32,
         x25519_pub_key: [32]u8 = [_]u8{0} ** 32,
+
+        // secp256r1 DH keys
+        secp256r1_key: P256.KeyPair = undefined,
 
         // payload protection
         cipher_suites: ArrayList(msg.CipherSuite),
@@ -85,11 +92,13 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         // logoutput
         print_keys: bool = false,
 
-        const State = enum { START, WAIT_SH, WAIT_EE, WAIT_CERT_CR, WAIT_CERT, WAIT_CV, WAIT_FINISHED, SEND_FINISHED, CONNECTED };
+        const State = enum { START, SEND_CH, WAIT_SH, WAIT_EE, WAIT_CERT_CR, WAIT_CERT, WAIT_CV, WAIT_FINISHED, SEND_FINISHED, CONNECTED };
 
         const Self = @This();
 
         const Error = error{
+            IllegalParameter,
+            UnexpectedMessage,
             IoNotConfigured,
             InvalidServerHello,
             UnsupportedCertificateAlgorithm,
@@ -114,6 +123,8 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 .session_id = session_id,
                 .msgs_bytes = msgs_bytes,
                 .msgs_stream = io.fixedBufferStream(msgs_bytes),
+                .supported_groups = ArrayList(NamedGroup).init(allocator),
+                .key_shares = ArrayList(NamedGroup).init(allocator),
                 .cipher_suites = ArrayList(msg.CipherSuite).init(allocator),
                 .ks = undefined,
                 .hs_protector = undefined,
@@ -126,6 +137,17 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
             random.bytes(&res.x25519_priv_key);
             res.x25519_pub_key = try dh.X25519.recoverPublicKey(res.x25519_priv_key);
+
+            var skey_bytes: [P256.SecretKey.encoded_length]u8 = undefined;
+            random.bytes(skey_bytes[0..]);
+            var skey = try P256.SecretKey.fromBytes(skey_bytes);
+            res.secp256r1_key = try P256.KeyPair.fromSecretKey(skey);
+
+            try res.supported_groups.append(.x25519);
+            try res.supported_groups.append(.secp256r1);
+
+            try res.key_shares.append(.x25519);
+            try res.key_shares.append(.secp256r1);
 
             try res.cipher_suites.append(.TLS_AES_128_GCM_SHA256);
             try res.cipher_suites.append(.TLS_AES_256_GCM_SHA384);
@@ -155,6 +177,8 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 self.allocator.free(self.host);
             }
             self.cert_pubkeys.deinit();
+            self.supported_groups.deinit();
+            self.key_shares.deinit();
             self.cipher_suites.deinit();
             self.ks.deinit();
             self.signature_schems.deinit();
@@ -179,17 +203,29 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             try client_hello.extensions.append(.{ .supported_versions = sv });
 
             // Extension SupportedGroups
-            // currently, only x25519 and secp256r1 are supported.
             var sg = NamedGroupList.init(self.allocator);
-            try sg.groups.append(NamedGroup.x25519);
+            for (self.supported_groups.items) |n| {
+                try sg.groups.append(n);
+            }
             try client_hello.extensions.append(.{ .supported_groups = sg });
 
             // Extension KeyShare
-            // currently, only x25519 is supported
             var ks = key_share.KeyShare.init(self.allocator, .client_hello, false);
-            var entry_x25519 = try key_share.KeyShareEntry.init(.x25519, 32, self.allocator);
-            std.mem.copy(u8, entry_x25519.key_exchange, &self.x25519_pub_key);
-            try ks.entries.append(entry_x25519);
+            for (self.key_shares.items) |k| {
+                switch (k) {
+                    .x25519 => {
+                        var entry_x25519 = try key_share.KeyShareEntry.init(.x25519, 32, self.allocator);
+                        std.mem.copy(u8, entry_x25519.key_exchange, &self.x25519_pub_key);
+                        try ks.entries.append(entry_x25519);
+                    },
+                    .secp256r1 => {
+                        var entry_secp256r1 = try key_share.KeyShareEntry.init(.secp256r1, P256.PublicKey.uncompressed_sec1_encoded_length, self.allocator);
+                        std.mem.copy(u8, entry_secp256r1.key_exchange, &self.secp256r1_key.public_key.toUncompressedSec1());
+                        try ks.entries.append(entry_secp256r1);
+                    },
+                    else => unreachable,
+                }
+            }
             try client_hello.extensions.append(.{ .key_share = ks });
 
             // Extension Signature Algorithms
@@ -204,8 +240,6 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             var snl = server_name.ServerNameList.init(self.allocator);
             try snl.server_name_list.append(sn);
             try client_hello.extensions.append(.{ .server_name = snl });
-
-            //var msg = tls_msg.TLSRecord{ .content = .{ .handshake = .{ .content = .{ .client_hello = client_hello }}}};
 
             return client_hello;
         }
@@ -229,58 +263,58 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
             self.writeBuffer = io.bufferedWriter(self.writer);
 
-            // Creating ClientHello.
-            const ch = try self.createClientHello(host);
-            const hs_ch = Handshake{ .client_hello = ch };
-            _ = try hs_ch.encode(self.msgs_stream.writer());
+            self.state = .SEND_CH;
+            self.msgs_stream.reset();
 
-            // Sending ClientHello.
-            const record_ch = TLSPlainText{ .content = Content{ .handshake = hs_ch } };
-            defer record_ch.deinit();
-            _ = try record_ch.encode(self.writeBuffer.writer());
-            try self.writeBuffer.flush();
-
-            // ClientHello is already sent.
-            self.state = .WAIT_SH;
             while (self.state != .CONNECTED) {
-                const t = try self.reader.readEnum(ContentType, .Big);
-                if (t == .change_cipher_spec) {
-                    const recv_record = (try TLSPlainText.decode(self.reader, t, self.allocator, null, null));
-                    defer recv_record.deinit();
-                    self.crypto_mode = true;
-                } else if ((t == .handshake) and (!self.crypto_mode)) {
-                    const recv_record = (try TLSPlainText.decode(self.reader, t, self.allocator, null, self.msgs_stream.writer())).content;
-                    defer recv_record.deinit();
-                    if (self.state == .WAIT_SH) {
-                        if (recv_record != .handshake) {
-                            // TODO: Error
-                            return;
-                        }
-                        if (recv_record.handshake != .server_hello) {
-                            // TODO: Error
-                            return;
-                        }
+                if (self.state == .SEND_CH) {
+                    // Sending ClientHello.
+                    const ch = try self.createClientHello(host);
+                    const hs_ch = Handshake{ .client_hello = ch };
+                    _ = try hs_ch.encode(self.msgs_stream.writer());
 
-                        try self.handleServerHello(recv_record.handshake.server_hello);
-                        self.crypto_mode = true;
-                    }
+                    const record_ch = TLSPlainText{ .content = Content{ .handshake = hs_ch } };
+                    defer record_ch.deinit();
+                    _ = try record_ch.encode(self.writeBuffer.writer());
+                    self.state = .WAIT_SH;
                 } else {
-                    const recv_record = try TLSCipherText.decode(self.reader, t, self.allocator);
-                    defer recv_record.deinit();
+                    const t = try self.reader.readEnum(ContentType, .Big);
+                    if (t == .change_cipher_spec) {
+                        const recv_record = (try TLSPlainText.decode(self.reader, t, self.allocator, null, null));
+                        defer recv_record.deinit();
+                    } else if (t == .handshake and self.state == .WAIT_SH) {
+                        const recv_record = (try TLSPlainText.decode(self.reader, t, self.allocator, null, self.msgs_stream.writer())).content;
+                        defer recv_record.deinit();
+                        if (self.state == .WAIT_SH) {
+                            if (recv_record != .handshake) {
+                                // TODO: Error
+                                return;
+                            }
+                            if (recv_record.handshake != .server_hello) {
+                                // TODO: Error
+                                return;
+                            }
 
-                    var plain_record = try self.hs_protector.decrypt(recv_record, self.allocator);
-                    defer plain_record.deinit();
-
-                    if (plain_record.content_type == .alert) {
-                        const alert = (try plain_record.decodeContent(self.allocator, null)).alert;
-                        std.log.err("alert = {}", .{alert});
-                        return Error.FailedToConnect;
-                    }
-
-                    if (plain_record.content_type == .handshake) {
-                        try self.handleHandshakeInnerPlaintext(plain_record, self.writeBuffer.writer());
+                            try self.handleServerHello(recv_record.handshake.server_hello);
+                        }
                     } else {
-                        unreachable;
+                        const recv_record = try TLSCipherText.decode(self.reader, t, self.allocator);
+                        defer recv_record.deinit();
+
+                        var plain_record = try self.hs_protector.decrypt(recv_record, self.allocator);
+                        defer plain_record.deinit();
+
+                        if (plain_record.content_type == .alert) {
+                            const alert = (try plain_record.decodeContent(self.allocator, null)).alert;
+                            std.log.err("alert = {}", .{alert});
+                            return Error.FailedToConnect;
+                        }
+
+                        if (plain_record.content_type == .handshake) {
+                            try self.handleHandshakeInnerPlaintext(plain_record, self.writeBuffer.writer());
+                        } else {
+                            unreachable;
+                        }
                     }
                 }
 
@@ -394,7 +428,6 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             var hkdf: crypto.Hkdf = undefined;
             var aead: crypto.Aead = undefined;
 
-            // Only TLS_AES_128_GCM_SHA256 is allowed
             switch (sh.cipher_suite) {
                 .TLS_AES_128_GCM_SHA256 => {
                     hkdf = crypto.Hkdf.Sha256.hkdf;
@@ -411,7 +444,19 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 else => return Error.UnsupportedCipherSuite,
             }
 
-            self.ks = try key.KeyScheduler.init(hkdf, aead);
+            if (self.already_recv_hrr) {
+                // check CipherSuites is same as first ServerHello.
+                if (self.ks.aead.aead_type != aead.aead_type or self.ks.hkdf.hash_type != hkdf.hash_type) {
+                    return Error.IllegalParameter;
+                }
+            } else {
+                self.ks = try key.KeyScheduler.init(hkdf, aead);
+            }
+
+            if (sh.is_hello_retry_request) {
+                // currently, HRR is not supported.
+                return Error.UnexpectedMessage;
+            }
 
             const ks = (try msg.getExtension(sh.extensions, .key_share)).key_share;
             if (ks.entries.items.len != 1) {
@@ -419,14 +464,26 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             }
 
             const key_entry = ks.entries.items[0];
-            if (key_entry.group != .x25519) {
+            if (key_entry.group != .x25519 and key_entry.group != .secp256r1) {
                 return Error.UnsupportedKeyShareAlgorithm;
             }
 
-            const server_pubkey = key_entry.key_exchange;
-            const shared_key = try dh.X25519.scalarmult(self.x25519_priv_key, server_pubkey[0..32].*);
             const zero_bytes = &([_]u8{0} ** 64);
-            try self.ks.generateEarlySecrets(&shared_key, zero_bytes[0..self.ks.hkdf.digest_length]);
+            const server_pubkey = key_entry.key_exchange;
+            switch (key_entry.group) {
+                .x25519 => {
+                    const shared_key = try dh.X25519.scalarmult(self.x25519_priv_key, server_pubkey[0..32].*);
+                    try self.ks.generateEarlySecrets(&shared_key, zero_bytes[0..self.ks.hkdf.digest_length]);
+                },
+                .secp256r1 => {
+                    const pubkey = try P256.PublicKey.fromSec1(server_pubkey);
+                    const mul = try pubkey.p.mulPublic(self.secp256r1_key.secret_key.bytes, .Big);
+                    const shared_key = mul.affineCoordinates().x.toBytes(.Big);
+                    try self.ks.generateEarlySecrets(&shared_key, zero_bytes[0..self.ks.hkdf.digest_length]);
+                },
+                else => unreachable,
+            }
+
             try self.ks.generateHandshakeSecrets(self.msgs_stream.getWritten());
 
             self.hs_protector = RecordPayloadProtector.init(self.ks.aead, self.ks.secret.c_hs_keys, self.ks.secret.s_hs_keys);
@@ -803,7 +860,7 @@ test "client test with RFC8448" {
     // End of connection
 }
 
-test "connect e2e with secp256r1" {
+test "connect e2e with x25519" {
     // ClientHello + Finished
     // zig fmt: off
     const client_ans = [_]u8{
@@ -931,6 +988,12 @@ test "connect e2e with secp256r1" {
 
     tls_client.cipher_suites.clearAndFree();
     try tls_client.cipher_suites.append(.TLS_AES_128_GCM_SHA256);
+
+    tls_client.supported_groups.clearAndFree();
+    try tls_client.supported_groups.append(.x25519);
+
+    tls_client.key_shares.clearAndFree();
+    try tls_client.key_shares.append(.x25519);
 
     try tls_client.connect("localhost", 443);
     try expect(std.mem.eql(u8, &client_ans, test_send_stream.getWritten()));

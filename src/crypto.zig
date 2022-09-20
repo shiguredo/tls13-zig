@@ -5,6 +5,7 @@ const BoundedArray = std.BoundedArray;
 
 pub const HashType = enum {
     SHA256,
+    SHA384,
 };
 
 fn max(comptime T: type, comptime a: T, comptime b: T) T {
@@ -80,7 +81,7 @@ pub const Hkdf = struct {
         }
 
         pub const hkdf = Hkdf{
-            .hash_type = .SHA256,
+            .hash_type = .SHA384,
             .digest_length = Hash.digest_length,
             .hash = &hash,
             .create = &create,
@@ -88,13 +89,6 @@ pub const Hkdf = struct {
             .expand = &expand,
         };
     };
-
-    pub fn fromHashType(t: HashType) Self {
-        switch (t) {
-            .SHA256 => return Sha256.h,
-            else => unreachable,
-        }
-    }
 
     pub const MAX_LABEL_LENGTH: usize = 256;
     pub const MAX_CONTENT_LENGTH: usize = 256;
@@ -139,12 +133,20 @@ pub const Hkdf = struct {
 
 const AuthenticationError = std.crypto.errors.AuthenticationError;
 
+pub const AeadType = enum(u8) {
+    AES128GCM,
+    AES256GCM,
+    CHACHA20_POLY1305,
+};
+
 // abstraction struct for Aead functions
 pub const Aead = struct {
     const MAX_KEY_LEGNTH =
         max(u8, ChaCha20Poly1305.C.key_length, max(u8, Aes128Gcm.C.key_length, Aes256Gcm.C.key_length));
     const MAX_NONCE_LENGTH =
         max(u8, ChaCha20Poly1305.C.nonce_length, max(u8, Aes128Gcm.C.nonce_length, Aes256Gcm.C.nonce_length));
+
+    aead_type: AeadType,
 
     key_length: usize,
     nonce_length: usize,
@@ -165,6 +167,7 @@ pub const Aead = struct {
         }
 
         pub const aead = Aead{
+            .aead_type = .AES128GCM,
             .key_length = C.key_length,
             .nonce_length = C.nonce_length,
             .tag_length = C.tag_length,
@@ -185,6 +188,7 @@ pub const Aead = struct {
         }
 
         pub const aead = Aead{
+            .aead_type = .AES256GCM,
             .key_length = C.key_length,
             .nonce_length = C.nonce_length,
             .tag_length = C.tag_length,
@@ -205,6 +209,7 @@ pub const Aead = struct {
         }
 
         pub const aead = Aead{
+            .aead_type = .CHACHA20_POLY1305,
             .key_length = C.key_length,
             .nonce_length = C.nonce_length,
             .tag_length = C.tag_length,
@@ -335,4 +340,23 @@ test "HKDF-SHA256 secret deriviation" {
 
     hkdf.extract(secret.hs_secret.slice(), secret.hs_derived_secret.slice(), &shared_key);
     try expect(std.mem.eql(u8, secret.hs_secret.slice(), &hs_secret_ans));
+}
+
+const P256 = std.crypto.sign.ecdsa.EcdsaP256Sha256;
+const random = std.crypto.random;
+
+test "ECDHE-P256" {
+    var a_skey_bytes: [P256.SecretKey.encoded_length]u8 = [_]u8{0} ** P256.SecretKey.encoded_length;
+    a_skey_bytes[31] = 1;
+    var a_skey = try P256.SecretKey.fromBytes(a_skey_bytes);
+    const a_key = try P256.KeyPair.fromSecretKey(a_skey);
+
+    var b_skey_bytes: [P256.SecretKey.encoded_length]u8 = [_]u8{0} ** P256.SecretKey.encoded_length;
+    b_skey_bytes[31] = 2;
+    var b_skey = try P256.SecretKey.fromBytes(b_skey_bytes);
+    const b_key = try P256.KeyPair.fromSecretKey(b_skey);
+
+    const shared = try a_key.public_key.p.mul(b_key.secret_key.bytes, .Big);
+    const shared2 = try b_key.public_key.p.mul(a_key.secret_key.bytes, .Big);
+    try expect(std.mem.eql(u8, &shared.affineCoordinates().x.toBytes(.Big), &shared2.affineCoordinates().x.toBytes(.Big)));
 }

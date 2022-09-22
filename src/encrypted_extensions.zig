@@ -51,6 +51,14 @@ pub const EncryptedExtensions = struct {
         return res;
     }
 
+    /// encode EncryptedExtensions writing to io.Writer.
+    /// @param self   EncryptedExtensions to be encoded.
+    /// @param writer io.Writer to write enocded EncryptedExntensions.
+    /// @return the length of encoded EncryptedExntensions.
+    pub fn encode(self: Self, writer: anytype) !usize {
+        return try msg.encodeExtensions(writer, self.extensions);
+    }
+
     /// get length of encoded EncryptedExtensions.
     /// @param self the target EncryptedExntensions.
     /// @return length of encoded EncryptedExtensions.

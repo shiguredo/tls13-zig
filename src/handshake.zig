@@ -120,6 +120,8 @@ pub const Handshake = union(HandshakeType) {
         switch (self) {
             .client_hello => |e| len += try e.encode(writer),
             .server_hello => |e| len += try e.encode(writer),
+            .encrypted_extensions => |e| len += try e.encode(writer),
+            .certificate => |e| len += try e.encode(writer),
             .certificate_verify => |e| len += try e.encode(writer),
             .finished => |e| len += try e.encode(writer),
             else => unreachable, // TODO: implement remaining.

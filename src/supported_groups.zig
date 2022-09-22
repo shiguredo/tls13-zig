@@ -34,6 +34,8 @@ pub const NamedGroup = enum(u16) {
     ffdhe4096 = 0x0102,
     ffdhe6144 = 0x0103,
     ffdhe8192 = 0x0104,
+
+    none = 0xfff,
 };
 
 /// RFC8446 Section 4.2.7 Supported Groups
@@ -44,6 +46,7 @@ pub const NamedGroup = enum(u16) {
 ///
 pub const NamedGroupList = struct {
     groups: ArrayList(NamedGroup) = undefined,
+    grease_length: usize = 0,
 
     const Self = @This();
 
@@ -75,7 +78,12 @@ pub const NamedGroupList = struct {
         }
         var i: usize = 0;
         while (i < group_len) : (i += 2) {
-            try res.groups.append(@intToEnum(NamedGroup, try reader.readIntBig(u16)));
+            const ng = reader.readEnum(NamedGroup, .Big) catch {
+                // if the value is not NamedGroup, it may be GREASE.
+                res.grease_length += 2;
+                continue;
+            };
+            try res.groups.append(ng);
         }
 
         return res;
@@ -102,7 +110,7 @@ pub const NamedGroupList = struct {
     /// @param self the target NamedGroupList.
     /// @return length of encoded NamedGroupList.
     pub fn length(self: Self) usize {
-        var len: usize = 0;
+        var len: usize = self.grease_length;
         len += @sizeOf(u16); // supported groups length
         len += self.groups.items.len * @sizeOf(NamedGroup);
         return len;

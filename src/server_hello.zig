@@ -45,6 +45,20 @@ pub const ServerHello = struct {
         UnsupportedCompressionMethod,
     };
 
+    /// initialize ServerHello message with given random and session_id.
+    /// @param random     random for ServerHello.
+    /// @param session_id session_id for ServerHello.
+    /// @param allocator  allocator to allocate ArrayLists.
+    /// @return the initialized ServerHello
+    pub fn init(random: [32]u8, session_id: SessionID, cipher_suite: CipherSuite, allocator: std.mem.Allocator) Self {
+        return Self{
+            .random = random,
+            .legacy_session_id = session_id,
+            .cipher_suite = cipher_suite,
+            .extensions = ArrayList(Extension).init(allocator),
+        };
+    }
+
     /// decode ServerHello message reading from io.Reader.
     /// @param reader     io.Reader to read messages.
     /// @param allocator  allocator to allocate ArrayList(Extension).

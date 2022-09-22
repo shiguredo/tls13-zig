@@ -4,6 +4,7 @@ const assert = std.debug.assert;
 const ArrayList = std.ArrayList;
 const BoundedArray = std.BoundedArray;
 
+const utils = @import("utils.zig");
 const Extension = @import("extension.zig").Extension;
 const ExtensionType = @import("extension.zig").ExtensionType;
 const HandshakeType = @import("handshake.zig").HandshakeType;
@@ -15,7 +16,7 @@ pub const CipherSuite = enum(u16) {
     TLS_AES_128_CCM_SHA256 = 0x1304,
     TLS_AES_128_CCM_8_SHA256 = 0x1305,
 
-    TLS_EMPTY_RENEGOTIATION_INFO_SCSV = 0x0,
+    TLS_EMPTY_RENEGOTIATION_INFO_SCSV = 0x00ff,
 };
 
 pub const SessionID = struct {
@@ -70,7 +71,12 @@ pub fn decodeCipherSuites(reader: anytype, suites: *ArrayList(CipherSuite)) !voi
 
     var i: usize = 0;
     while (i < len) : (i += @sizeOf(u16)) {
-        try suites.append(@intToEnum(CipherSuite, try reader.readIntBig(u16)));
+        const cs_raw = try reader.readIntBig(u16);
+        const cs = utils.intToEnum(CipherSuite, cs_raw) catch {
+            std.log.warn("Unknown CipherSuite 0x{x:0>4}", .{cs_raw});
+            continue;
+        };
+        try suites.append(cs);
     }
 
     assert(i == len);

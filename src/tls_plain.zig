@@ -15,6 +15,7 @@ const ContentType = @import("content.zig").ContentType;
 /// } TLSPlaintext;
 ///
 pub const TLSPlainText = struct {
+    proto_version: u16 = 0x0303,
     content: Content,
 
     const Self = @This();
@@ -34,10 +35,7 @@ pub const TLSPlainText = struct {
     pub fn decode(reader: anytype, t: ContentType, allocator: std.mem.Allocator, hkdf: ?crypto.Hkdf, writer: anytype) !Self {
         // Decoding ProtocolVersion.
         const proto_version = try reader.readIntBig(u16);
-        if (proto_version != 0x0303) {
-            // ProtocolVersion must be TLS1.2(0x0303)
-            return Error.InvalidProtocolVersion;
-        }
+        std.log.debug("protocol_version=0x{x:0>4}", .{proto_version});
 
         // Decoding length.
         const len = try reader.readIntBig(u16);
@@ -63,6 +61,7 @@ pub const TLSPlainText = struct {
         }
 
         return Self{
+            .proto_version = proto_version,
             .content = cont,
         };
     }
@@ -79,7 +78,7 @@ pub const TLSPlainText = struct {
         len += @sizeOf(u8);
 
         // Encoding ProtocolVersion(TLS1.2 0x0303).
-        try writer.writeIntBig(u16, 0x0303);
+        try writer.writeIntBig(u16, self.proto_version);
         len += @sizeOf(u16);
 
         // Encoding length.

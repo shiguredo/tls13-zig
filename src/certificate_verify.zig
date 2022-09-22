@@ -22,6 +22,19 @@ pub const CertificateVerify = struct {
 
     const Self = @This();
 
+    /// initialize CertificateVerify.
+    /// @param algo      algorithm used to sign.
+    /// @param sig_len   the length of signature.
+    /// @param allocator allocator to allocate CertificateVerify.
+    /// @return initialized CertificateVerify.
+    pub fn init(algo: SignatureScheme, sig_len: usize, allocator: std.mem.Allocator) !Self {
+        return Self{
+            .algorithm = algo,
+            .signature = try allocator.alloc(u8, sig_len),
+            .allocator = allocator,
+        };
+    }
+
     /// decode CertificateVerify message reading from io.Reader
     /// @param reader    io.Reader to read messages.
     /// @param allocator allocator for each handshake mssage.
@@ -41,6 +54,26 @@ pub const CertificateVerify = struct {
             .signature = signature,
             .allocator = allocator,
         };
+    }
+
+    /// encode CertificateVerify message writing to io.Writer.
+    /// @param self   CertificateVerify to be encoded.
+    /// @param writer io.Writer to write encoded CertificateVerify.
+    /// @return the length of encoded CertificateVerify.
+    pub fn encode(self: Self, writer: anytype) !usize {
+        var len: usize = 0;
+
+        // Encoding algorithm.
+        try writer.writeIntBig(u16, @enumToInt(self.algorithm));
+        len += 2;
+
+        // Encoding signature.
+        try writer.writeIntBig(u16, @intCast(u16, self.signature.len));
+        len += 2;
+        try writer.writeAll(self.signature);
+        len += self.signature.len;
+
+        return len;
     }
 
     /// get length of encoded CertificateVerify.
@@ -65,7 +98,7 @@ pub const CertificateVerify = struct {
     }
 };
 
-test "CertificateVerify decode" {
+test "CertificateVerify decode & encode" {
     const Handshake = @import("handshake.zig").Handshake;
 
     // zig fmt: off
@@ -83,7 +116,9 @@ test "CertificateVerify decode" {
     0xDF, 0xAC, 0xD4, 0x2F, 0x74, 0xF3
     };
     // zig fmt: on
+    var enc_data: [recv_data.len]u8 = undefined;
     var readStream = io.fixedBufferStream(&recv_data);
+    var writeStream = io.fixedBufferStream(&enc_data);
 
     const res = try Handshake.decode(readStream.reader(), std.testing.allocator, null);
     defer res.deinit();
@@ -92,4 +127,7 @@ test "CertificateVerify decode" {
     try expectError(error.EndOfStream, readStream.reader().readByte());
 
     try expect(res == .certificate_verify);
+
+    _ = try res.encode(writeStream.writer());
+    try expect(std.mem.eql(u8, &recv_data, &enc_data));
 }

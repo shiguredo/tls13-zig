@@ -60,6 +60,33 @@ pub const Certificate = struct {
         return res;
     }
 
+    /// encode CertificateEntry writing to io.Writer.
+    /// @param self   CertificateEntry to be encoded.
+    /// @param writer io.Writer to write encoded CertificateEntry.
+    /// @return length of encoded CertificateEntry.
+    pub fn encode(self: Self, writer: anytype) !usize {
+        var len: usize = 0;
+
+        // Encoding certificate_request.
+        try writer.writeIntBig(u16, @intCast(u16, self.cert_req_ctx.slice().len));
+        len += 2;
+        try writer.writeAll(self.cert_req_ctx.slice());
+        len += self.cert_req_ctx.slice().len;
+
+        // Encoding cert_list.
+        var cert_len: usize = 0;
+        for (self.cert_list.items) |c| {
+            cert_len += c.length();
+        }
+        try writer.writeIntBig(u16, @intCast(u16, cert_len));
+        len += 2;
+        for (self.cert_list.items) |c| {
+            len += try c.encode(writer);
+        }
+
+        return len;
+    }
+
     /// get length of encoded Certificate.
     /// @param self the target Certificate.
     /// @return length of encoded Certfiicate.
@@ -109,9 +136,38 @@ pub const CertificateEntry = struct {
     cert_len: usize, // TODO: remove this
     extensions: ArrayList(Extension),
 
+    cert_data: []u8 = &[_]u8{},
+    allocator: std.mem.Allocator,
+
     const Self = @This();
 
     const Error = error{UnsupportedCertificate};
+
+    /// load x509 der formatted certificate from file.
+    /// @param der_path  path to certificate(both relative and absolute path are allowed).
+    /// @param allocator allocator to allocate CertificateEntry.
+    /// @return CertificateEntry with loaded certificate.
+    pub fn fromDerFile(der_path: []const u8, allocator: std.mem.Allocator) !Self {
+        // Get the path
+        var path_buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+        const path = try std.fs.realpath(der_path, &path_buffer);
+
+        // Open the file
+        const file = try std.fs.openFileAbsolute(path, .{});
+        defer file.close();
+
+        const fb = try file.readToEndAlloc(allocator, 10000);
+
+        var stream = io.fixedBufferStream(fb);
+
+        return Self{
+            .cert = try x509.Certificate.decode(stream.reader(), allocator),
+            .cert_len = fb.len,
+            .extensions = ArrayList(Extension).init(allocator),
+            .cert_data = fb,
+            .allocator = allocator,
+        };
+    }
 
     /// deocde CertificateEntry message reading from io.Reader.
     /// @param reader    io.Reader to read messages.
@@ -138,7 +194,31 @@ pub const CertificateEntry = struct {
             .cert = cert,
             .cert_len = cert_len,
             .extensions = exts,
+            .allocator = allocator,
         };
+    }
+
+    /// encode CertificateEntry writing to io.Writer.
+    /// @param self   CertificateEntry to be encoded.
+    /// @param writer io.Writer to write encoded CertificateEntry.
+    /// @return length of encoded CertificateEntry.
+    pub fn encode(self: Self, writer: anytype) !usize {
+        var len: usize = 0;
+
+        // Encoding certificate_type.
+        try writer.writeByte(0); // Certificate type is x509.
+        len += 1;
+
+        // Encoding certificate.
+        try writer.writeIntBig(u16, @intCast(u16, self.cert_len));
+        len += 2;
+        // TODO: directly encode x509.Certificate.
+        try writer.writeAll(self.cert_data);
+        len += self.cert_data.len;
+
+        // Encoding extensions.
+        len += try msg.encodeExtensions(writer, self.extensions);
+        return len;
     }
 
     /// get length of encoded CertificateEntry.
@@ -167,6 +247,9 @@ pub const CertificateEntry = struct {
             e.deinit();
         }
         self.extensions.deinit();
+        if (self.cert_data.len != 0) {
+            self.allocator.free(self.cert_data);
+        }
     }
 };
 

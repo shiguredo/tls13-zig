@@ -25,6 +25,7 @@ const Extension = @import("extension.zig").Extension;
 pub const KeyShare = struct {
     entries: ArrayList(KeyShareEntry), // for ClientHello, ServerHello
     selected: NamedGroup = .x25519, // for HelloRetryRequest
+    grease_length: usize = 0,
 
     ht: HandshakeType = undefined,
     is_hello_retry_request: bool = false,
@@ -66,7 +67,12 @@ pub const KeyShare = struct {
                 while (i < ks_len) {
                     const kse = try KeyShareEntry.decode(reader, allocator);
                     errdefer kse.deinit();
-                    try res.entries.append(kse);
+                    if (kse.group != .none) {
+                        try res.entries.append(kse);
+                    } else {
+                        // if the KeyShareEntry is meaningless, it may be GREASE.
+                        res.grease_length += kse.length();
+                    }
                     i += kse.length();
                 }
 
@@ -129,7 +135,7 @@ pub const KeyShare = struct {
     /// @param self the target KeyShare.
     /// @return length of encoded KeyShare.
     pub fn length(self: Self) usize {
-        var len: usize = 0;
+        var len: usize = self.grease_length;
         // Structure of KeyShare varies based on HandshakeType.
         switch (self.ht) {
             HandshakeType.client_hello => {
@@ -210,7 +216,8 @@ pub const KeyShareEntry = struct {
     /// @return decoded KeyShareEntry.
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
         // Decoding group.
-        const t = @intToEnum(NamedGroup, try reader.readIntBig(u16));
+        // NamedGroup.none is for GREASE.
+        const t = reader.readEnum(NamedGroup, .Big) catch NamedGroup.none;
 
         // Decoding key_exchange.
         const len = try reader.readIntBig(u16);

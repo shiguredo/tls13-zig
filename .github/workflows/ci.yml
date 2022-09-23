@@ -48,3 +48,8 @@ jobs:
         with:
           image: zig-master
           run: /tls13-zig/test.sh
+
+      - uses: addnab/docker-run-action@v3
+        with:
+          image: zig-master
+          run: /tls13-zig/test_server.sh

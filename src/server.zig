@@ -1,5 +1,6 @@
 const std = @import("std");
 const io = std.io;
+const os = std.os;
 const net = std.net;
 const dh = std.crypto.dh;
 const expect = std.testing.expect;
@@ -69,6 +70,14 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
         };
 
         pub fn init(allocator: std.mem.Allocator) !Self {
+            // ignore SIGPIPE
+            var act = os.Sigaction{
+                .handler = .{ .handler = os.SIG.IGN },
+                .mask = os.empty_sigset,
+                .flags = (os.SA.SIGINFO | os.SA.RESTART | os.SA.RESETHAND),
+            };
+            try os.sigaction(os.SIG.PIPE, &act, null);
+
             const cert_keys = try x509.ECPrivateKey.fromDer("./test/prikey.der", allocator);
             if (cert_keys.namedCurve) |n| {
                 if (!std.mem.eql(u8, n.id, "1.2.840.10045.3.1.7")) {
@@ -371,22 +380,26 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
         }
 
         pub fn close(self: *Self) void {
+            defer {
+                if (self.tcp_conn) |c| {
+                    c.stream.close();
+                    self.tcp_conn = null;
+                }
+            }
+
             const close_notify = Content{ .alert = Alert{ .level = .warning, .description = .close_notify } };
             _ = self.ap_protector.encryptFromMessageAndWrite(
                 close_notify,
                 self.allocator,
                 self.write_buffer.writer(),
             ) catch {
-                unreachable;
-            };
-            self.write_buffer.flush() catch {
-                // TCP connection may be closed.
+                return;
             };
 
-            if (self.tcp_conn) |c| {
-                c.stream.close();
-                self.tcp_conn = null;
-            }
+            self.write_buffer.flush() catch {
+                // TCP connection may be closed.
+                return;
+            };
         }
 
         fn handleClientHello(self: *Self, ch: ClientHello) !void {

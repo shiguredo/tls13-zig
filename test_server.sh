@@ -11,6 +11,12 @@ trap cleanup EXIT
 
 cd $(dirname $0)
 
+cd test
+# Generate testing certificate
+./gen_cert.sh
+
+cd ../
+
 zig run src/main_test_server.zig &
 ZIG_SERVER_PID=$!
 

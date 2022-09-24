@@ -133,7 +133,7 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 self.tcp_server = net.StreamServer.init(.{
                     .reuse_address = true,
                 });
-                const addr = try net.Address.parseIp("127.0.0.1", port);
+                const addr = try net.Address.parseIp("0.0.0.0", port);
                 try self.tcp_server.listen(addr);
             }
         }

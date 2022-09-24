@@ -3,3 +3,5 @@
 /tmp.zig
 /pkcs1v15.py
 /test-certs
+/*.o
+/test_proxy

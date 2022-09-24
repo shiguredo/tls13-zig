@@ -69,7 +69,7 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
             UnsupportedPrivateKey,
         };
 
-        pub fn init(key_path: []const u8, key_type: x509.PrivateKeyType, cert_path: []const u8, ca_path: ?[]const u8, allocator: std.mem.Allocator) !Self {
+        pub fn init(key_path: []const u8, key_type: x509.PrivateKeyType, cert_path: []const u8, ca_path: ?[]const u8, host: ?[]const u8, allocator: std.mem.Allocator) !Self {
             // ignore SIGPIPE
             var act = os.Sigaction{
                 .handler = .{ .handler = os.SIG.IGN },
@@ -108,6 +108,11 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
             if (ca_path) |p| {
                 res.ca_cert = try certificate.CertificateEntry.fromDerFile(p, allocator);
+            }
+
+            if (host) |h| {
+                res.host = try allocator.alloc(u8, h.len);
+                std.mem.copy(u8, res.host, h);
             }
 
             return res;
@@ -199,6 +204,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             CertificateNotFound,
             FailedToConnect,
             UnsupportedPrivateKey,
+            UnknownServerName,
         };
 
         pub fn init(server: TLSServer, tcp_conn: net.StreamServer.Connection, allocator: std.mem.Allocator) !Self {
@@ -401,6 +407,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 if (self.tcp_conn) |c| {
                     c.stream.close();
                     self.tcp_conn = null;
+                    std.log.debug("tcp connection closed", .{});
                 }
             }
 
@@ -499,6 +506,22 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 return Error.UnsupportedKeyShareAlgorithm;
             }
             std.log.debug("selected key_share={s}", .{@tagName(self.key_share)});
+
+            var sn_ok = true;
+            if (self.tls_server.host.len != 0) {
+                sn_ok = false;
+                const snl = (try msg.getExtension(ch.extensions, .server_name)).server_name;
+                for (snl.server_name_list.items) |sn| {
+                    if (std.mem.eql(u8, sn.host_name, self.tls_server.host)) {
+                        sn_ok = true;
+                        std.log.debug("server_name={s}", .{self.tls_server.host});
+                        break;
+                    }
+                }
+            }
+            if (!sn_ok) {
+                return Error.UnknownServerName;
+            }
         }
 
         fn sendServerHello(self: *Self) !void {

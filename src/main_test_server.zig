@@ -8,8 +8,7 @@ const server = @import("server.zig");
 
 pub fn main() !void {
     log.info("started.", .{});
-    //var tls_server = try server.TLSServerTCP.init("./test-certs/key.der", .rsa, "./test-certs/cert.der", "./test-certs/chain.der", allocator);
-    var tls_server = try server.TLSServerTCP.init("./test/key.der", .ec, "./test/cert.der", null, allocator);
+    var tls_server = try server.TLSServerTCP.init("./test/key.der", .ec, "./test/cert.der", null, "localhost", allocator);
     defer tls_server.deinit();
     tls_server.print_keys = true;
     try tls_server.listen(8443);

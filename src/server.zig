@@ -140,7 +140,7 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         pub fn accept(self: *Self) !TLSStreamImpl(ReaderType, WriterType, is_tcp) {
             var conn = try self.tcp_server.accept();
-            std.log.info("accept", .{});
+            std.log.info("accept remote_addr={}", .{conn.address});
             var stream = try TLSStreamImpl(ReaderType, WriterType, is_tcp).init(self.*, conn, self.allocator);
             return stream;
         }

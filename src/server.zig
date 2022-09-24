@@ -69,7 +69,7 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
             UnsupportedPrivateKey,
         };
 
-        pub fn init(allocator: std.mem.Allocator) !Self {
+        pub fn init(key_path: []const u8, cert_path: []const u8, allocator: std.mem.Allocator) !Self {
             // ignore SIGPIPE
             var act = os.Sigaction{
                 .handler = .{ .handler = os.SIG.IGN },
@@ -78,7 +78,7 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
             };
             try os.sigaction(os.SIG.PIPE, &act, null);
 
-            const cert_keys = try x509.ECPrivateKey.fromDer("./test/prikey.der", allocator);
+            const cert_keys = try x509.ECPrivateKey.fromDer(key_path, allocator);
             if (cert_keys.namedCurve) |n| {
                 if (!std.mem.eql(u8, n.id, "1.2.840.10045.3.1.7")) {
                     // currently, only accepts secp256r1.
@@ -90,7 +90,7 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
             const cert_priv_key = try P256.SecretKey.fromBytes(cert_keys.privateKey[0..P256.SecretKey.encoded_length].*);
 
             var res = Self{
-                .cert = try certificate.CertificateEntry.fromDerFile("./test/cert.der", allocator),
+                .cert = try certificate.CertificateEntry.fromDerFile(cert_path, allocator),
                 .cert_secp256r1_key = try P256.KeyPair.fromSecretKey(cert_priv_key),
 
                 .allocator = allocator,

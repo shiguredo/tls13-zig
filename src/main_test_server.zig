@@ -14,6 +14,15 @@ pub fn main() !void {
     try tls_server.listen(8443);
     while (true) {
         var con = try tls_server.accept();
+        const fork_pid = std.os.fork() catch {
+            std.log.err("fork failed", .{});
+            return;
+        };
+        if (fork_pid != 0) {
+            continue;
+        }
+        std.log.debug("forked", .{});
+
         defer {
             con.close();
             std.log.info("connection closed", .{});
@@ -32,6 +41,8 @@ pub fn main() !void {
             const http_res = "HTTP/1.0 200 ok\r\nContent-type: text/html\r\n\r\n<HTML><BODY>tls13-zig</BODY></HTML>";
             _ = try con.send(http_res);
         }
+
+        return;
     }
 
     return;

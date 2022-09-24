@@ -27,10 +27,7 @@ pub fn main() !void {
             con.close();
             std.log.info("connection closed", .{});
         }
-        con.handshake() catch {
-            std.log.err("failed to handshake", .{});
-            return;
-        };
+        try con.handshake();
 
         var conStream = try net.tcpConnectToHost(allocator, "localhost", 8080);
         defer conStream.close();

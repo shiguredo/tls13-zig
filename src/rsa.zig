@@ -153,7 +153,7 @@ pub fn Rsa(comptime modulus_bits: usize) type {
                 return out;
             }
 
-            pub fn Sign(msg: []const u8, secret_key: SecretKey, comptime Hash: type, allocator: std.mem.Allocator) !Self {
+            pub fn sign(msg: []const u8, secret_key: SecretKey, comptime Hash: type, allocator: std.mem.Allocator) !Self {
                 const em = try EMSA_PKCS1_v1_5_ENCODE(msg, Hash);
 
                 return Self{
@@ -161,7 +161,7 @@ pub fn Rsa(comptime modulus_bits: usize) type {
                 };
             }
 
-            pub fn Verify(self: Self, msg: []const u8, public_key: PublicKey, comptime Hash: type, allocator: std.mem.Allocator) !bool {
+            pub fn verify(self: Self, msg: []const u8, public_key: PublicKey, comptime Hash: type, allocator: std.mem.Allocator) !bool {
                 const em_dec = try encrypt(self.signature, public_key, allocator);
                 const em = try EMSA_PKCS1_v1_5_ENCODE(msg, Hash);
                 return std.mem.eql(u8, &em, &em_dec);
@@ -438,7 +438,7 @@ pub fn Rsa(comptime modulus_bits: usize) type {
             }
         };
 
-        fn encrypt(msg: [modulus_length]u8, public_key: PublicKey, allocator: std.mem.Allocator) ![modulus_length]u8 {
+        pub fn encrypt(msg: [modulus_length]u8, public_key: PublicKey, allocator: std.mem.Allocator) ![modulus_length]u8 {
             var m = try bigInt.Managed.init(allocator);
             defer m.deinit();
 
@@ -460,7 +460,7 @@ pub fn Rsa(comptime modulus_bits: usize) type {
             return res;
         }
 
-        fn decrypt(msg: [modulus_length]u8, secret_key: SecretKey, allocator: std.mem.Allocator) ![modulus_length]u8 {
+        pub fn decrypt(msg: [modulus_length]u8, secret_key: SecretKey, allocator: std.mem.Allocator) ![modulus_length]u8 {
             var m = try bigInt.Managed.init(allocator);
             defer m.deinit();
 
@@ -547,18 +547,20 @@ fn mod(rem: *bigInt.Managed, a: *const bigInt.Managed, n: *const bigInt.Managed,
 
 // r = a^x mod n
 fn pow_montgomery(r: *bigInt.Managed, a: *const bigInt.Managed, x: *const bigInt.Managed, n: *const bigInt.Managed, allocator: std.mem.Allocator) !void {
-    var bin_str: [10000]u8 = undefined;
-    var bin_stream = io.fixedBufferStream(&bin_str);
-    try x.format("b", .{}, bin_stream.writer());
-    const bin_len = try bin_stream.getPos();
+    var bin_raw: [512]u8 = undefined;
+    try toBytes(&bin_raw, x, allocator);
+
+    var i: usize = 0;
+    while (bin_raw[i] == 0x00) : (i += 1) {}
+    const bin = bin_raw[i..];
 
     try r.set(1);
     var r1 = try bigInt.Managed.init(allocator);
     defer r1.deinit();
     try bigInt.Managed.copy(&r1, a.toConst());
-    var i: usize = 0;
-    while (i < bin_len) : (i += 1) {
-        if (bin_str[i] == '0') {
+    i = 0;
+    while (i < bin.len * 8) : (i += 1) {
+        if (((bin[i / 8] >> @intCast(u3, (7 - (i % 8)))) & 0x1) == 0) {
             try bigInt.Managed.mul(&r1, r, &r1);
             try mod(&r1, &r1, n, allocator);
             try bigInt.Managed.sqr(r, r);
@@ -709,7 +711,7 @@ test "2048-bit RSA PKCS1 v1.5" {
     defer public_key.deinit();
 
     const msg = "test data 16byte";
-    const sig = try Rsa2048.PKCS1V15Signature.Sign(msg, secret_key, std.crypto.hash.sha2.Sha256, std.testing.allocator);
+    const sig = try Rsa2048.PKCS1V15Signature.sign(msg, secret_key, std.crypto.hash.sha2.Sha256, std.testing.allocator);
 
     // zig fmt: off
     const sig_ans = [_]u8{
@@ -737,7 +739,7 @@ test "2048-bit RSA PKCS1 v1.5" {
     // zig fmt: on
 
     try expect(std.mem.eql(u8, &sig.signature, &sig_ans));
-    try expect(try sig.Verify(msg, public_key, std.crypto.hash.sha2.Sha256, std.testing.allocator));
+    try expect(try sig.verify(msg, public_key, std.crypto.hash.sha2.Sha256, std.testing.allocator));
 }
 
 test "2048-bit RSA PSS Sign" {
@@ -792,6 +794,40 @@ test "2048-bit RSA PSS Verify" {
     defer public_key.deinit();
 
     const msg = "test data 16byte";
+
+    try sig.verify(msg, public_key, std.crypto.hash.sha2.Sha256, std.testing.allocator);
+}
+
+test "4096-bit RSA PSS Sign" {
+    const n = "897535301620306077188891079301907673125963912211192741122348613922246072092610345250186564091181400747109015531089356444806090560753638865734563036738554165050798024801158167412934556646185261962016595023541314883422949023710685340675718103915652978942180795194958506158094483342012886642270027276693240459935208829184592396531495966261943744036979064638695422454818147885749109150302195425802819921308694143152344723082163813571934345758846689544769319697350655550031613804772387776701371526717638610510574001767592411627528450046156985403290908168738173358873495129077354640905355468389357577765586870921839988193004595009224627588073057372612891486057015942512692199236238168622228912025469578187459510803480351610523595706885613463758753288312263653456211204943914707207549073787942894431218381469240793425136973023446713462231486076209118140018376420926146941327295910991417167199375689590611101067683147180807440499150825756043075062581640588650519959175779521560663031612401158232135271870806087162232823153837034102908050667626930890079184403053749722256052973876704644595920341800544323289556048189453983881150373002292335443797850064651998186411619890589268469639972399875480015742895242553860437592274314253396272624328229";
+    const priv_key = "124765719846596478931139584589013906329185234771533922361564863511987766884076222558486231373295777288498861845096766857672683927111491805797615131993338313962403416473820150368092635376747627794825238946140611622697162234207551018888428839528778820382501527220117959789535381034630405733139150647687483313244804251584279611219632591156718693167415178046365792947785327857182138664213201334786763815678205148506243015601252466280020673412721562681008204445928083521135778410133629030054681629480741674953140314625375112806959291118497973301651448741081327247855062926280985857108320714342953520497412725495761062490421801944855566452675835332573294821067060364950225705181619044543374076046907857122339032132846458480459136994242930101676476634188331767976638972984292912772276454185106765455221936971234365412634972593988655306479329613012757794413721878817071086573880767173140552020830621393269768369436403209385438185082303210338201068744790834660283297579174434214336074750446053936741306386786314295925388699142167339273101476895448918346646048310067201771725165523372705823852777288497167237929363410260986664538816810108649851181733006891679372699037976134443225602046316464534714173380580082384920433288426890331571214521201";
+    const pub_key = "65537";
+
+    var secret_key = try Rsa4096.SecretKey.fromString(10, priv_key, n, std.testing.allocator);
+    defer secret_key.deinit();
+
+    var public_key = try Rsa4096.PublicKey.fromString(10, pub_key, n, std.testing.allocator);
+    defer public_key.deinit();
+
+    const msg = "test data 16byte";
+    const sig = try Rsa4096.PKCS1V15Signature.sign(msg, secret_key, std.crypto.hash.sha2.Sha256, std.testing.allocator);
+
+    try expect(try sig.verify(msg, public_key, std.crypto.hash.sha2.Sha256, std.testing.allocator));
+}
+
+test "1024-bit RSA PSS Sign" {
+    const n = "132379107402679919165171865620956884932493794394268210529821686924495515049897816049791754567775403042641020016873857657023789634961669862624896688369645162893925903729161862383562055232421425080516054744420973967593163722256021558574090119760313528619828245538983231115360642688817218248940217148000129578773";
+    const priv_key = "950273376351400380441085222235235744469007650144682201278792972614200078135045106227828874021971662942686651928866991690311274328208505560873768022533188565287153566930060932531064741693039138344314734857685605309659233992374225880820629095915167477606086894679092229184107533984322761876483641135744180033";
+    const pub_key = "65537";
+
+    var secret_key = try Rsa1024.SecretKey.fromString(10, priv_key, n, std.testing.allocator);
+    defer secret_key.deinit();
+
+    var public_key = try Rsa1024.PublicKey.fromString(10, pub_key, n, std.testing.allocator);
+    defer public_key.deinit();
+
+    const msg = "test data 16byte";
+    const sig = try Rsa1024.PSSSignature.sign(msg, secret_key, std.crypto.hash.sha2.Sha256, std.testing.allocator);
 
     try sig.verify(msg, public_key, std.crypto.hash.sha2.Sha256, std.testing.allocator);
 }

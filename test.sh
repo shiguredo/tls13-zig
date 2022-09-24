@@ -29,7 +29,7 @@ do
         cd test
 
         # Run openssl server
-        openssl s_server -tls1_3 -accept 8443 -cert cert.pem -key prikey.pem -www -ciphersuites $SUITE -groups $GROUP &
+        openssl s_server -tls1_3 -accept 8443 -cert cert.pem -key key.pem -www -ciphersuites $SUITE -groups $GROUP &
 
         cd ../
 

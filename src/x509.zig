@@ -1160,6 +1160,16 @@ const Dummy = struct {
     }
 };
 
+pub const PrivateKeyType = enum(u8) {
+    rsa,
+    ec,
+};
+
+pub const PrivateKey = union(PrivateKeyType) {
+    rsa: RSAPrivateKey,
+    ec: ECPrivateKey,
+};
+
 // RFC5915 Section3 Eppliptic Curve Private KEy Format
 //
 // ECPrivateKey ::= SEQUENCE {
@@ -1259,6 +1269,120 @@ pub const ECPrivateKey = struct {
         if (self.publicKey.len != 0) {
             self.allocator.free(self.publicKey);
         }
+    }
+
+    pub fn fromDer(der_path: []const u8, allocator: std.mem.Allocator) !Self {
+        // Get the path
+        var path_buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+        const path = try std.fs.realpath(der_path, &path_buffer);
+
+        // Open the file
+        const file = try std.fs.openFileAbsolute(path, .{});
+        defer file.close();
+
+        const fb = try file.readToEndAlloc(allocator, 10000);
+        defer allocator.free(fb);
+
+        var stream = io.fixedBufferStream(fb);
+
+        return try Self.decode(stream.reader(), allocator);
+    }
+};
+
+// RSAPrivateKey ::= SEQUENCE {
+//     version           Version,
+//     modulus           INTEGER,  -- n
+//     publicExponent    INTEGER,  -- e
+//     privateExponent   INTEGER,  -- d
+//     prime1            INTEGER,  -- p
+//     prime2            INTEGER,  -- q
+//     exponent1         INTEGER,  -- d mod (p-1)
+//     exponent2         INTEGER,  -- d mod (q-1)
+//     coefficient       INTEGER,  -- (inverse of q) mod p
+//     otherPrimeInfos   OtherPrimeInfos OPTIONAL
+// }
+pub const RSAPrivateKey = struct {
+    version: u8,
+    modulus: []u8,
+    publicExponent: []u8,
+    privateExponent: []u8,
+    prime1: []u8,
+    prime2: []u8,
+    exponent1: []u8,
+    exponent2: []u8,
+    coefficient: []u8,
+
+    allocator: std.mem.Allocator,
+
+    const Self = @This();
+
+    pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
+        return try asn1.Decoder.decodeSEQUENCE(reader, allocator, Self);
+    }
+
+    pub fn decodeContent(stream: *asn1.Stream, allocator: std.mem.Allocator) !Self {
+        const reader = stream.reader();
+
+        var t = @intToEnum(asn1.Tag, try reader.readByte());
+        if (t != .INTEGER) {
+            return asn1.Decoder.Error.InvalidType;
+        }
+        var t_len: usize = try reader.readByte();
+        if (t_len != 0x01) { // length is assumed to be 1(u8)
+            return asn1.Decoder.Error.InvalidLength;
+        }
+        const version = try reader.readByte();
+        if (version != 0x00) { // currently, only 'two-prime(0)' is supported.
+            return asn1.Decoder.Error.InvalidFormat;
+        }
+
+        const modulus = try asn1.Decoder.decodeINTEGER(reader, allocator);
+        errdefer allocator.free(modulus);
+
+        const publicExponent = try asn1.Decoder.decodeINTEGER(reader, allocator);
+        errdefer allocator.free(publicExponent);
+
+        const privateExponent = try asn1.Decoder.decodeINTEGER(reader, allocator);
+        errdefer allocator.free(privateExponent);
+
+        const prime1 = try asn1.Decoder.decodeINTEGER(reader, allocator);
+        errdefer allocator.free(prime1);
+
+        const prime2 = try asn1.Decoder.decodeINTEGER(reader, allocator);
+        errdefer allocator.free(prime2);
+
+        const exponent1 = try asn1.Decoder.decodeINTEGER(reader, allocator);
+        errdefer allocator.free(exponent1);
+
+        const exponent2 = try asn1.Decoder.decodeINTEGER(reader, allocator);
+        errdefer allocator.free(exponent2);
+
+        const coef = try asn1.Decoder.decodeINTEGER(reader, allocator);
+        errdefer allocator.free(coef);
+
+        return Self{
+            .version = version,
+            .modulus = modulus,
+            .publicExponent = publicExponent,
+            .privateExponent = privateExponent,
+            .prime1 = prime1,
+            .prime2 = prime2,
+            .exponent1 = exponent1,
+            .exponent2 = exponent2,
+            .coefficient = coef,
+            .allocator = allocator,
+        };
+    }
+
+    pub fn deinit(self: Self) void {
+        self.allocator.free(self.modulus);
+        self.allocator.free(self.publicExponent);
+        self.allocator.free(self.privateExponent);
+        self.allocator.free(self.prime1);
+        self.allocator.free(self.prime2);
+        self.allocator.free(self.exponent1);
+        self.allocator.free(self.exponent2);
+        self.allocator.free(self.coefficient);
     }
 
     pub fn fromDer(der_path: []const u8, allocator: std.mem.Allocator) !Self {

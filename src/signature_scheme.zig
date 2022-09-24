@@ -1,4 +1,5 @@
 const std = @import("std");
+const utils = @import("utils.zig");
 const io = std.io;
 const log = std.log;
 const assert = std.debug.assert;
@@ -65,6 +66,7 @@ pub const SignatureScheme = enum(u16) {
 ///
 pub const SignatureSchemeList = struct {
     algos: ArrayList(SignatureScheme),
+    grease_length: usize = 0,
 
     const Self = @This();
 
@@ -96,7 +98,13 @@ pub const SignatureSchemeList = struct {
         }
         var i: usize = 0;
         while (i < algos_len) : (i += 2) {
-            try res.algos.append(@intToEnum(SignatureScheme, try reader.readIntBig(u16)));
+            const ss_raw = try reader.readIntBig(u16);
+            const ss = utils.intToEnum(SignatureScheme, ss_raw) catch {
+                std.log.warn("Unknown SignatureScheme 0x{x:0>4}", .{ss_raw});
+                res.grease_length += 2;
+                continue;
+            };
+            try res.algos.append(ss);
         }
 
         return res;
@@ -123,7 +131,7 @@ pub const SignatureSchemeList = struct {
     /// @param self the target SignatureSchemeList.
     /// @return length of encoded SignatureSchemeList.
     pub fn length(self: Self) usize {
-        var len: usize = 0;
+        var len: usize = self.grease_length;
         len += @sizeOf(u16); // supported groups length
         len += self.algos.items.len * @sizeOf(SignatureScheme);
         return len;

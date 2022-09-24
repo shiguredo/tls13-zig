@@ -281,7 +281,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
         }
 
         pub fn handshake(self: *Self) !void {
-            std.log.debug("handshake started", .{});
+            std.log.info("handshake started", .{});
             var t = try self.reader.readEnum(ContentType, .Big);
             const ch_record = try TLSPlainText.decode(self.reader, t, self.allocator, null, self.msgs_stream.writer());
             defer ch_record.deinit();

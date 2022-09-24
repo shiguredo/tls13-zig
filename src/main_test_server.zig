@@ -27,10 +27,7 @@ pub fn main() !void {
             con.close();
             std.log.info("connection closed", .{});
         }
-        con.handshake() catch {
-            std.log.err("failed to handshake", .{});
-            continue;
-        };
+        try con.handshake();
 
         var recv_bytes: [4096]u8 = undefined;
         const recv_size = try con.recv(&recv_bytes);

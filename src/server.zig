@@ -53,9 +53,9 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         // certificate
         cert: certificate.CertificateEntry,
+        cert_key: x509.PrivateKey,
 
-        // private keys
-        cert_secp256r1_key: P256.KeyPair,
+        ca_cert: ?certificate.CertificateEntry = null,
 
         // Misc
         allocator: std.mem.Allocator,
@@ -69,7 +69,7 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
             UnsupportedPrivateKey,
         };
 
-        pub fn init(key_path: []const u8, cert_path: []const u8, allocator: std.mem.Allocator) !Self {
+        pub fn init(key_path: []const u8, key_type: x509.PrivateKeyType, cert_path: []const u8, ca_path: ?[]const u8, allocator: std.mem.Allocator) !Self {
             // ignore SIGPIPE
             var act = os.Sigaction{
                 .handler = .{ .handler = os.SIG.IGN },
@@ -78,23 +78,37 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
             };
             try os.sigaction(os.SIG.PIPE, &act, null);
 
-            const cert_keys = try x509.ECPrivateKey.fromDer(key_path, allocator);
-            if (cert_keys.namedCurve) |n| {
-                if (!std.mem.eql(u8, n.id, "1.2.840.10045.3.1.7")) {
-                    // currently, only accepts secp256r1.
-                    return Error.UnsupportedPrivateKey;
-                }
-            } else {
-                return Error.UnsupportedPrivateKey;
+            var private_key: x509.PrivateKey = undefined;
+            switch (key_type) {
+                .rsa => {
+                    const cert_keys = try x509.RSAPrivateKey.fromDer(key_path, allocator);
+                    private_key = .{ .rsa = cert_keys };
+                },
+                .ec => {
+                    const cert_keys = try x509.ECPrivateKey.fromDer(key_path, allocator);
+                    if (cert_keys.namedCurve) |n| {
+                        if (!std.mem.eql(u8, n.id, "1.2.840.10045.3.1.7")) {
+                            // currently, only accepts secp256r1.
+                            return Error.UnsupportedPrivateKey;
+                        }
+                    } else {
+                        return Error.UnsupportedPrivateKey;
+                    }
+
+                    private_key = .{ .ec = cert_keys };
+                },
             }
-            const cert_priv_key = try P256.SecretKey.fromBytes(cert_keys.privateKey[0..P256.SecretKey.encoded_length].*);
 
             var res = Self{
                 .cert = try certificate.CertificateEntry.fromDerFile(cert_path, allocator),
-                .cert_secp256r1_key = try P256.KeyPair.fromSecretKey(cert_priv_key),
+                .cert_key = private_key,
 
                 .allocator = allocator,
             };
+
+            if (ca_path) |p| {
+                res.ca_cert = try certificate.CertificateEntry.fromDerFile(p, allocator);
+            }
 
             return res;
         }
@@ -104,6 +118,9 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 self.allocator.free(self.host);
             }
             self.cert.deinit();
+            if (self.ca_cert) |c| {
+                c.deinit();
+            }
         }
 
         pub fn listen(self: *Self, port: u16) !void {
@@ -510,10 +527,17 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
         fn sendCertificate(self: *Self) !void {
             var c = try certificate.Certificate.init(0, self.allocator);
             defer {
+                // remove certs not to deinit them.
+                // TODO: FIX THIS.
+                _ = c.cert_list.popOrNull();
+                _ = c.cert_list.popOrNull();
                 _ = c.cert_list.popOrNull();
                 c.deinit();
             }
             try c.cert_list.append(self.tls_server.cert);
+            if (self.tls_server.ca_cert) |ca| {
+                try c.cert_list.append(ca);
+            }
             var cont_c = Content{ .handshake = .{ .certificate = c } };
             _ = try cont_c.encode(self.msgs_stream.writer());
             _ = try self.hs_protector.encryptFromMessageAndWrite(cont_c, self.allocator, self.write_buffer.writer());
@@ -533,11 +557,50 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             _ = try verify_stream.write(&([_]u8{0x00}));
             _ = try verify_stream.write(hash_out[0..self.ks.hkdf.digest_length]);
 
-            const verify_sig = try self.tls_server.cert_secp256r1_key.sign(verify_stream.getWritten(), null);
-            var sig_buf: [P256.Signature.der_encoded_max_length]u8 = undefined;
-            const sig_bytes = verify_sig.toDer(&sig_buf);
-            const cv = try CertificateVerify.init(.ecdsa_secp256r1_sha256, sig_bytes.len, self.allocator);
-            std.mem.copy(u8, cv.signature, sig_bytes);
+            var cv: CertificateVerify = undefined;
+            switch (self.tls_server.cert_key) {
+                .rsa => |k| {
+                    var modulus_len = k.modulus.len;
+                    var i: usize = 0;
+                    while (i < modulus_len) : (i += 1) {
+                        if (k.modulus[i] != 0) {
+                            break;
+                        }
+                        modulus_len -= 1;
+                    }
+                    const modulus = k.modulus[i..];
+                    const modulus_bits = modulus.len * 8;
+                    if (modulus_bits == 2048) {
+                        var p_key = try rsa.Rsa2048.SecretKey.fromBytes(k.privateExponent, modulus, self.allocator);
+                        defer p_key.deinit();
+
+                        const sig = try rsa.Rsa2048.PSSSignature.sign(verify_stream.getWritten(), p_key, std.crypto.hash.sha2.Sha256, self.allocator);
+                        _ = sig;
+                    } else if (modulus_bits == 4096) {
+                        var p_key = try rsa.Rsa4096.SecretKey.fromBytes(k.privateExponent, modulus, self.allocator);
+                        defer p_key.deinit();
+                        var pub_key = try rsa.Rsa4096.PublicKey.fromBytes(k.publicExponent, modulus, self.allocator);
+                        defer pub_key.deinit();
+
+                        const sig = try rsa.Rsa4096.PSSSignature.sign(verify_stream.getWritten(), p_key, std.crypto.hash.sha2.Sha256, self.allocator);
+                        try sig.verify(verify_stream.getWritten(), pub_key, std.crypto.hash.sha2.Sha256, self.allocator);
+                        cv = try CertificateVerify.init(.rsa_pss_rsae_sha256, sig.signature.len, self.allocator);
+                        std.mem.copy(u8, cv.signature, &sig.signature);
+                    } else {
+                        std.log.err("unsupported modulus length: {d} bits", .{modulus_bits});
+                        return Error.UnsupportedSignatureScheme;
+                    }
+                },
+                .ec => |k| {
+                    const skey = try P256.SecretKey.fromBytes(k.privateKey[0..P256.SecretKey.encoded_length].*);
+                    const kp = try P256.KeyPair.fromSecretKey(skey);
+                    const verify_sig = try kp.sign(verify_stream.getWritten(), null);
+                    var sig_buf: [P256.Signature.der_encoded_max_length]u8 = undefined;
+                    const sig_bytes = verify_sig.toDer(&sig_buf);
+                    cv = try CertificateVerify.init(.ecdsa_secp256r1_sha256, sig_bytes.len, self.allocator);
+                    std.mem.copy(u8, cv.signature, sig_bytes);
+                },
+            }
             const cont_cv = Content{ .handshake = .{ .certificate_verify = cv } };
             defer cont_cv.deinit();
             _ = try cont_cv.encode(self.msgs_stream.writer());

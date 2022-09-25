@@ -41,6 +41,9 @@ const P256 = std.crypto.sign.ecdsa.EcdsaP256Sha256;
 
 const rsa = @import("rsa.zig");
 
+const builtin = @import("builtin");
+const is_windows = builtin.os.tag == .windows;
+
 pub const TLSClientTCP = TLSClientImpl(net.Stream.Reader, net.Stream.Writer, true);
 
 pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, comptime is_tcp: bool) type {
@@ -118,6 +121,10 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             random.bytes(&rand);
             random.bytes(session_id.session_id.slice());
 
+            if (is_windows) {
+                _ = std.os.windows.WSAStartup(2, 2) catch return error.InitializationError;
+            }
+
             var res = Self{
                 .random = rand,
                 .session_id = session_id,
@@ -182,6 +189,10 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             self.cipher_suites.deinit();
             self.ks.deinit();
             self.signature_schems.deinit();
+
+            if (is_windows) {
+                std.os.windows.WSACleanup() catch unreachable;
+            }
         }
 
         pub fn configureX25519Keys(self: *Self, priv_key: [32]u8) !void {

@@ -19,6 +19,7 @@ const crypto = @import("crypto.zig");
 const x509 = @import("x509.zig");
 const ServerHello = @import("server_hello.zig").ServerHello;
 const ClientHello = @import("client_hello.zig").ClientHello;
+const HandshakeType = @import("handshake.zig").HandshakeType;
 const Handshake = @import("handshake.zig").Handshake;
 const EncryptedExtensions = @import("encrypted_extensions.zig").EncryptedExtensions;
 const Finished = @import("finished.zig").Finished;
@@ -147,7 +148,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             try res.supported_groups.append(.secp256r1);
 
             try res.key_shares.append(.x25519);
-            try res.key_shares.append(.secp256r1);
+            //try res.key_shares.append(.secp256r1);
 
             try res.cipher_suites.append(.TLS_AES_128_GCM_SHA256);
             try res.cipher_suites.append(.TLS_AES_256_GCM_SHA384);
@@ -283,7 +284,9 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         const recv_record = (try TLSPlainText.decode(self.reader, t, self.allocator, null, null));
                         defer recv_record.deinit();
                     } else if (t == .handshake and self.state == .WAIT_SH) {
-                        const recv_record = (try TLSPlainText.decode(self.reader, t, self.allocator, null, self.msgs_stream.writer())).content;
+                        var sh_bytes: [1024 * 2]u8 = undefined;
+                        var sh_stream = io.fixedBufferStream(&sh_bytes);
+                        const recv_record = (try TLSPlainText.decode(self.reader, t, self.allocator, null, sh_stream.writer())).content;
                         defer recv_record.deinit();
                         if (self.state == .WAIT_SH) {
                             if (recv_record != .handshake) {
@@ -295,7 +298,8 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                                 return;
                             }
 
-                            try self.handleServerHello(recv_record.handshake.server_hello);
+                            try self.handleServerHello(recv_record.handshake.server_hello, &sh_stream);
+                            std.log.debug("hhr_hash={}", .{std.fmt.fmtSliceHexLower(self.msgs_stream.getWritten())});
                         }
                     } else {
                         const recv_record = try TLSCipherText.decode(self.reader, t, self.allocator);
@@ -424,7 +428,9 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             std.log.info("connection closed", .{});
         }
 
-        fn handleServerHello(self: *Self, sh: ServerHello) !void {
+        fn handleServerHello(self: *Self, sh: ServerHello, sh_stream: *io.FixedBufferStream([]u8)) !void {
+            defer sh_stream.reset();
+
             var hkdf: crypto.Hkdf = undefined;
             var aead: crypto.Aead = undefined;
 
@@ -454,8 +460,54 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             }
 
             if (sh.is_hello_retry_request) {
-                // currently, HRR is not supported.
-                return Error.UnexpectedMessage;
+                // RFC8446 Section 4.1.4 Hello Retry Request
+                //
+                // If a client receives a second
+                // HelloRetryRequest in the same connection (i.e., where the ClientHello
+                // was itself in response to a HelloRetryRequest), it MUST abort the
+                // handshake with an "unexpected_message" alert.
+                if (self.already_recv_hrr) {
+                    return Error.UnexpectedMessage;
+                }
+                self.already_recv_hrr = true;
+
+                const ks = (try msg.getExtension(sh.extensions, .key_share)).key_share;
+                self.key_shares.clearAndFree();
+                switch (ks.selected) {
+                    .x25519 => {},
+                    .secp256r1 => {},
+                    else => return Error.UnsupportedKeyShareAlgorithm,
+                }
+                try self.key_shares.append(ks.selected);
+
+                // RFC8446 Section 4.4.1 The Transcript Hash
+                //  As an exception to this general rule, when the server responds to a
+                //  ClientHello with a HelloRetryRequest, the value of ClientHello1 is
+                //  replaced with a special synthetic handshake message of handshake type
+                //  "message_hash" containing Hash(ClientHello1).  I.e.,
+                //
+                // Transcript-Hash(ClientHello1, HelloRetryRequest, ... Mn) =
+                //     Hash(message_hash ||        /* Handshake type */
+                //          00 00 Hash.length  ||  /* Handshake message length (bytes) */
+                //          Hash(ClientHello1) ||  /* Hash of ClientHello1 */
+                //          HelloRetryRequest  || ... || Mn)
+                var hash: [crypto.Hkdf.MAX_DIGEST_LENGTH]u8 = [_]u8{0} ** crypto.Hkdf.MAX_DIGEST_LENGTH;
+                std.log.info("ch={}", .{std.fmt.fmtSliceHexLower(self.msgs_stream.getWritten())});
+                self.ks.hkdf.hash(&hash, self.msgs_stream.getWritten());
+                self.msgs_stream.reset();
+
+                var ch_header: [4]u8 = [_]u8{0} ** 4;
+                ch_header[0] = @enumToInt(HandshakeType.message_hash);
+                ch_header[3] = @intCast(u8, self.ks.hkdf.digest_length);
+                _ = try self.msgs_stream.write(&ch_header);
+                _ = try self.msgs_stream.write(hash[0..self.ks.hkdf.digest_length]);
+                std.log.info("hrr={}", .{std.fmt.fmtSliceHexLower(self.msgs_stream.getWritten())});
+
+                self.state = .SEND_CH;
+                _ = try self.msgs_stream.write(sh_stream.getWritten());
+                return;
+            } else {
+                _ = try self.msgs_stream.write(sh_stream.getWritten());
             }
 
             const ks = (try msg.getExtension(sh.extensions, .key_share)).key_share;

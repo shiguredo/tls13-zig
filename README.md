@@ -120,8 +120,11 @@ pub fn main() !void {
 # TODO
 ## Priority: High
 - [ ] Support HelloRetryRequest.
+    - [x] ClientSide
+    - [ ] ServerSide
 - [ ] Error handle
   - [ ] Send 'alert' when errors occur.
+- [ ] Support KeyUpdate
 - [ ] Support X.509(src/x509.zig) fully.
   - [ ] Add more tests.
   - [ ] Implement X.509 Certificate encoder.

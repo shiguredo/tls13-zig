@@ -37,7 +37,7 @@ pub const HandshakeType = enum(u8) {
     certificate_verify = 15,
     finished = 20,
     // key_update = 24,
-    // message_hash = 254,
+    message_hash = 254,
 };
 
 /// RFC8446 Section 4 Handshake Protocol
@@ -67,6 +67,7 @@ pub const Handshake = union(HandshakeType) {
     certificate: Certificate,
     certificate_verify: CertificateVerify,
     finished: Finished,
+    message_hash: [0]u8,
 
     const Self = @This();
 
@@ -98,6 +99,7 @@ pub const Handshake = union(HandshakeType) {
             } else {
                 return Error.HkdfNotSpecified;
             },
+            else => unreachable,
         }
     }
 
@@ -160,6 +162,7 @@ pub const Handshake = union(HandshakeType) {
             .certificate => |e| e.deinit(),
             .certificate_verify => |e| e.deinit(),
             .finished => {},
+            else => unreachable, // TODO: implement remaining.
         }
     }
 };

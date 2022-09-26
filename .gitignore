@@ -5,3 +5,4 @@
 /test-certs
 /*.o
 /test_proxy
+/deploy.sh

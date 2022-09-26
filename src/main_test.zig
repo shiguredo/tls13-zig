@@ -1,7 +1,5 @@
 const std = @import("std");
 const log = std.log;
-const net = std.net;
-const io = std.io;
 const allocator = std.heap.page_allocator;
 
 const client = @import("client.zig");

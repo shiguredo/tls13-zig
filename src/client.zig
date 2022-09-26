@@ -1018,3 +1018,5 @@ test "connect to www.google.com" {
 
     return;
 }
+
+test "RFC8448 Section 5. HelloRetryRequest" {}

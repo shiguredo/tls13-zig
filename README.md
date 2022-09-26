@@ -123,13 +123,17 @@ pub fn main() !void {
     - [x] ClientSide
     - [ ] ServerSide
 - [ ] Error handle
-  - [ ] Send 'alert' when errors occur.
-- [ ] Support KeyUpdate
+  - [ ] Send 'alert' when an error occur.
+- [ ] Support KeyUpdate.
+- [ ] Support 0-RTT handshake(resumption).
+- [ ] Add more E2E tests.
+    - [ ] Static tests for server.
+    - [ ] Server tests with Web browser.
 - [ ] Support X.509(src/x509.zig) fully.
   - [ ] Add more tests.
   - [ ] Implement X.509 Certificate encoder.
   - [ ] Verify implementation with NIST's test vectors.
-- [ ] Verify receieved X.509 Certificate itself.
+- [ ] Verify received X.509 Certificate itself.
 - [ ] Check the implementation follows RFC8446.
 
 ## Priority: Low
@@ -148,6 +152,7 @@ pub fn main() !void {
    - [ ] compress_certificate
    - [ ] application_settings
 - [ ] Improve slow RSA(src/rsa.zig).
+- [ ] Improve comments.
 
 # Example
 ## TLS Termination Proxy

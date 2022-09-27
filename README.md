@@ -125,6 +125,7 @@ pub fn main() !void {
 - [ ] Error handle
   - [ ] Send 'alert' when an error occur.
 - [ ] Support KeyUpdate.
+- [ ] Support NewSessionTicket.
 - [ ] Support 0-RTT handshake(resumption).
 - [ ] Add more E2E tests.
     - [ ] Static tests for server.

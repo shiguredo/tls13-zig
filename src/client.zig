@@ -32,6 +32,7 @@ const RecordPayloadProtector = @import("protector.zig").RecordPayloadProtector;
 const TLSPlainText = @import("tls_plain.zig").TLSPlainText;
 const TLSCipherText = @import("tls_cipher.zig").TLSCipherText;
 const TLSInnerPlainText = @import("tls_cipher.zig").TLSInnerPlainText;
+const NewSessionTicket = @import("new_session_ticket.zig").NewSessionTicket;
 
 const Content = @import("content.zig").Content;
 const ContentType = @import("content.zig").ContentType;
@@ -76,6 +77,9 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         // secp256r1 DH keys
         secp256r1_key: P256.KeyPair = undefined,
+
+        // new session tickets
+        session_tickets: ArrayList(NewSessionTicket),
 
         // payload protection
         cipher_suites: ArrayList(msg.CipherSuite),
@@ -126,6 +130,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 .msgs_stream = io.fixedBufferStream(msgs_bytes),
                 .supported_groups = ArrayList(NamedGroup).init(allocator),
                 .key_shares = ArrayList(NamedGroup).init(allocator),
+                .session_tickets = ArrayList(NewSessionTicket).init(allocator),
                 .cipher_suites = ArrayList(msg.CipherSuite).init(allocator),
                 .ks = undefined,
                 .hs_protector = undefined,
@@ -180,6 +185,10 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             self.cert_pubkeys.deinit();
             self.supported_groups.deinit();
             self.key_shares.deinit();
+            for (self.session_tickets.items) |t| {
+                t.deinit();
+            }
+            self.session_tickets.deinit();
             self.cipher_suites.deinit();
             self.ks.deinit();
             self.signature_schems.deinit();
@@ -359,6 +368,14 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 defer plain_record.deinit();
 
                 if (plain_record.content_type != .application_data) {
+                    if (plain_record.content_type == .handshake) {
+                        const hs = (try plain_record.decodeContent(self.allocator, self.ks.hkdf)).handshake;
+                        if (hs != .new_session_ticket) {
+                            continue;
+                        }
+                        const nst = hs.new_session_ticket;
+                        try self.session_tickets.append(nst);
+                    }
                     continue;
                 }
 

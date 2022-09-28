@@ -50,8 +50,8 @@ pub const ExtensionType = enum(u16) {
     // server_certificate_type = 20,
     // padding = 21,
     record_size_limit = 28,
-    // pre_shared_key = 41,
-    // early_data = 42,
+    pre_shared_key = 41,
+    early_data = 42,
     supported_versions = 43,
     // cookie = 44,
     psk_key_exchange_modes = 45,
@@ -100,6 +100,8 @@ pub const Extension = union(ExtensionType) {
     session_ticket: Dummy,
     compress_certificate: Dummy,
     application_settings: Dummy,
+    pre_shared_key: Dummy,
+    early_data: Dummy,
 
     const Self = @This();
     pub const HEADER_LENGTH = @sizeOf(u16) + @sizeOf(u16);
@@ -148,6 +150,8 @@ pub const Extension = union(ExtensionType) {
             .session_ticket => return Self{ .session_ticket = try Dummy.decode(reader, len) },
             .compress_certificate => return Self{ .compress_certificate = try Dummy.decode(reader, len) },
             .application_settings => return Self{ .application_settings = try Dummy.decode(reader, len) },
+            .pre_shared_key => return Self{ .pre_shared_key = try Dummy.decode(reader, len) },
+            .early_data => return Self{ .early_data = try Dummy.decode(reader, len) },
         }
     }
 
@@ -212,6 +216,8 @@ pub const Extension = union(ExtensionType) {
             .session_ticket => |e| return e.length() + len,
             .compress_certificate => |e| return e.length() + len,
             .application_settings => |e| return e.length() + len,
+            .pre_shared_key => |e| return e.length() + len,
+            .early_data => |e| return e.length() + len,
         }
     }
 

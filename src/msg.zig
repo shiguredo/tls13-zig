@@ -96,6 +96,11 @@ pub fn encodeCipherSuites(writer: anytype, suites: ArrayList(CipherSuite)) !usiz
 }
 
 pub fn decodeExtensions(reader: anytype, allocator: std.mem.Allocator, extensions: *ArrayList(Extension), ht: HandshakeType, is_hello_retry: bool) !void {
+    errdefer {
+        for (extensions.items) |e| {
+            e.deinit();
+        }
+    }
     const ext_len = try reader.readIntBig(u16);
     var i: usize = 0;
     while (i < ext_len) {

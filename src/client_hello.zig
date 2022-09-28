@@ -71,6 +71,7 @@ pub const ClientHello = struct {
         // Decoding CipherSuites.
         var suites = ArrayList(CipherSuite).init(allocator);
         try msg.decodeCipherSuites(reader, &suites);
+        errdefer suites.deinit();
 
         // Decoding legacy_compression_methods.
         // only compression method 'null' is allowed.
@@ -85,6 +86,7 @@ pub const ClientHello = struct {
         // Decoding Extensions.
         var exts = ArrayList(Extension).init(allocator);
         try msg.decodeExtensions(reader, allocator, &exts, .client_hello, false);
+        errdefer exts.deinit();
 
         return Self{
             .protocol_version = protocol_version,

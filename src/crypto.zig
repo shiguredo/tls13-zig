@@ -275,6 +275,7 @@ pub const Secret = struct {
 
     exp_master_secret: DigestBoundedArray,
     res_master_secret: DigestBoundedArray,
+    res_secret: DigestBoundedArray,
 
     const Self = @This();
 
@@ -305,6 +306,7 @@ pub const Secret = struct {
 
             .exp_master_secret = try DigestBoundedArray.init(d_len),
             .res_master_secret = try DigestBoundedArray.init(d_len),
+            .res_secret = try DigestBoundedArray.init(d_len),
         };
     }
 };

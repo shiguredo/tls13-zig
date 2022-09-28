@@ -59,8 +59,9 @@ pub const KeyScheduler = struct {
         try self.hkdf.hkdfExpandLabel(record_keys.iv.slice(), secret, "iv", "", self.aead.nonce_length);
     }
 
-    pub fn generateResumptionMasterSecret(self: *Self, msgs: []const u8) !void {
+    pub fn generateResumptionMasterSecret(self: *Self, msgs: []const u8, nonce: []const u8) !void {
         try self.hkdf.deriveSecret(self.secret.res_master_secret.slice(), self.secret.master_secret.slice(), "res master", msgs);
+        try self.hkdf.hkdfExpandLabel(self.secret.res_secret.slice(), self.secret.res_master_secret.slice(), "resumption", nonce, self.hkdf.digest_length);
     }
 
     pub fn printKeys(self: Self, random: []const u8) void {
@@ -148,7 +149,7 @@ test "KeyScheduler AES128GCM-SHA256" {
 
     const c_finished = [_]u8{ 0x14, 0x0, 0x0, 0x20, 0xa8, 0xec, 0x43, 0x6d, 0x67, 0x76, 0x34, 0xae, 0x52, 0x5a, 0xc1, 0xfc, 0xeb, 0xe1, 0x1a, 0x03, 0x9e, 0xc1, 0x76, 0x94, 0xfa, 0xc6, 0xe9, 0x85, 0x27, 0xb6, 0x42, 0xf2, 0xed, 0xd5, 0xce, 0x61 };
     _ = try msgs_stream.write(&c_finished);
-    try ks.generateResumptionMasterSecret(msgs_stream.getWritten());
+    try ks.generateResumptionMasterSecret(msgs_stream.getWritten(), &([_]u8{ 0, 0 }));
 
     const res_master_secret_ans = [_]u8{ 0x7d, 0xf2, 0x35, 0xf2, 0x03, 0x1d, 0x2a, 0x05, 0x12, 0x87, 0xd0, 0x2b, 0x02, 0x41, 0xb0, 0xbf, 0xda, 0xf8, 0x6c, 0xc8, 0x56, 0x23, 0x1f, 0x2d, 0x5a, 0xba, 0x46, 0xc4, 0x34, 0xec, 0x19, 0x6c };
     try expect(std.mem.eql(u8, ks.secret.res_master_secret.slice(), &res_master_secret_ans));

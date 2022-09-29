@@ -7,6 +7,8 @@ const KeyShare = @import("key_share.zig").KeyShare;
 const RecordSizeLimit = @import("record_size_limit.zig").RecordSizeLimit;
 const ServerNameList = @import("server_name.zig").ServerNameList;
 const HandshakeType = @import("handshake.zig").HandshakeType;
+const PreSharedKey = @import("pre_shared_key.zig").PreSharedKey;
+const PskKeyExchangeModes = @import("psk_key_exchange_modes.zig").PskKeyExchangeModes;
 
 /// RFC8446 Section 4.2 Extensions
 ///
@@ -88,7 +90,7 @@ pub const Extension = union(ExtensionType) {
     key_share: KeyShare,
     none: Dummy,
     application_layer_protocol_negotiation: Dummy,
-    psk_key_exchange_modes: Dummy,
+    psk_key_exchange_modes: PskKeyExchangeModes,
     post_handshake_auth: Dummy,
     ec_points_format: Dummy,
     next_protocol_negotiation: Dummy,
@@ -100,7 +102,7 @@ pub const Extension = union(ExtensionType) {
     session_ticket: Dummy,
     compress_certificate: Dummy,
     application_settings: Dummy,
-    pre_shared_key: Dummy,
+    pre_shared_key: PreSharedKey,
     early_data: Dummy,
 
     const Self = @This();
@@ -138,7 +140,7 @@ pub const Extension = union(ExtensionType) {
             .key_share => return Self{ .key_share = try KeyShare.decode(reader, allocator, ht, hello_retry) },
             .none => return Self{ .none = try Dummy.decode(reader, len) },
             .application_layer_protocol_negotiation => return Self{ .application_layer_protocol_negotiation = try Dummy.decode(reader, len) },
-            .psk_key_exchange_modes => return Self{ .psk_key_exchange_modes = try Dummy.decode(reader, len) },
+            .psk_key_exchange_modes => return Self{ .psk_key_exchange_modes = try PskKeyExchangeModes.decode(reader, allocator) },
             .post_handshake_auth => return Self{ .post_handshake_auth = try Dummy.decode(reader, len) },
             .ec_points_format => return Self{ .ec_points_format = try Dummy.decode(reader, len) },
             .next_protocol_negotiation => return Self{ .next_protocol_negotiation = try Dummy.decode(reader, len) },
@@ -150,7 +152,7 @@ pub const Extension = union(ExtensionType) {
             .session_ticket => return Self{ .session_ticket = try Dummy.decode(reader, len) },
             .compress_certificate => return Self{ .compress_certificate = try Dummy.decode(reader, len) },
             .application_settings => return Self{ .application_settings = try Dummy.decode(reader, len) },
-            .pre_shared_key => return Self{ .pre_shared_key = try Dummy.decode(reader, len) },
+            .pre_shared_key => return Self{ .pre_shared_key = try PreSharedKey.decode(reader, ht, allocator) },
             .early_data => return Self{ .early_data = try Dummy.decode(reader, len) },
         }
     }
@@ -181,6 +183,8 @@ pub const Extension = union(ExtensionType) {
             .record_size_limit => |e| len += try e.encode(writer),
             .supported_versions => |e| len += try e.encode(writer),
             .key_share => |e| len += try e.encode(writer),
+            .pre_shared_key => |e| len += try e.encode(writer),
+            .psk_key_exchange_modes => |e| len += try e.encode(writer),
             .none => unreachable,
             else => unreachable,
         }
@@ -230,6 +234,8 @@ pub const Extension = union(ExtensionType) {
             .signature_algorithms => |e| e.deinit(),
             .supported_versions => {},
             .key_share => |e| e.deinit(),
+            .pre_shared_key => |e| e.deinit(),
+            .psk_key_exchange_modes => |e| e.deinit(),
             else => {},
         }
     }

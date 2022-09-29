@@ -295,6 +295,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             const ch = hs.client_hello;
             try self.handleClientHello(ch);
             try self.sendServerHello();
+            try self.ks.generateHandshakeSecrets2(self.msgs_stream.getWritten());
 
             self.hs_protector = RecordPayloadProtector.init(self.ks.aead, self.ks.secret.s_hs_keys, self.ks.secret.c_hs_keys);
 
@@ -487,7 +488,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         key_share_ok = true;
 
                         const shared_key = try dh.X25519.scalarmult(self.x25519_priv_key, ke.key_exchange[0..32].*);
-                        try self.ks.generateHandshakeSecrets(&shared_key, self.msgs_stream.getWritten());
+                        try self.ks.generateHandshakeSecrets1(&shared_key);
                         std.log.debug("generated handshake secrets", .{});
                     },
                     .secp256r1 => |k| {
@@ -497,7 +498,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         const pubkey = try P256.PublicKey.fromSec1(ke.key_exchange);
                         const mul = try pubkey.p.mulPublic(self.secp256r1_key.secret_key.bytes, .Big);
                         const shared_key = mul.affineCoordinates().x.toBytes(.Big);
-                        try self.ks.generateHandshakeSecrets(&shared_key, self.msgs_stream.getWritten());
+                        try self.ks.generateHandshakeSecrets1(&shared_key);
                         std.log.debug("generated handshake secrets", .{});
                     },
                     else => key_share_ok = false,

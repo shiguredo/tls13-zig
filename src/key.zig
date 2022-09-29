@@ -31,9 +31,12 @@ pub const KeyScheduler = struct {
         try self.hkdf.deriveSecret(self.secret.hs_derived_secret.slice(), self.secret.early_secret.slice(), "derived", "");
     }
 
-    pub fn generateHandshakeSecrets(self: *Self, shared_key: []const u8, msgs: []const u8) !void {
-        const zero_bytes = &([_]u8{0} ** 64);
+    pub fn generateHandshakeSecrets1(self: *Self, shared_key: []const u8) !void {
         self.hkdf.extract(self.secret.hs_secret.slice(), self.secret.hs_derived_secret.slice(), shared_key);
+    }
+
+    pub fn generateHandshakeSecrets2(self: *Self, msgs: []const u8) !void {
+        const zero_bytes = &([_]u8{0} ** 64);
         try self.hkdf.deriveSecret(self.secret.s_hs_secret.slice(), self.secret.hs_secret.slice(), "s hs traffic", msgs);
         try self.hkdf.deriveSecret(self.secret.c_hs_secret.slice(), self.secret.hs_secret.slice(), "c hs traffic", msgs);
         try self.hkdf.deriveSecret(self.secret.master_derived_secret.slice(), self.secret.hs_secret.slice(), "derived", "");
@@ -101,7 +104,8 @@ test "KeyScheduler AES128GCM-SHA256" {
     _ = try msgs_stream.write(&ch_bytes);
     _ = try msgs_stream.write(&sh_bytes);
 
-    try ks.generateHandshakeSecrets(&dhe_shared_key, msgs_stream.getWritten());
+    try ks.generateHandshakeSecrets1(&dhe_shared_key);
+    try ks.generateHandshakeSecrets2(msgs_stream.getWritten());
     const hs_derived_secret_ans = [_]u8{ 0x6f, 0x26, 0x15, 0xa1, 0x08, 0xc7, 0x02, 0xc5, 0x67, 0x8f, 0x54, 0xfc, 0x9d, 0xba, 0xb6, 0x97, 0x16, 0xc0, 0x76, 0x18, 0x9c, 0x48, 0x25, 0x0c, 0xeb, 0xea, 0xc3, 0x57, 0x6c, 0x36, 0x11, 0xba };
     const hs_secret_ans = [_]u8{ 0x1d, 0xc8, 0x26, 0xe9, 0x36, 0x06, 0xaa, 0x6f, 0xdc, 0x0a, 0xad, 0xc1, 0x2f, 0x74, 0x1b, 0x01, 0x04, 0x6a, 0xa6, 0xb9, 0x9f, 0x69, 0x1e, 0xd2, 0x21, 0xa9, 0xf0, 0xca, 0x04, 0x3f, 0xbe, 0xac };
     try expect(std.mem.eql(u8, ks.secret.hs_derived_secret.slice(), &hs_derived_secret_ans));

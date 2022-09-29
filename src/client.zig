@@ -593,16 +593,17 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             switch (key_entry.group) {
                 .x25519 => {
                     const shared_key = try dh.X25519.scalarmult(self.x25519_priv_key, server_pubkey[0..32].*);
-                    try self.ks.generateHandshakeSecrets(&shared_key, self.msgs_stream.getWritten());
+                    try self.ks.generateHandshakeSecrets1(&shared_key);
                 },
                 .secp256r1 => {
                     const pubkey = try P256.PublicKey.fromSec1(server_pubkey);
                     const mul = try pubkey.p.mulPublic(self.secp256r1_key.secret_key.bytes, .Big);
                     const shared_key = mul.affineCoordinates().x.toBytes(.Big);
-                    try self.ks.generateHandshakeSecrets(&shared_key, self.msgs_stream.getWritten());
+                    try self.ks.generateHandshakeSecrets1(&shared_key);
                 },
                 else => unreachable,
             }
+            try self.ks.generateHandshakeSecrets2(self.msgs_stream.getWritten());
 
             self.hs_protector = RecordPayloadProtector.init(self.ks.aead, self.ks.secret.c_hs_keys, self.ks.secret.s_hs_keys);
 
@@ -831,7 +832,8 @@ test "client test with RFC8448" {
     var ks = try key.KeyScheduler.init(crypto.Hkdf.Sha256.hkdf, crypto.Aead.Aes128Gcm.aead);
     defer ks.deinit();
     try ks.generateEarlySecrets(&([_]u8{0} ** 32));
-    try ks.generateHandshakeSecrets(&dhe_shared_key, msgs_stream.getWritten());
+    try ks.generateHandshakeSecrets1(&dhe_shared_key);
+    try ks.generateHandshakeSecrets2(msgs_stream.getWritten());
 
     var hs_protector = RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead, ks.secret.c_hs_keys, ks.secret.s_hs_keys);
 

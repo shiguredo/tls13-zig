@@ -1,6 +1,8 @@
 const std = @import("std");
 const log = std.log;
 const allocator = std.heap.page_allocator;
+const key = @import("key.zig");
+const PskIdentity = @import("pre_shared_key.zig").PskIdentity;
 
 const client = @import("client.zig");
 
@@ -15,10 +17,29 @@ pub fn main() !void {
     _ = try tls_client.send(http_req);
 
     var recv_bytes: [4096]u8 = undefined;
-    const recv_size = try tls_client.recv(&recv_bytes);
+    var recv_size = try tls_client.recv(&recv_bytes);
     log.info("RECV=\n {s}", .{recv_bytes[0..recv_size]});
 
     try tls_client.close();
+    log.info("finished.", .{});
+
+    var tls_client_res = try client.TLSClientTCP.init(allocator);
+    defer tls_client_res.deinit();
+    tls_client_res.print_keys = true;
+    tls_client_res.res_secret = tls_client.ks.secret.res_secret;
+    tls_client_res.ks = try key.KeyScheduler.init(tls_client.ks.hkdf, tls_client.ks.aead);
+    const nst = tls_client.session_ticket.?;
+    tls_client_res.pre_shared_key = try PskIdentity.init(allocator, nst.ticket.len);
+    std.mem.copy(u8, tls_client_res.pre_shared_key.?.identity, nst.ticket);
+    tls_client_res.pre_shared_key.?.obfuscated_ticket_age = nst.ticket_age_add + 10; // TODO: measure time
+
+    try tls_client_res.connect("localhost", 8443);
+
+    _ = try tls_client_res.send(http_req);
+    recv_size = try tls_client_res.recv(&recv_bytes);
+    log.info("RECV=\n {s}", .{recv_bytes[0..recv_size]});
+
+    try tls_client_res.close();
     log.info("finished.", .{});
 
     return;

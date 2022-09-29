@@ -33,6 +33,8 @@ const TLSPlainText = @import("tls_plain.zig").TLSPlainText;
 const TLSCipherText = @import("tls_cipher.zig").TLSCipherText;
 const TLSInnerPlainText = @import("tls_cipher.zig").TLSInnerPlainText;
 const NewSessionTicket = @import("new_session_ticket.zig").NewSessionTicket;
+const pre_shared_key = @import("pre_shared_key.zig");
+const PskKeyExchangeModes = @import("psk_key_exchange_modes.zig").PskKeyExchangeModes;
 
 const Content = @import("content.zig").Content;
 const ContentType = @import("content.zig").ContentType;
@@ -79,7 +81,11 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         secp256r1_key: P256.KeyPair = undefined,
 
         // new session tickets
-        session_tickets: ArrayList(NewSessionTicket),
+        session_ticket: ?NewSessionTicket = null,
+
+        // psk
+        pre_shared_key: ?pre_shared_key.PskIdentity = null,
+        res_secret: ?crypto.DigestBoundedArray = null,
 
         // payload protection
         cipher_suites: ArrayList(msg.CipherSuite),
@@ -130,7 +136,6 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 .msgs_stream = io.fixedBufferStream(msgs_bytes),
                 .supported_groups = ArrayList(NamedGroup).init(allocator),
                 .key_shares = ArrayList(NamedGroup).init(allocator),
-                .session_tickets = ArrayList(NewSessionTicket).init(allocator),
                 .cipher_suites = ArrayList(msg.CipherSuite).init(allocator),
                 .ks = undefined,
                 .hs_protector = undefined,
@@ -185,13 +190,15 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             self.cert_pubkeys.deinit();
             self.supported_groups.deinit();
             self.key_shares.deinit();
-            for (self.session_tickets.items) |t| {
-                t.deinit();
+            if (self.session_ticket) |st| {
+                st.deinit();
             }
-            self.session_tickets.deinit();
             self.cipher_suites.deinit();
             self.ks.deinit();
             self.signature_schems.deinit();
+            if (self.pre_shared_key) |p| {
+                p.deinit();
+            }
         }
 
         pub fn configureX25519Keys(self: *Self, priv_key: [32]u8) !void {
@@ -199,7 +206,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             self.x25519_pub_key = try dh.X25519.recoverPublicKey(self.x25519_priv_key);
         }
 
-        fn createClientHello(self: Self, host: []const u8) !ClientHello {
+        fn createClientHello(self: *Self, host: []const u8) !ClientHello {
             var client_hello = ClientHello.init(self.random, self.session_id, self.allocator);
 
             // CipherSuite
@@ -250,6 +257,45 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             var snl = server_name.ServerNameList.init(self.allocator);
             try snl.server_name_list.append(sn);
             try client_hello.extensions.append(.{ .server_name = snl });
+
+            // Extension Pre Shared Key
+            if (self.pre_shared_key) |psk| {
+                var pkem = PskKeyExchangeModes.init(self.allocator);
+                try pkem.modes.append(.psk_dhe_ke);
+                try client_hello.extensions.append(.{ .psk_key_exchange_modes = pkem });
+
+                var opsk = try pre_shared_key.OfferedPsks.init(self.ks.hkdf.digest_length + 1, self.allocator);
+                errdefer opsk.deinit();
+                try opsk.identities.append(try psk.copy(self.allocator));
+                var ext_psk = pre_shared_key.PreSharedKey{
+                    .msg_type = .client_hello,
+                    .offeredPsks = opsk,
+                };
+                try client_hello.extensions.append(.{ .pre_shared_key = ext_psk });
+
+                std.log.info("FIN={}", .{std.fmt.fmtSliceHexLower(self.res_secret.?.slice())});
+                try self.ks.generateEarlySecrets(self.res_secret.?.slice());
+                var prk = try crypto.DigestBoundedArray.init(self.ks.hkdf.digest_length);
+                try self.ks.hkdf.deriveSecret(prk.slice(), self.ks.secret.early_secret.slice(), "res binder", "");
+                var fin_secret = try crypto.DigestBoundedArray.init(self.ks.hkdf.digest_length);
+                try self.ks.hkdf.hkdfExpandLabel(fin_secret.slice(), prk.slice(), "finished", "", self.ks.hkdf.digest_length);
+
+                var hs_ch = Handshake{ .client_hello = client_hello };
+                var ch_tmp = try self.allocator.alloc(u8, hs_ch.length());
+                defer self.allocator.free(ch_tmp);
+                var ch_stream = io.fixedBufferStream(ch_tmp);
+                _ = try hs_ch.encode(ch_stream.writer());
+                const last_chb_idx = hs_ch.length() - opsk.binders.len - 2;
+
+                var binder_bytes: [1024 * 4]u8 = undefined;
+                var binder_stream = io.fixedBufferStream(&binder_bytes);
+                _ = try binder_stream.write(self.msgs_stream.getWritten());
+                _ = try binder_stream.write(ch_stream.getWritten()[0..last_chb_idx]);
+
+                const fin = try Finished.fromMessageBytes(binder_stream.getWritten(), fin_secret.slice(), self.ks.hkdf);
+                opsk.binders[0] = @intCast(u8, self.ks.hkdf.digest_length);
+                std.mem.copy(u8, opsk.binders[1..], fin.verify_data.slice());
+            }
 
             return client_hello;
         }
@@ -374,7 +420,11 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                             continue;
                         }
                         const nst = hs.new_session_ticket;
-                        try self.session_tickets.append(nst);
+                        if (self.session_ticket) |st| {
+                            st.deinit();
+                        }
+                        self.session_ticket = nst;
+                        try self.ks.generateResumptionMasterSecret(self.msgs_stream.getWritten(), nst.ticket_nonce.slice());
                     }
                     continue;
                 }
@@ -467,13 +517,15 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 else => return Error.UnsupportedCipherSuite,
             }
 
-            if (self.already_recv_hrr) {
-                // check CipherSuites is same as first ServerHello.
+            if (self.pre_shared_key != null or self.already_recv_hrr) {
+                // check CipherSuites is same as first or previous session's ServerHello.
                 if (self.ks.aead.aead_type != aead.aead_type or self.ks.hkdf.hash_type != hkdf.hash_type) {
                     return Error.IllegalParameter;
                 }
             } else {
                 self.ks = try key.KeyScheduler.init(hkdf, aead);
+                const zero_bytes = &([_]u8{0} ** 64);
+                try self.ks.generateEarlySecrets(zero_bytes[0..self.ks.hkdf.digest_length]);
             }
 
             if (sh.is_hello_retry_request) {
@@ -537,23 +589,20 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 return Error.UnsupportedKeyShareAlgorithm;
             }
 
-            const zero_bytes = &([_]u8{0} ** 64);
             const server_pubkey = key_entry.key_exchange;
             switch (key_entry.group) {
                 .x25519 => {
                     const shared_key = try dh.X25519.scalarmult(self.x25519_priv_key, server_pubkey[0..32].*);
-                    try self.ks.generateEarlySecrets(&shared_key, zero_bytes[0..self.ks.hkdf.digest_length]);
+                    try self.ks.generateHandshakeSecrets(&shared_key, self.msgs_stream.getWritten());
                 },
                 .secp256r1 => {
                     const pubkey = try P256.PublicKey.fromSec1(server_pubkey);
                     const mul = try pubkey.p.mulPublic(self.secp256r1_key.secret_key.bytes, .Big);
                     const shared_key = mul.affineCoordinates().x.toBytes(.Big);
-                    try self.ks.generateEarlySecrets(&shared_key, zero_bytes[0..self.ks.hkdf.digest_length]);
+                    try self.ks.generateHandshakeSecrets(&shared_key, self.msgs_stream.getWritten());
                 },
                 else => unreachable,
             }
-
-            try self.ks.generateHandshakeSecrets(self.msgs_stream.getWritten());
 
             self.hs_protector = RecordPayloadProtector.init(self.ks.aead, self.ks.secret.c_hs_keys, self.ks.secret.s_hs_keys);
 
@@ -620,6 +669,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     const c_finished = try Finished.fromMessageBytes(self.msgs_stream.getWritten(), self.ks.secret.c_hs_finished_secret.slice(), self.ks.hkdf);
                     const hs_c_finished = Content{ .handshake = Handshake{ .finished = c_finished } };
                     defer hs_c_finished.deinit();
+                    _ = try hs_c_finished.encode(self.msgs_stream.writer());
 
                     _ = try self.hs_protector.encryptFromMessageAndWrite(hs_c_finished, self.allocator, writer);
 
@@ -634,7 +684,11 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             _ = ee;
             // TODO: what to do?
 
-            self.state = .WAIT_CERT_CR;
+            if (self.pre_shared_key != null) {
+                self.state = .WAIT_FINISHED;
+            } else {
+                self.state = .WAIT_CERT_CR;
+            }
         }
 
         fn handleCertificate(self: *Self, cert: certificate.Certificate) !void {
@@ -776,8 +830,8 @@ test "client test with RFC8448" {
 
     var ks = try key.KeyScheduler.init(crypto.Hkdf.Sha256.hkdf, crypto.Aead.Aes128Gcm.aead);
     defer ks.deinit();
-    try ks.generateEarlySecrets(&dhe_shared_key, &([_]u8{0} ** 32));
-    try ks.generateHandshakeSecrets(msgs_stream.getWritten());
+    try ks.generateEarlySecrets(&([_]u8{0} ** 32));
+    try ks.generateHandshakeSecrets(&dhe_shared_key, msgs_stream.getWritten());
 
     var hs_protector = RecordPayloadProtector.init(crypto.Aead.Aes128Gcm.aead, ks.secret.c_hs_keys, ks.secret.s_hs_keys);
 
@@ -1143,14 +1197,29 @@ test "RFC8448 Section 5. HelloRetryRequest" {
     0xf9, 0xfb, 0xf2, 0x97, 0xb5, 0xae, 0xa6, 0x17, 0x64, 0x6f, 0xac, 0x5c, 0x03,
     0x27, 0x2e, 0x97, 0x07, 0x27, 0xc6, 0x21, 0xa7, 0x91, 0x41, 0xef, 0x5f, 0x7d,
     0xe6, 0x50, 0x5e, 0x5b, 0xfb, 0xc3, 0x88, 0xe9, 0x33, 0x43, 0x69, 0x40, 0x93,
-    0x93, 0x4a, 0xe4, 0xd3, 0x57, 0xfa, 0xd6, 0xaa, 0xcb,
+    0x93, 0x4a, 0xe4, 0xd3, 0x57, 0xfa, 0xd6, 0xaa, 0xcb, 0x00, 0x21, 0x20, 0x3a,
+    0xdd, 0x4f, 0xb2, 0xd8, 0xfd, 0xf8, 0x22, 0xa0, 0xca, 0x3c, 0xf7, 0x67, 0x8e,
+    0xf5, 0xe8, 0x8d, 0xae, 0x99, 0x01, 0x41, 0xc5, 0x92, 0x4d, 0x57, 0xbb, 0x6f,
+    0xa3, 0x1b, 0x9e, 0x5f, 0x9d
     };
     // zig fmt: on
+
+    var stream = io.fixedBufferStream(&ch_bytes);
+    const ch = try Handshake.decode(stream.reader(), std.testing.allocator, null);
+    defer ch.deinit();
 
     var hkdf = crypto.Hkdf.Sha256.hkdf;
     var hash: [crypto.Hkdf.MAX_DIGEST_LENGTH]u8 = undefined;
 
-    hkdf.hash(&hash, &ch_bytes);
+    const binder_hash_ans = [_]u8{
+        0x63, 0x22, 0x4b, 0x2e, 0x45, 0x73, 0xf2, 0xd3, 0x45, 0x4c, 0xa8, 0x4b, 0x9d,
+        0x00, 0x9a, 0x04, 0xf6, 0xbe, 0x9e, 0x05, 0x71, 0x1a, 0x83, 0x96, 0x47, 0x3a,
+        0xef, 0xa0, 0x1e, 0x92, 0x4a, 0x14,
+    };
+    const psk = (try msg.getExtension(ch.client_hello.extensions, .pre_shared_key)).pre_shared_key;
+    const last_chb_idx = ch.length() - psk.offeredPsks.binders.len - 2;
+    hkdf.hash(&hash, ch_bytes[0..last_chb_idx]);
+    try expect(std.mem.eql(u8, hash[0..hkdf.digest_length], &binder_hash_ans));
 
     const early_secret = [_]u8{ 0x9b, 0x21, 0x88, 0xe9, 0xb2, 0xfc, 0x6d, 0x64, 0xd7, 0x1d, 0xc3, 0x29, 0x90, 0x0e, 0x20, 0xbb, 0x41, 0x91, 0x50, 0x00, 0xf6, 0x78, 0xaa, 0x83, 0x9c, 0xbb, 0x79, 0x7c, 0xb7, 0xd8, 0x33, 0x2c };
 
@@ -1165,5 +1234,6 @@ test "RFC8448 Section 5. HelloRetryRequest" {
     try hkdf.hkdfExpandLabel(&out, &prk, "finished", "", 32);
     try expect(std.mem.eql(u8, &out, &expand_ans));
 
-    _ = try Finished.fromMessageBytes(&ch_bytes, &out, hkdf);
+    const fin = try Finished.fromMessageBytes(ch_bytes[0..last_chb_idx], &out, hkdf);
+    std.log.warn("FIN={}", .{std.fmt.fmtSliceHexLower(fin.verify_data.slice())});
 }

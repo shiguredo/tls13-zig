@@ -129,6 +129,8 @@ pub fn main() !void {
 - [ ] Support 0-RTT handshake(resumption).
   - [x] Support extension pre_shared_key.
   - [ ] Support extension early_data.
+  - [ ] ClientSide
+  - [ ] ServerSide
 - [ ] Add more E2E tests.
     - [ ] Static tests for server.
     - [ ] Server tests with Web browser.

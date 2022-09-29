@@ -296,8 +296,6 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             try self.handleClientHello(ch);
             try self.sendServerHello();
 
-            try self.ks.generateHandshakeSecrets(self.msgs_stream.getWritten());
-            std.log.debug("generated handshake secrets", .{});
             self.hs_protector = RecordPayloadProtector.init(self.ks.aead, self.ks.secret.s_hs_keys, self.ks.secret.c_hs_keys);
 
             try self.sendEncryptedExtensions();
@@ -475,12 +473,13 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 return Error.UnsupportedCipherSuite;
             }
             self.ks = try key.KeyScheduler.init(hkdf, aead);
+            const zero_bytes = &([_]u8{0} ** 64);
+            try self.ks.generateEarlySecrets(zero_bytes[0..self.ks.hkdf.digest_length]);
             std.log.debug("selected cipher_suite={s}", .{@tagName(self.cipher_suite)});
 
             // Selecting KeyShare and deriving shared secret.
             const ks = (try msg.getExtension(ch.extensions, .key_share)).key_share;
             var key_share_ok = ks.entries.items.len != 0;
-            const zero_bytes = &([_]u8{0} ** 64);
             for (ks.entries.items) |ke| {
                 switch (ke.group) {
                     .x25519 => |k| {
@@ -488,7 +487,8 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         key_share_ok = true;
 
                         const shared_key = try dh.X25519.scalarmult(self.x25519_priv_key, ke.key_exchange[0..32].*);
-                        try self.ks.generateEarlySecrets(&shared_key, zero_bytes[0..self.ks.hkdf.digest_length]);
+                        try self.ks.generateHandshakeSecrets(&shared_key, self.msgs_stream.getWritten());
+                        std.log.debug("generated handshake secrets", .{});
                     },
                     .secp256r1 => |k| {
                         self.key_share = k;
@@ -497,7 +497,8 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         const pubkey = try P256.PublicKey.fromSec1(ke.key_exchange);
                         const mul = try pubkey.p.mulPublic(self.secp256r1_key.secret_key.bytes, .Big);
                         const shared_key = mul.affineCoordinates().x.toBytes(.Big);
-                        try self.ks.generateEarlySecrets(&shared_key, zero_bytes[0..self.ks.hkdf.digest_length]);
+                        try self.ks.generateHandshakeSecrets(&shared_key, self.msgs_stream.getWritten());
+                        std.log.debug("generated handshake secrets", .{});
                     },
                     else => key_share_ok = false,
                 }

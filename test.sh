@@ -36,9 +36,14 @@ do
         set +e
 
         # Let's test!
-        zig run src/main_test.zig  2>&1 | grep "HTTP/1.0 200 ok"
+        NUM_OF_OK=`zig run src/main_test.zig  2>&1 | grep "HTTP/1.0 200 ok" | wc -l`
         if [ $? -ne 0 ]; then
             echo "failed."
+            pkill -SIGKILL openssl
+            exit 1
+        fi
+        if [ $NUM_OF_OK -ne 2 ]; then
+            echo "failed. NUM_OF_OK is not 2."
             pkill -SIGKILL openssl
             exit 1
         fi

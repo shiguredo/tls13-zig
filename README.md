@@ -127,7 +127,7 @@ pub fn main() !void {
 - [ ] Support KeyUpdate.
 - [ ] Support NewSessionTicket.
 - [ ] Support 0-RTT handshake(resumption).
-  - [ ] Support extension pre_shared_key.
+  - [x] Support extension pre_shared_key.
   - [ ] Support extension early_data.
 - [ ] Add more E2E tests.
     - [ ] Static tests for server.

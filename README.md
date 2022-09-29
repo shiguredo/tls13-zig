@@ -143,7 +143,7 @@ pub fn main() !void {
 - [ ] Support Extensions.
    - [ ] record_size_limit
    - [ ] application_layer_protocol_negotiation
-   - [ ] pks_key_exchange_modes
+   - [x] pks_key_exchange_modes
    - [ ] post_handshake_auth
    - [ ] ec_points_format
    - [ ] next_protocol_negotiation

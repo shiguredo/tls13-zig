@@ -45,7 +45,13 @@ const P256 = std.crypto.sign.ecdsa.EcdsaP256Sha256;
 
 const rsa = @import("rsa.zig");
 
-pub const TLSClientTCP = TLSClientImpl(net.Stream.Reader, net.Stream.Writer, true);
+const Client = std.x.net.tcp.Client;
+
+pub fn ErrorSetOf(comptime Function: anytype) type {
+    return @typeInfo(@typeInfo(@TypeOf(Function)).Fn.return_type.?).ErrorUnion.error_set;
+}
+
+pub const TLSClientTCP = TLSClientImpl(io.Reader(Client.Reader, ErrorSetOf(Client.Reader.read), Client.Reader.read), io.Writer(Client.Writer, ErrorSetOf(Client.Writer.write), Client.Writer.write), true);
 
 pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, comptime is_tcp: bool) type {
     return struct {
@@ -54,7 +60,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         reader: ReaderType = undefined,
         writer: WriterType = undefined,
         writeBuffer: io.BufferedWriter(4096, WriterType) = undefined,
-        tcp_stream: ?net.Stream = null,
+        tcp_client: ?std.x.net.tcp.Client = null,
 
         // session related
         random: [32]u8,
@@ -199,6 +205,9 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             if (self.pre_shared_key) |p| {
                 p.deinit();
             }
+            if (self.tcp_client) |tc| {
+                tc.deinit();
+            }
         }
 
         pub fn configureX25519Keys(self: *Self, priv_key: [32]u8) !void {
@@ -300,13 +309,45 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             return client_hello;
         }
 
+        fn connectToHost(client: *std.x.net.tcp.Client, allocator: std.mem.Allocator, name: []const u8, port: u16) !void {
+            const list = try net.getAddressList(allocator, name, port);
+            defer list.deinit();
+
+            if (list.addrs.len == 0) return error.UnknownHostName;
+
+            for (list.addrs) |addr| {
+                if (addr.any.family != std.os.AF.INET) {
+                    continue;
+                }
+                // TODO: ipv6
+                const bytes = @ptrCast(*const [4]u8, &addr.in.sa.addr);
+                var ipv4_addr = std.x.os.IPv4{
+                    .octets = [_]u8{ bytes[0], bytes[1], bytes[2], bytes[3] },
+                };
+
+                client.connect(std.x.net.ip.Address.initIPv4(ipv4_addr, port)) catch |err| switch (err) {
+                    error.ConnectionRefused => {
+                        continue;
+                    },
+                    else => return err,
+                };
+
+                return;
+            }
+            return std.os.ConnectError.ConnectionRefused;
+        }
+
         pub fn connect(self: *Self, host: []const u8, port: u16) !void {
             if (is_tcp) {
+                var tcp_client = try std.x.net.tcp.Client.init(.ip, .{});
+                errdefer tcp_client.deinit();
+
+                try tcp_client.setReadTimeout(500);
                 // establish tcp connection.
-                var stream = try net.tcpConnectToHost(self.allocator, host, port);
-                self.reader = stream.reader();
-                self.writer = stream.writer();
-                self.tcp_stream = stream;
+                try connectToHost(&tcp_client, self.allocator, host, port);
+                self.reader = tcp_client.reader(0);
+                self.writer = tcp_client.writer(0);
+                self.tcp_client = tcp_client;
                 self.io_init = true;
             }
 
@@ -441,8 +482,10 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         pub fn close(self: *Self) !void {
             defer {
-                if (self.tcp_stream) |tc| {
-                    tc.close();
+                if (self.tcp_client) |tc| {
+                    tc.shutdown(.both) catch {
+                        //TODO Error handle
+                    };
                 }
             }
 

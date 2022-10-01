@@ -13,6 +13,11 @@ TEST_GROUPS=(
 
 set -eux
 
+TMP_FIFO="/tmp/tls13-zig"
+rm -rf $TMP_FIFO
+
+mkfifo $TMP_FIFO
+
 cd $(dirname $0)
 
 cd test
@@ -64,7 +69,7 @@ do
     cd test
 
     # Run openssl server
-    openssl s_server -tls1_3 -accept 8443 -cert cert.pem -key key.pem -early_data -ciphersuites $SUITE < /dev/stdin &
+    cat $TMP_FIFO | openssl s_server -tls1_3 -accept 8443 -cert cert.pem -key key.pem -early_data -ciphersuites $SUITE &
 
     cd ../
 
@@ -86,3 +91,4 @@ do
     sleep 1
 done
 
+rm -rf $TMP_FIFO

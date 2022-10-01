@@ -358,7 +358,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 // establish tcp connection.
                 try connectToHost(&tcp_client, self.allocator, host, port);
                 self.reader = tcp_client.reader(0);
-                self.writer = tcp_client.writer(std.os.MSG.NOSIGNAL);
+                self.writer = tcp_client.writer(0); //TODO: handle SIGPIPE
                 self.tcp_client = tcp_client;
                 self.io_init = true;
             }

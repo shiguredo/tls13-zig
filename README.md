@@ -128,8 +128,8 @@ pub fn main() !void {
 - [ ] Support NewSessionTicket.
 - [ ] Support 0-RTT handshake(resumption).
   - [x] Support extension pre_shared_key.
-  - [ ] Support extension early_data.
-  - [ ] ClientSide
+  - [x] Support extension early_data.
+  - [x] ClientSide
   - [ ] ServerSide
 - [ ] Add more E2E tests.
     - [ ] Static tests for server.

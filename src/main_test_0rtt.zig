@@ -6,6 +6,8 @@ const PskIdentity = @import("pre_shared_key.zig").PskIdentity;
 
 const client = @import("client.zig");
 
+const Error = error{EarlyDataIsNotAccepted};
+
 pub fn main() !void {
     log.info("started.", .{});
     var tls_client = try client.TLSClientTCP.init(allocator);
@@ -17,7 +19,11 @@ pub fn main() !void {
     _ = try tls_client.send(http_req);
 
     var recv_bytes: [4096]u8 = undefined;
-    var recv_size = try tls_client.recv(&recv_bytes);
+    var recv_size = tls_client.recv(&recv_bytes) catch |err| blk: {
+        std.log.err("faile to receive, err={}", .{err});
+        break :blk 0;
+    };
+
     log.info("RECV=\n {s}", .{recv_bytes[0..recv_size]});
 
     try tls_client.close();
@@ -32,14 +38,17 @@ pub fn main() !void {
     tls_client_res.pre_shared_key = try PskIdentity.init(allocator, nst.ticket.len);
     std.mem.copy(u8, tls_client_res.pre_shared_key.?.identity, nst.ticket);
     tls_client_res.pre_shared_key.?.obfuscated_ticket_age = nst.ticket_age_add + 10; // TODO: measure time
-    tls_client_res.early_data = http_req; // Trying to send early_data, but server will not accept this.
+    tls_client_res.early_data = http_req;
 
     try tls_client_res.connect("localhost", 8443);
 
-    recv_size = try tls_client_res.recv(&recv_bytes);
-    log.info("RECV=\n {s}", .{recv_bytes[0..recv_size]});
+    _ = try tls_client_res.send(http_req);
 
     try tls_client_res.close();
+
+    if (!tls_client_res.early_data_ok) {
+        return Error.EarlyDataIsNotAccepted;
+    }
     log.info("finished.", .{});
 
     return;

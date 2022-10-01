@@ -11,7 +11,7 @@ TEST_GROUPS=(
     "P-256"
 )
 
-set -eu
+set -eux
 
 cd $(dirname $0)
 
@@ -56,3 +56,33 @@ do
         sleep 1
     done
 done
+
+# 0-RTT
+for SUITE in "${TEST_CIPHER_SUITES[@]}"
+do
+    echo "Testing 0-RTT Early Data $SUITE."
+    cd test
+
+    # Run openssl server
+    openssl s_server -tls1_3 -accept 8443 -cert cert.pem -key key.pem -early_data -ciphersuites $SUITE < /dev/stdin &
+
+    cd ../
+
+    set +e
+
+    # Let's test!
+    zig run src/main_test_0rtt.zig 
+    if [ $? -ne 0 ]; then
+        echo "failed."
+        pkill -SIGKILL openssl
+        exit 1
+    fi
+    echo "OK."
+
+    set -e
+
+    pkill -SIGKILL openssl
+
+    sleep 1
+done
+

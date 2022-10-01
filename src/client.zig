@@ -35,6 +35,7 @@ const TLSInnerPlainText = @import("tls_cipher.zig").TLSInnerPlainText;
 const NewSessionTicket = @import("new_session_ticket.zig").NewSessionTicket;
 const pre_shared_key = @import("pre_shared_key.zig");
 const PskKeyExchangeModes = @import("psk_key_exchange_modes.zig").PskKeyExchangeModes;
+const EarlyData = @import("early_data.zig").EarlyData;
 
 const Content = @import("content.zig").Content;
 const ContentType = @import("content.zig").ContentType;
@@ -88,6 +89,9 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         // new session tickets
         session_ticket: ?NewSessionTicket = null,
+        early_data: []const u8 = &([_]u8{}), // this array is not managed by TLSClient.
+        early_data_ok: bool = false,
+        early_protector: RecordPayloadProtector = undefined,
 
         // psk
         pre_shared_key: ?pre_shared_key.PskIdentity = null,
@@ -124,6 +128,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             UnsupportedSignatureScheme,
             CertificateNotFound,
             FailedToConnect,
+            CannotSendEarlyData,
         };
 
         pub fn init(allocator: std.mem.Allocator) !Self {
@@ -267,7 +272,15 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             try snl.server_name_list.append(sn);
             try client_hello.extensions.append(.{ .server_name = snl });
 
+            // Extension Early Data
+            if (self.early_data.len != 0 and self.pre_shared_key != null and !self.already_recv_hrr) {
+                const ed = EarlyData{ .msg_type = .client_hello };
+                try client_hello.extensions.append(.{ .early_data = ed });
+            }
+
             // Extension Pre Shared Key
+            // Caution!!: This extension must be appended last of createClientHello
+            //            because of binder key derivation.
             if (self.pre_shared_key) |psk| {
                 var pkem = PskKeyExchangeModes.init(self.allocator);
                 try pkem.modes.append(.psk_dhe_ke);
@@ -345,7 +358,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 // establish tcp connection.
                 try connectToHost(&tcp_client, self.allocator, host, port);
                 self.reader = tcp_client.reader(0);
-                self.writer = tcp_client.writer(0);
+                self.writer = tcp_client.writer(std.os.MSG.NOSIGNAL);
                 self.tcp_client = tcp_client;
                 self.io_init = true;
             }
@@ -362,6 +375,10 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             self.state = .SEND_CH;
             self.msgs_stream.reset();
 
+            if (self.early_data.len != 0 and self.pre_shared_key == null) {
+                return Error.CannotSendEarlyData;
+            }
+
             while (self.state != .CONNECTED) {
                 if (self.state == .SEND_CH) {
                     // Sending ClientHello.
@@ -372,6 +389,20 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     const record_ch = TLSPlainText{ .content = Content{ .handshake = hs_ch } };
                     defer record_ch.deinit();
                     _ = try record_ch.encode(self.writeBuffer.writer());
+
+                    // Sending EarlyData if this is first flight.(not received HRR)
+                    if (self.early_data.len != 0 and !self.already_recv_hrr) {
+                        try self.ks.generateEarlySecrets2(self.msgs_stream.getWritten());
+                        self.early_protector = RecordPayloadProtector.init(self.ks.aead, self.ks.secret.c_early_ap_keys, self.ks.secret.c_early_ap_keys);
+                        const app_c = Content{ .application_data = try ApplicationData.initAsView(self.early_data) };
+                        defer app_c.deinit();
+
+                        _ = try self.early_protector.encryptFromMessageAndWrite(app_c, self.allocator, self.writeBuffer.writer());
+                        if (self.print_keys) {
+                            std.debug.print("CLIENT_EARLY_TRAFFIC_SECRET {} {}\n", .{ std.fmt.fmtSliceHexLower(&self.random), &std.fmt.fmtSliceHexLower(self.ks.secret.c_early_ap_secret.slice()) });
+                        }
+                    }
+
                     self.state = .WAIT_SH;
                 } else {
                     const t = try self.reader.readEnum(ContentType, .Big);
@@ -422,6 +453,13 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
             if (self.print_keys) {
                 self.ks.printKeys(&self.random);
+            }
+
+            // if early_data is not accepted, send early_data after connected.
+            // TODO: Is this ok?
+            if (self.early_data.len != 0 and !self.early_data_ok) {
+                _ = try self.send(self.early_data);
+                std.log.info("sent early_data as application data.", .{});
             }
 
             std.log.info("connected\n", .{});
@@ -612,7 +650,6 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 ch_header[3] = @intCast(u8, self.ks.hkdf.digest_length);
                 _ = try self.msgs_stream.write(&ch_header);
                 _ = try self.msgs_stream.write(hash[0..self.ks.hkdf.digest_length]);
-                std.log.info("hrr={}", .{std.fmt.fmtSliceHexLower(self.msgs_stream.getWritten())});
 
                 self.state = .SEND_CH;
                 _ = try self.msgs_stream.write(sh_stream.getWritten());
@@ -708,6 +745,15 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     try self.ks.generateApplicationSecrets(self.msgs_stream.getWritten());
                     self.ap_protector = RecordPayloadProtector.init(self.hs_protector.aead, self.ks.secret.c_ap_keys, self.ks.secret.s_ap_keys);
 
+                    if (self.early_data_ok) {
+                        const eoed = Content{ .handshake = Handshake{ .end_of_early_data = [0]u8{} } };
+                        defer eoed.deinit();
+                        // End Of Early Data is also included in Handshake Context.
+                        _ = try eoed.encode(self.msgs_stream.writer());
+
+                        _ = try self.early_protector.encryptFromMessageAndWrite(eoed, self.allocator, writer);
+                    }
+
                     // construct client finished message
                     const c_finished = try Finished.fromMessageBytes(self.msgs_stream.getWritten(), self.ks.secret.c_hs_finished_secret.slice(), self.ks.hkdf);
                     const hs_c_finished = Content{ .handshake = Handshake{ .finished = c_finished } };
@@ -724,13 +770,20 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         }
 
         fn handleEncryptedExtensions(self: *Self, ee: EncryptedExtensions) !void {
-            _ = ee;
-            // TODO: what to do?
-
             if (self.pre_shared_key != null) {
                 self.state = .WAIT_FINISHED;
             } else {
                 self.state = .WAIT_CERT_CR;
+            }
+
+            if (self.early_data.len != 0) {
+                const ed = msg.getExtension(ee.extensions, .early_data) catch {
+                    self.early_data_ok = false;
+                    return;
+                };
+                if (ed == .early_data) {
+                    self.early_data_ok = true;
+                }
             }
         }
 
@@ -1272,6 +1325,11 @@ test "RFC8448 Section 5. HelloRetryRequest" {
     var prk: [32]u8 = undefined;
     try hkdf.deriveSecret(&prk, &early_secret, "res binder", "");
     try expect(std.mem.eql(u8, &prk, &prk_ans));
+
+    var c_early_ap: [32]u8 = undefined;
+    try hkdf.deriveSecret(&c_early_ap, &early_secret, "c e traffic", &ch_bytes);
+    const c_early_ap_ans = [_]u8{ 0x3f, 0xbb, 0xe6, 0xa6, 0x0d, 0xeb, 0x66, 0xc3, 0x0a, 0x32, 0x79, 0x5a, 0xba, 0x0e, 0xff, 0x7e, 0xaa, 0x10, 0x10, 0x55, 0x86, 0xe7, 0xbe, 0x5c, 0x09, 0x67, 0x8d, 0x63, 0xb6, 0xca, 0xab, 0x62 };
+    try expect(std.mem.eql(u8, &c_early_ap, &c_early_ap_ans));
 
     const expand_ans = [_]u8{ 0x55, 0x88, 0x67, 0x3e, 0x72, 0xcb, 0x59, 0xc8, 0x7d, 0x22, 0x0c, 0xaf, 0xfe, 0x94, 0xf2, 0xde, 0xa9, 0xa3, 0xb1, 0x60, 0x9f, 0x7d, 0x50, 0xe9, 0x0a, 0x48, 0x22, 0x7d, 0xb9, 0xed, 0x7e, 0xaa };
     var out: [32]u8 = undefined;

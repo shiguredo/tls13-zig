@@ -126,6 +126,7 @@ pub const ServerName = struct {
 /// } ServerNameList;
 ///
 pub const ServerNameList = struct {
+    nothing: bool = false, // sometimes ServerNameList does not have contents.
     server_name_list: ArrayList(ServerName),
 
     const Self = @This();
@@ -154,11 +155,17 @@ pub const ServerNameList = struct {
 
     /// decode ServerNameList reading from io.Reader.
     /// @param reader    io.Reader to read messages.
+    /// @param snl_len   the length of ServerNameList.
     /// @param allocator allocator to initialize ServerNameList.
     /// @return decoded ServerNameList.
-    pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
+    pub fn decode(reader: anytype, snl_len: usize, allocator: std.mem.Allocator) !Self {
         var res = Self.init(allocator);
         errdefer res.deinit();
+
+        if (snl_len == 0) {
+            res.nothing = true;
+            return res;
+        }
 
         // Decoding server_name_list.
         const len = try reader.readIntBig(u16);
@@ -197,6 +204,10 @@ pub const ServerNameList = struct {
     /// @param self ServerNameList to get the encoded length.
     /// @return the length encoded ServerNameList.
     pub fn length(self: Self) usize {
+        if (self.nothing) {
+            return 0;
+        }
+
         var len: usize = 0;
         len += @sizeOf(u16);
         for (self.server_name_list.items) |n| {

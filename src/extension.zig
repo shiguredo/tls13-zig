@@ -127,13 +127,8 @@ pub const Extension = union(ExtensionType) {
         // Decoding extension_data.
         const len = try reader.readIntBig(u16); // TODO: check readable length of reader
 
-        // If the length is 0, 'none'.
-        if (len == 0) {
-            t = .none;
-        }
-
         switch (t) {
-            .server_name => return Self{ .server_name = try ServerNameList.decode(reader, allocator) },
+            .server_name => return Self{ .server_name = try ServerNameList.decode(reader, len, allocator) },
             .supported_groups => return Self{ .supported_groups = try NamedGroupList.decode(reader, allocator) },
             .signature_algorithms => return Self{ .signature_algorithms = try SignatureSchemeList.decode(reader, allocator) },
             .record_size_limit => return Self{ .record_size_limit = try RecordSizeLimit.decode(reader) },

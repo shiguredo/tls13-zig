@@ -47,7 +47,7 @@ pub const EncryptedExtensions = struct {
         errdefer res.deinit();
 
         // Decoding Extensions.
-        try msg.decodeExtensions(reader, allocator, &res.extensions, .server_hello, false);
+        try msg.decodeExtensions(reader, allocator, &res.extensions, .encrypted_extensions, false);
         return res;
     }
 

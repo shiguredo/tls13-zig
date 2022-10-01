@@ -253,6 +253,8 @@ pub const Secret = struct {
     };
 
     early_secret: DigestBoundedArray,
+    c_early_ap_secret: DigestBoundedArray,
+    c_early_ap_keys: RecordKeys,
 
     hs_derived_secret: DigestBoundedArray,
     hs_secret: DigestBoundedArray,
@@ -284,6 +286,8 @@ pub const Secret = struct {
 
         return Self{
             .early_secret = try DigestBoundedArray.init(d_len),
+            .c_early_ap_secret = try DigestBoundedArray.init(d_len),
+            .c_early_ap_keys = try RecordKeys.init(aead),
 
             .hs_derived_secret = try DigestBoundedArray.init(d_len),
             .hs_secret = try DigestBoundedArray.init(d_len),

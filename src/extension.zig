@@ -9,6 +9,7 @@ const ServerNameList = @import("server_name.zig").ServerNameList;
 const HandshakeType = @import("handshake.zig").HandshakeType;
 const PreSharedKey = @import("pre_shared_key.zig").PreSharedKey;
 const PskKeyExchangeModes = @import("psk_key_exchange_modes.zig").PskKeyExchangeModes;
+const EarlyData = @import("early_data.zig").EarlyData;
 
 /// RFC8446 Section 4.2 Extensions
 ///
@@ -103,7 +104,7 @@ pub const Extension = union(ExtensionType) {
     compress_certificate: Dummy,
     application_settings: Dummy,
     pre_shared_key: PreSharedKey,
-    early_data: Dummy,
+    early_data: EarlyData,
 
     const Self = @This();
     pub const HEADER_LENGTH = @sizeOf(u16) + @sizeOf(u16);
@@ -153,7 +154,7 @@ pub const Extension = union(ExtensionType) {
             .compress_certificate => return Self{ .compress_certificate = try Dummy.decode(reader, len) },
             .application_settings => return Self{ .application_settings = try Dummy.decode(reader, len) },
             .pre_shared_key => return Self{ .pre_shared_key = try PreSharedKey.decode(reader, ht, allocator) },
-            .early_data => return Self{ .early_data = try Dummy.decode(reader, len) },
+            .early_data => return Self{ .early_data = try EarlyData.decode(reader, ht) },
         }
     }
 
@@ -185,6 +186,7 @@ pub const Extension = union(ExtensionType) {
             .key_share => |e| len += try e.encode(writer),
             .pre_shared_key => |e| len += try e.encode(writer),
             .psk_key_exchange_modes => |e| len += try e.encode(writer),
+            .early_data => |e| len += try e.encode(writer),
             .none => unreachable,
             else => unreachable,
         }

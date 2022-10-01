@@ -126,6 +126,8 @@ pub fn main() !void {
   - [ ] Send 'alert' when an error occur.
 - [ ] Support KeyUpdate.
 - [ ] Support NewSessionTicket.
+  - [x] ClientSide
+  - [ ] ServerSide
 - [ ] Support 0-RTT handshake(resumption).
   - [x] Support extension pre_shared_key.
   - [x] Support extension early_data.

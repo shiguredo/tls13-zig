@@ -282,8 +282,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 };
                 try client_hello.extensions.append(.{ .pre_shared_key = ext_psk });
 
-                std.log.info("FIN={}", .{std.fmt.fmtSliceHexLower(self.res_secret.?.slice())});
-                try self.ks.generateEarlySecrets(self.res_secret.?.slice());
+                try self.ks.generateEarlySecrets1(self.res_secret.?.slice());
                 var prk = try crypto.DigestBoundedArray.init(self.ks.hkdf.digest_length);
                 try self.ks.hkdf.deriveSecret(prk.slice(), self.ks.secret.early_secret.slice(), "res binder", "");
                 var fin_secret = try crypto.DigestBoundedArray.init(self.ks.hkdf.digest_length);
@@ -568,7 +567,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             } else {
                 self.ks = try key.KeyScheduler.init(hkdf, aead);
                 const zero_bytes = &([_]u8{0} ** 64);
-                try self.ks.generateEarlySecrets(zero_bytes[0..self.ks.hkdf.digest_length]);
+                try self.ks.generateEarlySecrets1(zero_bytes[0..self.ks.hkdf.digest_length]);
             }
 
             if (sh.is_hello_retry_request) {
@@ -874,7 +873,7 @@ test "client test with RFC8448" {
 
     var ks = try key.KeyScheduler.init(crypto.Hkdf.Sha256.hkdf, crypto.Aead.Aes128Gcm.aead);
     defer ks.deinit();
-    try ks.generateEarlySecrets(&([_]u8{0} ** 32));
+    try ks.generateEarlySecrets1(&([_]u8{0} ** 32));
     try ks.generateHandshakeSecrets1(&dhe_shared_key);
     try ks.generateHandshakeSecrets2(msgs_stream.getWritten());
 
@@ -902,7 +901,7 @@ test "client test with RFC8448" {
     try expect(enc_ext.extensions.items.len == 3);
     try expect(enc_ext.extensions.items[0] == .supported_groups);
     try expect(enc_ext.extensions.items[1] == .record_size_limit);
-    try expect(enc_ext.extensions.items[2] == .none); //server name
+    try expect(enc_ext.extensions.items[2] == .server_name); //server name
 
     // STATE = WAIT_CERT_CR
 

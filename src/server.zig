@@ -475,7 +475,8 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             }
             self.ks = try key.KeyScheduler.init(hkdf, aead);
             const zero_bytes = &([_]u8{0} ** 64);
-            try self.ks.generateEarlySecrets(zero_bytes[0..self.ks.hkdf.digest_length]);
+            try self.ks.generateEarlySecrets1(zero_bytes[0..self.ks.hkdf.digest_length]);
+            try self.ks.generateEarlySecrets2(self.msgs_stream.getWritten());
             std.log.debug("selected cipher_suite={s}", .{@tagName(self.cipher_suite)});
 
             // Selecting KeyShare and deriving shared secret.

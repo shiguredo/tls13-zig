@@ -26,9 +26,14 @@ pub const KeyScheduler = struct {
         _ = self;
     }
 
-    pub fn generateEarlySecrets(self: *Self, psk: []const u8) !void {
+    pub fn generateEarlySecrets1(self: *Self, psk: []const u8) !void {
         self.hkdf.deriveEarlySecret(self.secret.early_secret.slice(), psk);
         try self.hkdf.deriveSecret(self.secret.hs_derived_secret.slice(), self.secret.early_secret.slice(), "derived", "");
+    }
+
+    pub fn generateEarlySecrets2(self: *Self, msgs: []const u8) !void {
+        try self.hkdf.deriveSecret(self.secret.c_early_ap_secret.slice(), self.secret.early_secret.slice(), "c e traffic", msgs);
+        try self.generateRecordKeys(&self.secret.c_early_ap_keys, self.secret.c_early_ap_secret.slice());
     }
 
     pub fn generateHandshakeSecrets1(self: *Self, shared_key: []const u8) !void {
@@ -90,7 +95,7 @@ test "KeyScheduler AES128GCM-SHA256" {
 
     var ks = try KeyScheduler.init(hkdf, aead);
     defer ks.deinit();
-    try ks.generateEarlySecrets(&([_]u8{0} ** 32));
+    try ks.generateEarlySecrets1(&([_]u8{0} ** 32));
 
     const early_secret_ans = [_]u8{ 0x33, 0xad, 0x0a, 0x1c, 0x60, 0x7e, 0xc0, 0x3b, 0x09, 0xe6, 0xcd, 0x98, 0x93, 0x68, 0x0c, 0xe2, 0x10, 0xad, 0xf3, 0x00, 0xaa, 0x1f, 0x26, 0x60, 0xe1, 0xb2, 0x2e, 0x10, 0xf1, 0x70, 0xf9, 0x2a };
     try expect(std.mem.eql(u8, ks.secret.early_secret.slice(), &early_secret_ans));

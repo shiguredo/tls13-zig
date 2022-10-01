@@ -119,9 +119,9 @@ pub fn main() !void {
 
 # TODO
 ## Priority: High
-- [ ] Support HelloRetryRequest.
+- [x] Support HelloRetryRequest.
     - [x] ClientSide
-    - [ ] ServerSide
+    - [x] ServerSide
 - [ ] Error handle
   - [ ] Send 'alert' when an error occur.
 - [ ] Support KeyUpdate.

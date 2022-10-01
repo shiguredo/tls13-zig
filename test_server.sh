@@ -31,3 +31,18 @@ if [ $? -eq 0 ]; then
 else
     echo "FAILED"
 fi
+
+# Testing Hello Retry Request
+echo "GET / " | openssl s_client -groups x448:x25519 -servername localhost -connect localhost:8443 -ign_eof | grep tls13-zig
+if [ $? -eq 0 ]; then
+    echo "OK"
+else
+    echo "FAILED"
+fi
+
+echo "GET / " | openssl s_client -groups x448:secp256r1 -servername localhost -connect localhost:8443 -ign_eof | grep tls13-zig
+if [ $? -eq 0 ]; then
+    echo "OK"
+else
+    echo "FAILED"
+fi

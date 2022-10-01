@@ -21,6 +21,7 @@ const x509 = @import("x509.zig");
 const ServerHello = @import("server_hello.zig").ServerHello;
 const ClientHello = @import("client_hello.zig").ClientHello;
 const Handshake = @import("handshake.zig").Handshake;
+const HandshakeType = @import("handshake.zig").HandshakeType;
 const EncryptedExtensions = @import("encrypted_extensions.zig").EncryptedExtensions;
 const Finished = @import("finished.zig").Finished;
 const Alert = @import("alert.zig").Alert;
@@ -165,6 +166,9 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
         random: [32]u8,
         session_id: msg.SessionID,
 
+        // hello retry request
+        already_sent_hrr: bool = false,
+
         // message buffer for KeySchedule
         msgs_bytes: []u8,
         msgs_stream: io.FixedBufferStream([]u8),
@@ -200,6 +204,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             UnsupportedCertificateAlgorithm,
             UnsupportedCipherSuite,
             UnsupportedKeyShareAlgorithm,
+            NoKeyShareAlgorithmAvailable,
             UnsupportedSignatureScheme,
             CertificateNotFound,
             FailedToConnect,
@@ -280,6 +285,23 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             return server_hello;
         }
 
+        fn createHelloRetryRequest(self: Self) !ServerHello {
+            var hrr = ServerHello.init(ServerHello.hello_retry_request_magic, self.session_id, self.cipher_suite, self.allocator);
+            hrr.is_hello_retry_request = true;
+
+            // Extension SupportedVresions
+            var sv = try SupportedVersions.init(.server_hello);
+            try sv.versions.append(0x0304); //TLSv1.3
+            try hrr.extensions.append(.{ .supported_versions = sv });
+
+            // Extension KeyShare
+            var ks = key_share.KeyShare.init(self.allocator, .server_hello, true);
+            ks.selected = self.key_share;
+            try hrr.extensions.append(.{ .key_share = ks });
+
+            return hrr;
+        }
+
         pub fn handshake(self: *Self) !void {
             std.log.info("handshake started", .{});
             var t = try self.reader.readEnum(ContentType, .Big);
@@ -293,7 +315,60 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 return Error.UnexpectedMessage;
             }
             const ch = hs.client_hello;
-            try self.handleClientHello(ch);
+            self.handleClientHello(ch) catch |err| {
+                switch (err) {
+                    error.UnsupportedKeyShareAlgorithm => {
+                        // RFC8446 Section 4.4.1 The Transcript Hash
+                        //  As an exception to this general rule, when the server responds to a
+                        //  ClientHello with a HelloRetryRequest, the value of ClientHello1 is
+                        //  replaced with a special synthetic handshake message of handshake type
+                        //  "message_hash" containing Hash(ClientHello1).  I.e.,
+                        //
+                        // Transcript-Hash(ClientHello1, HelloRetryRequest, ... Mn) =
+                        //     Hash(message_hash ||        /* Handshake type */
+                        //          00 00 Hash.length  ||  /* Handshake message length (bytes) */
+                        //          Hash(ClientHello1) ||  /* Hash of ClientHello1 */
+                        //          HelloRetryRequest  || ... || Mn)
+                        var hash: [crypto.Hkdf.MAX_DIGEST_LENGTH]u8 = [_]u8{0} ** crypto.Hkdf.MAX_DIGEST_LENGTH;
+                        self.ks.hkdf.hash(&hash, self.msgs_stream.getWritten());
+                        self.msgs_stream.reset();
+
+                        var ch_header: [4]u8 = [_]u8{0} ** 4;
+                        ch_header[0] = @enumToInt(HandshakeType.message_hash);
+                        ch_header[3] = @intCast(u8, self.ks.hkdf.digest_length);
+                        _ = try self.msgs_stream.write(&ch_header);
+                        _ = try self.msgs_stream.write(hash[0..self.ks.hkdf.digest_length]);
+
+                        // send HRR
+                        try self.sendHelloRetryRequest();
+                        try self.write_buffer.flush();
+                        std.log.debug("sent all contents in write buffer", .{});
+
+                        // handle ClientHello2
+                        while (true) {
+                            t = try self.reader.readEnum(ContentType, .Big);
+                            if (t == .change_cipher_spec) {
+                                const ch_record2 = try TLSPlainText.decode(self.reader, t, self.allocator, null, null);
+                                defer ch_record2.deinit();
+                                continue;
+                            }
+                            const ch_record2 = try TLSPlainText.decode(self.reader, t, self.allocator, null, self.msgs_stream.writer());
+                            defer ch_record2.deinit();
+                            if (ch_record2.content != .handshake) {
+                                return Error.UnexpectedMessage;
+                            }
+                            const hs2 = ch_record2.content.handshake;
+                            if (hs2 != .client_hello) {
+                                return Error.UnexpectedMessage;
+                            }
+                            const ch2 = hs2.client_hello;
+                            try self.handleClientHello(ch2);
+                            break;
+                        }
+                    },
+                    else => return err,
+                }
+            };
             try self.sendServerHello();
             try self.ks.generateHandshakeSecrets2(self.msgs_stream.getWritten());
 
@@ -443,41 +518,44 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             }
 
             // Selecting CiperSuite
-            var cs_ok = ch.cipher_suites.items.len != 0;
-            var hkdf: crypto.Hkdf = undefined;
-            var aead: crypto.Aead = undefined;
-            for (ch.cipher_suites.items) |cs| {
-                self.cipher_suite = cs;
-                switch (cs) {
-                    .TLS_AES_128_GCM_SHA256 => {
-                        hkdf = crypto.Hkdf.Sha256.hkdf;
-                        aead = crypto.Aead.Aes128Gcm.aead;
-                        cs_ok = true;
-                        break;
-                    },
-                    .TLS_AES_256_GCM_SHA384 => {
-                        hkdf = crypto.Hkdf.Sha384.hkdf;
-                        aead = crypto.Aead.Aes256Gcm.aead;
-                        cs_ok = true;
-                        break;
-                    },
-                    .TLS_CHACHA20_POLY1305_SHA256 => {
-                        hkdf = crypto.Hkdf.Sha256.hkdf;
-                        aead = crypto.Aead.ChaCha20Poly1305.aead;
-                        cs_ok = true;
-                        break;
-                    },
-                    else => cs_ok = false,
+            // CiperSuite is selected on First Flight
+            if (!self.already_sent_hrr) {
+                var cs_ok = ch.cipher_suites.items.len != 0;
+                var hkdf: crypto.Hkdf = undefined;
+                var aead: crypto.Aead = undefined;
+                for (ch.cipher_suites.items) |cs| {
+                    self.cipher_suite = cs;
+                    switch (cs) {
+                        .TLS_AES_128_GCM_SHA256 => {
+                            hkdf = crypto.Hkdf.Sha256.hkdf;
+                            aead = crypto.Aead.Aes128Gcm.aead;
+                            cs_ok = true;
+                            break;
+                        },
+                        .TLS_AES_256_GCM_SHA384 => {
+                            hkdf = crypto.Hkdf.Sha384.hkdf;
+                            aead = crypto.Aead.Aes256Gcm.aead;
+                            cs_ok = true;
+                            break;
+                        },
+                        .TLS_CHACHA20_POLY1305_SHA256 => {
+                            hkdf = crypto.Hkdf.Sha256.hkdf;
+                            aead = crypto.Aead.ChaCha20Poly1305.aead;
+                            cs_ok = true;
+                            break;
+                        },
+                        else => cs_ok = false,
+                    }
                 }
+                if (!cs_ok) {
+                    return Error.UnsupportedCipherSuite;
+                }
+                self.ks = try key.KeyScheduler.init(hkdf, aead);
+                const zero_bytes = &([_]u8{0} ** 64);
+                try self.ks.generateEarlySecrets1(zero_bytes[0..self.ks.hkdf.digest_length]);
+                try self.ks.generateEarlySecrets2(self.msgs_stream.getWritten());
+                std.log.debug("selected cipher_suite={s}", .{@tagName(self.cipher_suite)});
             }
-            if (!cs_ok) {
-                return Error.UnsupportedCipherSuite;
-            }
-            self.ks = try key.KeyScheduler.init(hkdf, aead);
-            const zero_bytes = &([_]u8{0} ** 64);
-            try self.ks.generateEarlySecrets1(zero_bytes[0..self.ks.hkdf.digest_length]);
-            try self.ks.generateEarlySecrets2(self.msgs_stream.getWritten());
-            std.log.debug("selected cipher_suite={s}", .{@tagName(self.cipher_suite)});
 
             // Selecting KeyShare and deriving shared secret.
             const ks = (try msg.getExtension(ch.extensions, .key_share)).key_share;
@@ -506,6 +584,24 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 }
             }
             if (!key_share_ok) {
+                // if already sent HRR, it must be error.
+                if (self.already_sent_hrr) {
+                    return Error.NoKeyShareAlgorithmAvailable;
+                }
+                const sg = (try msg.getExtension(ch.extensions, .supported_groups)).supported_groups;
+                var next_is_hrr = false;
+                for (sg.groups.items) |g| {
+                    switch (g) {
+                        .x25519 => next_is_hrr = true,
+                        .secp256r1 => next_is_hrr = true,
+                        else => continue,
+                    }
+                    self.key_share = g;
+                }
+
+                if (!next_is_hrr) {
+                    return Error.NoKeyShareAlgorithmAvailable;
+                }
                 return Error.UnsupportedKeyShareAlgorithm;
             }
             std.log.debug("selected key_share={s}", .{@tagName(self.key_share)});
@@ -537,6 +633,19 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             _ = try record_sh.encode(self.write_buffer.writer());
 
             std.log.debug("ServerHello has been written to send buffer", .{});
+        }
+
+        fn sendHelloRetryRequest(self: *Self) !void {
+            const hrr = try self.createHelloRetryRequest();
+            const hs_hrr = Handshake{ .server_hello = hrr };
+            _ = try hs_hrr.encode(self.msgs_stream.writer());
+
+            const record_hrr = TLSPlainText{ .content = Content{ .handshake = hs_hrr } };
+            defer record_hrr.deinit();
+            _ = try record_hrr.encode(self.write_buffer.writer());
+            self.already_sent_hrr = true;
+
+            std.log.debug("HelloRetryRequest has been written to send buffer", .{});
         }
 
         fn sendEncryptedExtensions(self: *Self) !void {

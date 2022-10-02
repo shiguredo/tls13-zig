@@ -33,6 +33,7 @@ const TLSPlainText = @import("tls_plain.zig").TLSPlainText;
 const TLSCipherText = @import("tls_cipher.zig").TLSCipherText;
 const TLSInnerPlainText = @import("tls_cipher.zig").TLSInnerPlainText;
 const NewSessionTicket = @import("new_session_ticket.zig").NewSessionTicket;
+const MessageHash = @import("message_hash.zig").MessageHash;
 const pre_shared_key = @import("pre_shared_key.zig");
 const PskKeyExchangeModes = @import("psk_key_exchange_modes.zig").PskKeyExchangeModes;
 const EarlyData = @import("early_data.zig").EarlyData;
@@ -640,16 +641,9 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 //          00 00 Hash.length  ||  /* Handshake message length (bytes) */
                 //          Hash(ClientHello1) ||  /* Hash of ClientHello1 */
                 //          HelloRetryRequest  || ... || Mn)
-                var hash: [crypto.Hkdf.MAX_DIGEST_LENGTH]u8 = [_]u8{0} ** crypto.Hkdf.MAX_DIGEST_LENGTH;
-                std.log.info("ch={}", .{std.fmt.fmtSliceHexLower(self.msgs_stream.getWritten())});
-                self.ks.hkdf.hash(&hash, self.msgs_stream.getWritten());
+                const hs_hash = Handshake{ .message_hash = try MessageHash.fromClientHello(self.msgs_stream.getWritten(), self.ks.hkdf) };
                 self.msgs_stream.reset();
-
-                var ch_header: [4]u8 = [_]u8{0} ** 4;
-                ch_header[0] = @enumToInt(HandshakeType.message_hash);
-                ch_header[3] = @intCast(u8, self.ks.hkdf.digest_length);
-                _ = try self.msgs_stream.write(&ch_header);
-                _ = try self.msgs_stream.write(hash[0..self.ks.hkdf.digest_length]);
+                _ = try hs_hash.encode(self.msgs_stream.writer());
 
                 self.state = .SEND_CH;
                 _ = try self.msgs_stream.write(sh_stream.getWritten());

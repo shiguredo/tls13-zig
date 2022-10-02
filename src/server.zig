@@ -24,6 +24,7 @@ const Handshake = @import("handshake.zig").Handshake;
 const HandshakeType = @import("handshake.zig").HandshakeType;
 const EncryptedExtensions = @import("encrypted_extensions.zig").EncryptedExtensions;
 const Finished = @import("finished.zig").Finished;
+const MessageHash = @import("message_hash.zig").MessageHash;
 const Alert = @import("alert.zig").Alert;
 const ApplicationData = @import("application_data.zig").ApplicationData;
 const CertificateVerify = @import("certificate_verify.zig").CertificateVerify;
@@ -329,15 +330,9 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         //          00 00 Hash.length  ||  /* Handshake message length (bytes) */
                         //          Hash(ClientHello1) ||  /* Hash of ClientHello1 */
                         //          HelloRetryRequest  || ... || Mn)
-                        var hash: [crypto.Hkdf.MAX_DIGEST_LENGTH]u8 = [_]u8{0} ** crypto.Hkdf.MAX_DIGEST_LENGTH;
-                        self.ks.hkdf.hash(&hash, self.msgs_stream.getWritten());
+                        const hs_hash = Handshake{ .message_hash = try MessageHash.fromClientHello(self.msgs_stream.getWritten(), self.ks.hkdf) };
                         self.msgs_stream.reset();
-
-                        var ch_header: [4]u8 = [_]u8{0} ** 4;
-                        ch_header[0] = @enumToInt(HandshakeType.message_hash);
-                        ch_header[3] = @intCast(u8, self.ks.hkdf.digest_length);
-                        _ = try self.msgs_stream.write(&ch_header);
-                        _ = try self.msgs_stream.write(hash[0..self.ks.hkdf.digest_length]);
+                        _ = try hs_hash.encode(self.msgs_stream.writer());
 
                         // send HRR
                         try self.sendHelloRetryRequest();

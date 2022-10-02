@@ -8,6 +8,7 @@ const Certificate = @import("certificate.zig").Certificate;
 const CertificateVerify = @import("certificate_verify.zig").CertificateVerify;
 const Finished = @import("finished.zig").Finished;
 const NewSessionTicket = @import("new_session_ticket.zig").NewSessionTicket;
+const MessageHash = @import("message_hash.zig").MessageHash;
 const Hkdf = @import("crypto.zig").Hkdf;
 
 /// RFC8446 Secion 4 Handshake Protocol
@@ -69,7 +70,7 @@ pub const Handshake = union(HandshakeType) {
     certificate: Certificate,
     certificate_verify: CertificateVerify,
     finished: Finished,
-    message_hash: [0]u8,
+    message_hash: MessageHash,
 
     const Self = @This();
 
@@ -130,6 +131,7 @@ pub const Handshake = union(HandshakeType) {
             .certificate => |e| len += try e.encode(writer),
             .certificate_verify => |e| len += try e.encode(writer),
             .finished => |e| len += try e.encode(writer),
+            .message_hash => |e| len += try e.encode(writer),
             else => unreachable, // TODO: implement remaining.
         }
 
@@ -150,6 +152,7 @@ pub const Handshake = union(HandshakeType) {
             .certificate => |e| len += e.length(),
             .certificate_verify => |e| len += e.length(),
             .finished => |e| len += e.length(),
+            .message_hash => |e| len += e.length(),
             else => unreachable, // TODO: implement remaining.
         }
 
@@ -168,7 +171,7 @@ pub const Handshake = union(HandshakeType) {
             .certificate => |e| e.deinit(),
             .certificate_verify => |e| e.deinit(),
             .finished => {},
-            else => unreachable, // TODO: implement remaining.
+            .message_hash => {},
         }
     }
 };

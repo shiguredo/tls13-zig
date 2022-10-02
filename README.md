@@ -25,6 +25,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
+# Features
+- Supported CipherSuite
+  - TLS_AES_128_GCM_SHA256
+  - TLS_AES_256_GCM_SHA384
+  - TLS_CHACHA20_POLY1305_SHA256
+- Supported KeyShare
+  - x25519
+  - secp256r1
+- Supported SignatureAlgorithm
+  - ecdsa_secp256r1_sha256
+  - rsa_pss_rsae_sha256
+
 # How to use
 This client retrieves contents from `www.google.com` with TLS1.3.
 If you want to try this, simple executes `zig run src/main.zig`.

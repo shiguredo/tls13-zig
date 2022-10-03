@@ -98,7 +98,7 @@ do
     cd test
 
     # Run openssl server
-    ./go/server
+    ./go/server &
 
     cd ../
 

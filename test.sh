@@ -91,4 +91,34 @@ do
     sleep 1
 done
 
+# Stream
+for SUITE in "${TEST_CIPHER_SUITES[@]}"
+do
+    echo "Testing Stream $SUITE."
+    cd test
+
+    # Run openssl server
+    ./go/server
+
+    cd ../
+
+    set +e
+
+    # Let's test!
+    zig run src/test_stream.zig 
+    if [ $? -ne 0 ]; then
+        echo "failed."
+        pkill -SIGKILL server
+        exit 1
+    fi
+    echo "OK."
+
+    set -e
+
+    pkill -SIGKILL server
+
+    sleep 1
+done
+
+
 rm -rf $TMP_FIFO

@@ -6,6 +6,8 @@ pub const ApplicationData = struct {
     view_c: []const u8 = undefined,
     view: bool = false,
 
+    read_idx: usize = 0,
+
     allocator: std.mem.Allocator,
 
     const Self = @This();

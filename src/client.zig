@@ -70,6 +70,9 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         session_id: msg.SessionID,
         host: []u8 = &([_]u8{}),
 
+        // buffer for receive
+        recv_contents: ?ArrayList(Content) = null,
+
         // message buffer for KeySchedule
         msgs_bytes: []u8,
         msgs_stream: io.FixedBufferStream([]u8),
@@ -194,6 +197,12 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         pub fn deinit(self: Self) void {
             self.allocator.free(self.msgs_bytes);
+            if (self.recv_contents) |cs| {
+                for (cs.items) |c| {
+                    c.deinit();
+                }
+                cs.deinit();
+            }
             for (self.cert_pubkeys.items) |c| {
                 c.deinit();
             }
@@ -511,15 +520,41 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         }
 
         pub fn recv(self: *Self, b: []u8) !usize {
-            const updated = try self.checkAndUpdateKey();
-            if (updated) {
-                std.log.debug("KeyUpdate updated_request has been sent", .{});
-            }
-
-            var ap_recv = false;
             var msg_stream = io.fixedBufferStream(b);
-            while (!ap_recv) {
-                const t = try self.reader.readEnum(ContentType, .Big);
+
+            while ((try msg_stream.getEndPos()) != (try msg_stream.getPos())) {
+                // writing application_data contents into buffer/
+                if (self.recv_contents) |*cs| {
+                    while (cs.items.len != 0) {
+                        var ap = cs.*.orderedRemove(0).application_data;
+                        const read_size = ap.content.len - ap.read_idx;
+                        const write_size = try msg_stream.getEndPos() - try msg_stream.getPos();
+                        if (read_size >= write_size) {
+                            _ = try msg_stream.write(ap.content[ap.read_idx..(ap.read_idx + write_size)]);
+                            ap.read_idx += write_size;
+                            try cs.*.insert(0, Content{ .application_data = ap });
+                            return b.len;
+                        } else {
+                            _ = try msg_stream.write(ap.content[ap.read_idx..]);
+                            ap.deinit();
+                        }
+                    }
+                    cs.deinit();
+                    self.recv_contents = null;
+                }
+
+                const updated = try self.checkAndUpdateKey();
+                if (updated) {
+                    std.log.debug("KeyUpdate updated_request has been sent", .{});
+                }
+
+                const t = self.reader.readEnum(ContentType, .Big) catch |err| {
+                    switch (err) {
+                        error.EndOfStream => return msg_stream.getWritten().len,
+                        //error.WouldBlock => return msg_stream.getWritten().len,
+                        else => return err,
+                    }
+                };
                 if (t != .application_data) {
                     // TODO: error
                     std.log.err("ERROR!!!", .{});
@@ -577,13 +612,8 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     continue;
                 }
 
-                const content = try plain_record.decodeContent(self.allocator, self.ks.hkdf);
-                defer content.deinit();
-                // TODO: handle oversized content
-                _ = try msg_stream.write(content.application_data.content);
-                ap_recv = true;
+                self.recv_contents = try plain_record.decodeContents(self.allocator, self.ks.hkdf);
             }
-
             return msg_stream.getWritten().len;
         }
 

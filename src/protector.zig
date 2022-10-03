@@ -182,7 +182,7 @@ pub const RecordPayloadProtector = struct {
 
         i = 0;
         while (i < @sizeOf(u64)) : (i += 1) {
-            nonce.slice()[nonce.len - i - 1] = @intCast(u8, count >> (@intCast(u6, i * 8)));
+            nonce.slice()[nonce.len - i - 1] = @intCast(u8, (count >> (@intCast(u6, i * 8))) & 0xFF);
         }
 
         i = 0;

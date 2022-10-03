@@ -37,6 +37,7 @@ const MessageHash = @import("message_hash.zig").MessageHash;
 const pre_shared_key = @import("pre_shared_key.zig");
 const PskKeyExchangeModes = @import("psk_key_exchange_modes.zig").PskKeyExchangeModes;
 const EarlyData = @import("early_data.zig").EarlyData;
+const KeyUpdate = @import("key_update.zig").KeyUpdate;
 
 const Content = @import("content.zig").Content;
 const ContentType = @import("content.zig").ContentType;
@@ -466,7 +467,40 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             std.log.info("connected\n", .{});
         }
 
+        fn checkAndUpdateKey(self: *Self) !bool {
+            // RFC8446 Section 5.5.  Limits on Key Usage
+            //
+            // For AES-GCM, up to 2^24.5 full-size records (about 24 million) may be
+            // encrypted on a given connection while keeping a safety margin of
+            // approximately 2^-57 for Authenticated Encryption (AE) security.  For
+            // ChaCha20/Poly1305, the record sequence number would wrap before the
+            // safety limit is reached.
+
+            const limit_cnt: usize = 2 << 24;
+            if (self.ap_protector.enc_cnt > limit_cnt or self.ap_protector.dec_cnt > limit_cnt) {
+                const update = Content{ .handshake = Handshake{ .key_update = KeyUpdate{ .request_update = .update_requested } } };
+                defer update.deinit();
+
+                _ = try self.ap_protector.encryptFromMessageAndWrite(update, self.allocator, self.writeBuffer.writer());
+                try self.writeBuffer.flush();
+
+                // update encoding key(clieny key)
+                try self.ks.updateClientSecrets();
+                self.ap_protector.enc_keys = self.ks.secret.c_ap_keys;
+                self.ap_protector.enc_cnt = 0;
+
+                return true;
+            }
+
+            return false;
+        }
+
         pub fn send(self: *Self, b: []const u8) !usize {
+            const updated = try self.checkAndUpdateKey();
+            if (updated) {
+                std.log.debug("KeyUpdate updated_request has been sent", .{});
+            }
+
             const app_c = Content{ .application_data = try ApplicationData.initAsView(b) };
             defer app_c.deinit();
 
@@ -477,6 +511,11 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         }
 
         pub fn recv(self: *Self, b: []u8) !usize {
+            const updated = try self.checkAndUpdateKey();
+            if (updated) {
+                std.log.debug("KeyUpdate updated_request has been sent", .{});
+            }
+
             var ap_recv = false;
             var msg_stream = io.fixedBufferStream(b);
             while (!ap_recv) {
@@ -495,15 +534,45 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 if (plain_record.content_type != .application_data) {
                     if (plain_record.content_type == .handshake) {
                         const hs = (try plain_record.decodeContent(self.allocator, self.ks.hkdf)).handshake;
-                        if (hs != .new_session_ticket) {
-                            continue;
+                        switch (hs) {
+                            .new_session_ticket => |nst| {
+                                if (self.session_ticket) |st| {
+                                    st.deinit();
+                                }
+                                self.session_ticket = nst;
+                                try self.ks.generateResumptionMasterSecret(self.msgs_stream.getWritten(), nst.ticket_nonce.slice());
+                            },
+                            .key_update => |ku| {
+                                switch (ku.request_update) {
+                                    .update_not_requested => {
+                                        std.log.debug("received key update update_not_requested", .{});
+                                        // update decoding key(server key)
+                                        try self.ks.updateServerSecrets();
+                                        self.ap_protector.dec_keys = self.ks.secret.s_ap_keys;
+                                        self.ap_protector.dec_cnt = 0;
+                                    },
+                                    .update_requested => {
+                                        std.log.debug("received key update update_requested", .{});
+                                        // update decoding key(server key)
+                                        try self.ks.updateServerSecrets();
+                                        self.ap_protector.dec_keys = self.ks.secret.s_ap_keys;
+                                        self.ap_protector.dec_cnt = 0;
+
+                                        const update = Content{ .handshake = Handshake{ .key_update = KeyUpdate{ .request_update = .update_not_requested } } };
+                                        defer update.deinit();
+
+                                        _ = try self.ap_protector.encryptFromMessageAndWrite(update, self.allocator, self.writeBuffer.writer());
+                                        try self.writeBuffer.flush();
+
+                                        // update encoding key(clieny key)
+                                        try self.ks.updateClientSecrets();
+                                        self.ap_protector.enc_keys = self.ks.secret.c_ap_keys;
+                                        self.ap_protector.enc_cnt = 0;
+                                    },
+                                }
+                            },
+                            else => continue,
                         }
-                        const nst = hs.new_session_ticket;
-                        if (self.session_ticket) |st| {
-                            st.deinit();
-                        }
-                        self.session_ticket = nst;
-                        try self.ks.generateResumptionMasterSecret(self.msgs_stream.getWritten(), nst.ticket_nonce.slice());
                     }
                     continue;
                 }

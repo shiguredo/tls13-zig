@@ -62,6 +62,16 @@ pub const KeyScheduler = struct {
         try self.hkdf.deriveSecret(self.secret.exp_master_secret.slice(), self.secret.master_secret.slice(), "exp master", msgs);
     }
 
+    pub fn updateClientSecrets(self: *Self) !void {
+        try self.hkdf.hkdfExpandLabel(self.secret.c_ap_secret.slice(), self.secret.c_ap_secret.slice(), "traffic upd", "", self.hkdf.digest_length);
+        try self.generateRecordKeys(&self.secret.c_ap_keys, self.secret.c_ap_secret.slice());
+    }
+
+    pub fn updateServerSecrets(self: *Self) !void {
+        try self.hkdf.hkdfExpandLabel(self.secret.s_ap_secret.slice(), self.secret.s_ap_secret.slice(), "traffic upd", "", self.hkdf.digest_length);
+        try self.generateRecordKeys(&self.secret.s_ap_keys, self.secret.s_ap_secret.slice());
+    }
+
     fn generateRecordKeys(self: Self, record_keys: *Secret.RecordKeys, secret: []const u8) !void {
         try self.hkdf.hkdfExpandLabel(record_keys.key.slice(), secret, "key", "", self.aead.key_length);
         try self.hkdf.hkdfExpandLabel(record_keys.iv.slice(), secret, "iv", "", self.aead.nonce_length);

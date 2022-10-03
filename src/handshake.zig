@@ -8,6 +8,7 @@ const Certificate = @import("certificate.zig").Certificate;
 const CertificateVerify = @import("certificate_verify.zig").CertificateVerify;
 const Finished = @import("finished.zig").Finished;
 const NewSessionTicket = @import("new_session_ticket.zig").NewSessionTicket;
+const KeyUpdate = @import("key_update.zig").KeyUpdate;
 const MessageHash = @import("message_hash.zig").MessageHash;
 const Hkdf = @import("crypto.zig").Hkdf;
 
@@ -38,7 +39,7 @@ pub const HandshakeType = enum(u8) {
     // certificate_request = 13,
     certificate_verify = 15,
     finished = 20,
-    // key_update = 24,
+    key_update = 24,
     message_hash = 254,
 };
 
@@ -70,6 +71,7 @@ pub const Handshake = union(HandshakeType) {
     certificate: Certificate,
     certificate_verify: CertificateVerify,
     finished: Finished,
+    key_update: KeyUpdate,
     message_hash: MessageHash,
 
     const Self = @This();
@@ -103,6 +105,7 @@ pub const Handshake = union(HandshakeType) {
             } else {
                 return Error.HkdfNotSpecified;
             },
+            .key_update => return Self{ .key_update = try KeyUpdate.decode(reader) },
             else => unreachable,
         }
     }
@@ -131,6 +134,7 @@ pub const Handshake = union(HandshakeType) {
             .certificate => |e| len += try e.encode(writer),
             .certificate_verify => |e| len += try e.encode(writer),
             .finished => |e| len += try e.encode(writer),
+            .key_update => |e| len += try e.encode(writer),
             .message_hash => |e| len += try e.encode(writer),
             else => unreachable, // TODO: implement remaining.
         }
@@ -152,6 +156,7 @@ pub const Handshake = union(HandshakeType) {
             .certificate => |e| len += e.length(),
             .certificate_verify => |e| len += e.length(),
             .finished => |e| len += e.length(),
+            .key_update => |e| len += e.length(),
             .message_hash => |e| len += e.length(),
             else => unreachable, // TODO: implement remaining.
         }
@@ -171,6 +176,7 @@ pub const Handshake = union(HandshakeType) {
             .certificate => |e| e.deinit(),
             .certificate_verify => |e| e.deinit(),
             .finished => {},
+            .key_update => {},
             .message_hash => {},
         }
     }

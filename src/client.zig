@@ -551,7 +551,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 const t = self.reader.readEnum(ContentType, .Big) catch |err| {
                     switch (err) {
                         error.EndOfStream => return msg_stream.getWritten().len,
-                        //error.WouldBlock => return msg_stream.getWritten().len,
+                        error.WouldBlock => return msg_stream.getWritten().len,
                         else => return err,
                     }
                 };

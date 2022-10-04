@@ -38,6 +38,7 @@ const pre_shared_key = @import("pre_shared_key.zig");
 const PskKeyExchangeModes = @import("psk_key_exchange_modes.zig").PskKeyExchangeModes;
 const EarlyData = @import("early_data.zig").EarlyData;
 const KeyUpdate = @import("key_update.zig").KeyUpdate;
+const RecordSizeLimit = @import("record_size_limit.zig").RecordSizeLimit;
 
 const Content = @import("content.zig").Content;
 const ContentType = @import("content.zig").ContentType;
@@ -111,6 +112,14 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         // certificate
         signature_schems: ArrayList(signature_scheme.SignatureScheme),
         cert_pubkeys: ArrayList(x509.PublicKey),
+
+        // record size limitation
+        // RFC 8449 Section 4.  The "record_size_limit" Extension
+        // An endpoint that supports all record sizes can include any limit up
+        // to the protocol-defined limit for maximum record size.  For TLS 1.2
+        // and earlier, that limit is 2^14 octets.  TLS 1.3 uses a limit of
+        // 2^14+1 octets.
+        record_size_limit: u16 = 2 << 14,
 
         // Misc
         allocator: std.mem.Allocator,
@@ -505,16 +514,23 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         }
 
         pub fn send(self: *Self, b: []const u8) !usize {
-            const updated = try self.checkAndUpdateKey();
-            if (updated) {
-                std.log.debug("KeyUpdate updated_request has been sent", .{});
+            var cur_idx: usize = 0;
+            while (cur_idx < b.len) {
+                const updated = try self.checkAndUpdateKey();
+                if (updated) {
+                    std.log.debug("KeyUpdate updated_request has been sent", .{});
+                }
+
+                var end_idx = cur_idx + self.record_size_limit - self.ap_protector.getHeaderSize();
+                end_idx = if (end_idx >= b.len) b.len else end_idx;
+
+                const app_c = Content{ .application_data = try ApplicationData.initAsView(b[cur_idx..end_idx]) };
+                defer app_c.deinit();
+
+                _ = try self.ap_protector.encryptFromMessageAndWrite(app_c, self.allocator, self.writeBuffer.writer());
+                try self.writeBuffer.flush();
+                cur_idx = end_idx;
             }
-
-            const app_c = Content{ .application_data = try ApplicationData.initAsView(b) };
-            defer app_c.deinit();
-
-            _ = try self.ap_protector.encryptFromMessageAndWrite(app_c, self.allocator, self.writeBuffer.writer());
-            try self.writeBuffer.flush();
 
             return b.len;
         }
@@ -878,6 +894,15 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     self.early_data_ok = true;
                 }
             }
+
+            if (msg.getExtension(ee.extensions, .record_size_limit)) |rsl| {
+                const r = rsl.record_size_limit;
+                if (r.record_size_limit < 64) {
+                    return Error.IllegalParameter;
+                }
+                self.record_size_limit = r.record_size_limit;
+                std.log.info("recv record_size_limit={}", .{r.record_size_limit});
+            } else |_| {}
         }
 
         fn handleCertificate(self: *Self, cert: certificate.Certificate) !void {

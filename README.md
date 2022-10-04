@@ -160,6 +160,8 @@ pub fn main() !void {
 ## Priority: Low
 - [ ] Support Extensions.
    - [ ] record_size_limit
+     - [x] ClientSide
+     - [ ] ServerSide
    - [ ] application_layer_protocol_negotiation
    - [x] pks_key_exchange_modes
    - [ ] post_handshake_auth

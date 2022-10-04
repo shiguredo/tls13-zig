@@ -192,6 +192,23 @@ pub const RecordPayloadProtector = struct {
 
         return nonce;
     }
+
+    pub fn getHeaderSize(self: Self) usize {
+        var len: usize = 0;
+
+        // InnerPlainText
+        len += @sizeOf(u8); // contentType
+
+        // RecordPayloadProtector
+        len += self.aead.tag_length;
+
+        // CipherText
+        len += @sizeOf(u8); // contentType
+        len += @sizeOf(u16); // version
+        len += @sizeOf(u16); // encoding length
+
+        return len;
+    }
 };
 
 const Alert = @import("alert.zig").Alert;

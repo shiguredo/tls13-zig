@@ -47,8 +47,10 @@ func handleConnection(conn net.Conn) {
 		}
 		msg_len := binary.BigEndian.Uint32(buf)
 		msg := make([]byte, msg_len)
-		for i := 0; i < len(msg); i++ {
-			msg[i] = byte(i & 0xFF)
+		_, err = conn.Read(msg)
+		if err != nil {
+			log.Println(err)
+			return
 		}
 
 		_, err = conn.Write(buf)

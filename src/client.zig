@@ -145,6 +145,21 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             CannotSendEarlyData,
         };
 
+        // io.Reader, Writer
+        pub const ReadError = ErrorSetOf(Self.recv);
+        pub const WriteError = ErrorSetOf(Self.send);
+
+        pub const Reader = io.Reader(*Self, ReadError, recv);
+        pub const Writer = io.Writer(*Self, WriteError, send);
+
+        pub fn tlsReader(self: *Self) Reader {
+            return .{ .context = self };
+        }
+
+        pub fn tlsWriter(self: *Self) Writer {
+            return .{ .context = self };
+        }
+
         pub fn init(allocator: std.mem.Allocator) !Self {
             var session_id = try msg.SessionID.init(32);
             var msgs_bytes = try allocator.alloc(u8, 1024 * 32);

@@ -32,12 +32,14 @@ pub fn main() !void {
     tls_client.print_keys = true;
     try tls_client.connect("localhost", 8443);
 
-    var msg_len_bytes: [8]u8 = undefined;
     var recv_bytes = try allocator.alloc(u8, end_n);
     defer allocator.free(recv_bytes);
 
     var size: u64 = @intCast(u64, start_n);
     var idx: usize = 0;
+
+    const reader = tls_client.tlsReader();
+    const writer = tls_client.tlsWriter();
 
     while (size <= recv_bytes.len) : (size += 1) {
         if ((size - start_n) % 100 == 0) {
@@ -49,13 +51,11 @@ pub fn main() !void {
             recv_bytes[idx] = @intCast(u8, idx & 0xFF);
         }
 
-        std.mem.writeIntBig(u64, &msg_len_bytes, size);
-        _ = try tls_client.send(&msg_len_bytes);
-        _ = try tls_client.send(recv_bytes[0..size]);
+        try writer.writeIntBig(u64, size);
+        try writer.writeAll(recv_bytes[0..size]);
 
-        var recv_size = try tls_client.recv(recv_bytes[0..8]);
-        const msg_len = std.mem.readIntSliceBig(u64, recv_bytes[0..8]);
-        recv_size = try tls_client.recv(recv_bytes[0..size]);
+        const msg_len = try reader.readIntBig(u64);
+        const recv_size = try reader.readAll(recv_bytes[0..size]);
         if (msg_len != recv_size) {
             return Error.InvalidValue;
         }

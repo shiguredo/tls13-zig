@@ -105,7 +105,7 @@ do
     set +e
 
     # Let's test!
-    zig run src/test_stream.zig -O ReleaseSafe
+    zig run src/test_stream.zig -O ReleaseSafe --  1048000 1048576
     if [ $? -ne 0 ]; then
         echo "failed."
         pkill -SIGKILL server

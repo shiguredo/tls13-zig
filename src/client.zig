@@ -119,7 +119,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         // to the protocol-defined limit for maximum record size.  For TLS 1.2
         // and earlier, that limit is 2^14 octets.  TLS 1.3 uses a limit of
         // 2^14+1 octets.
-        record_size_limit: u16 = 2 << 14,
+        record_size_limit: u16 = 2 << 13,
 
         // Misc
         allocator: std.mem.Allocator,
@@ -494,7 +494,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             // ChaCha20/Poly1305, the record sequence number would wrap before the
             // safety limit is reached.
 
-            const limit_cnt: usize = 2 << 24;
+            const limit_cnt: usize = 2 << 23;
             if (self.ap_protector.enc_cnt > limit_cnt or self.ap_protector.dec_cnt > limit_cnt) {
                 const update = Content{ .handshake = Handshake{ .key_update = KeyUpdate{ .request_update = .update_requested } } };
                 defer update.deinit();
@@ -548,7 +548,9 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         if (read_size >= write_size) {
                             _ = try msg_stream.write(ap.content[ap.read_idx..(ap.read_idx + write_size)]);
                             ap.read_idx += write_size;
-                            try cs.*.insert(0, Content{ .application_data = ap });
+                            if (read_size != write_size) {
+                                try cs.*.insert(0, Content{ .application_data = ap });
+                            }
                             return b.len;
                         } else {
                             _ = try msg_stream.write(ap.content[ap.read_idx..]);

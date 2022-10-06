@@ -136,9 +136,9 @@ pub fn main() !void {
     - [x] ServerSide
 - [ ] Error handle
   - [ ] Send 'alert' when an error occur.
-- [ ] Support KeyUpdate.
+- [x] Support KeyUpdate.
   - [x] ClientSide
-  - [ ] ServerSide
+  - [x] ServerSide
 - [ ] Support NewSessionTicket.
   - [x] ClientSide
   - [ ] ServerSide

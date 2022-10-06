@@ -33,6 +33,7 @@ const NamedGroupList = @import("supported_groups.zig").NamedGroupList;
 const RecordPayloadProtector = @import("protector.zig").RecordPayloadProtector;
 const TLSPlainText = @import("tls_plain.zig").TLSPlainText;
 const TLSCipherText = @import("tls_cipher.zig").TLSCipherText;
+const KeyUpdate = @import("key_update.zig").KeyUpdate;
 
 const Content = @import("content.zig").Content;
 const ContentType = @import("content.zig").ContentType;
@@ -431,7 +432,40 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             std.log.info("handshake done", .{});
         }
 
+        fn checkAndUpdateKey(self: *Self) !bool {
+            // RFC8446 Section 5.5.  Limits on Key Usage
+            //
+            // For AES-GCM, up to 2^24.5 full-size records (about 24 million) may be
+            // encrypted on a given connection while keeping a safety margin of
+            // approximately 2^-57 for Authenticated Encryption (AE) security.  For
+            // ChaCha20/Poly1305, the record sequence number would wrap before the
+            // safety limit is reached.
+
+            const limit_cnt: usize = 2 << 23;
+            if (self.ap_protector.enc_cnt > limit_cnt or self.ap_protector.dec_cnt > limit_cnt) {
+                const update = Content{ .handshake = Handshake{ .key_update = KeyUpdate{ .request_update = .update_requested } } };
+                defer update.deinit();
+
+                _ = try self.ap_protector.encryptFromMessageAndWrite(update, self.allocator, self.write_buffer.writer());
+                try self.write_buffer.flush();
+
+                // update encoding key(server key)
+                try self.ks.updateServerSecrets();
+                self.ap_protector.enc_keys = self.ks.secret.s_ap_keys;
+                self.ap_protector.enc_cnt = 0;
+
+                return true;
+            }
+
+            return false;
+        }
+
         pub fn send(self: *Self, b: []const u8) !usize {
+            const updated = try self.checkAndUpdateKey();
+            if (updated) {
+                std.log.debug("KeyUpdate updated_request has been sent", .{});
+            }
+
             const app_c = Content{ .application_data = try ApplicationData.initAsView(b) };
             defer app_c.deinit();
 
@@ -458,6 +492,41 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 defer plain_record.deinit();
 
                 if (plain_record.content_type != .application_data) {
+                    if (plain_record.content_type == .handshake) {
+                        const hs = (try plain_record.decodeContent(self.allocator, self.ks.hkdf)).handshake;
+                        switch (hs) {
+                            .key_update => |ku| {
+                                switch (ku.request_update) {
+                                    .update_not_requested => {
+                                        std.log.debug("received key update update_not_requested", .{});
+                                        // update decoding key(client key)
+                                        try self.ks.updateClientSecrets();
+                                        self.ap_protector.dec_keys = self.ks.secret.c_ap_keys;
+                                        self.ap_protector.dec_cnt = 0;
+                                    },
+                                    .update_requested => {
+                                        std.log.debug("received key update update_requested", .{});
+                                        // update decoding key(client key)
+                                        try self.ks.updateClientSecrets();
+                                        self.ap_protector.dec_keys = self.ks.secret.c_ap_keys;
+                                        self.ap_protector.dec_cnt = 0;
+
+                                        const update = Content{ .handshake = Handshake{ .key_update = KeyUpdate{ .request_update = .update_not_requested } } };
+                                        defer update.deinit();
+
+                                        _ = try self.ap_protector.encryptFromMessageAndWrite(update, self.allocator, self.write_buffer.writer());
+                                        try self.write_buffer.flush();
+
+                                        // update encoding key(server key)
+                                        try self.ks.updateServerSecrets();
+                                        self.ap_protector.enc_keys = self.ks.secret.s_ap_keys;
+                                        self.ap_protector.enc_cnt = 0;
+                                    },
+                                }
+                            },
+                            else => continue,
+                        }
+                    }
                     continue;
                 }
 

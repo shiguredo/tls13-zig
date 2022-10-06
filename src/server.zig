@@ -47,9 +47,11 @@ const rsa = @import("rsa.zig");
 pub const TLSServerTCP = TLSServerImpl(net.Stream.Reader, net.Stream.Writer, true);
 
 pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, comptime is_tcp: bool) type {
+    _ = ReaderType;
+    _ = WriterType;
     return struct {
         // io
-        tcp_server: net.StreamServer = undefined,
+        tcp_listener: ?std.x.net.tcp.Listener = null,
 
         // host
         host: []u8 = &([_]u8{}),
@@ -118,10 +120,17 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 std.mem.copy(u8, res.host, h);
             }
 
+            if (is_tcp) {
+                res.tcp_listener = try std.x.net.tcp.Listener.init(.ip, .{});
+            }
+
             return res;
         }
 
         pub fn deinit(self: Self) void {
+            if (self.tcp_listener) |tl| {
+                tl.deinit();
+            }
             if (self.host.len != 0) {
                 self.allocator.free(self.host);
             }
@@ -133,36 +142,41 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         pub fn listen(self: *Self, port: u16) !void {
             if (is_tcp) {
-                self.tcp_server = net.StreamServer.init(.{
-                    .reuse_address = true,
-                });
-                const addr = try net.Address.parseIp("0.0.0.0", port);
-                try self.tcp_server.listen(addr);
+                const addr = std.x.os.IPv4{
+                    .octets = [_]u8{ 0, 0, 0, 0 },
+                };
+                try self.tcp_listener.?.bind(std.x.net.ip.Address.initIPv4(addr, port));
+                try self.tcp_listener.?.listen(10);
             }
         }
 
-        pub fn accept(self: *Self) !TLSStreamImpl(ReaderType, WriterType, is_tcp) {
-            var conn = try self.tcp_server.accept();
+        pub fn accept(self: *Self) !TLSStreamTCP {
+            var conn = try self.tcp_listener.?.accept(.{});
             std.log.info("accept remote_addr={}", .{conn.address});
-            var stream = try TLSStreamImpl(ReaderType, WriterType, is_tcp).init(self.*, conn, self.allocator);
+            var stream = try TLSStreamTCP.init(self.*, conn, self.allocator);
             return stream;
         }
     };
 }
 
-pub const TLSStreamTCP = TLSStreamImpl(net.Stream.Reader, net.Stream.Writer, true);
+pub fn ErrorSetOf(comptime Function: anytype) type {
+    return @typeInfo(@typeInfo(@TypeOf(Function)).Fn.return_type.?).ErrorUnion.error_set;
+}
 
-pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, comptime is_tcp: bool) type {
+const Client = std.x.net.tcp.Client;
+
+pub const TLSStreamTCP = TLSStreamImpl(io.Reader(Client.Reader, ErrorSetOf(Client.Reader.read), Client.Reader.read), io.Writer(Client.Writer, ErrorSetOf(Client.Writer.write), Client.Writer.write), TLSServerTCP, true);
+
+pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, comptime TLSServerType: type, comptime is_tcp: bool) type {
     return struct {
         // server
-        const TLSServer = TLSServerImpl(ReaderType, WriterType, is_tcp);
-        tls_server: TLSServer,
+        tls_server: TLSServerType,
 
         // io
         reader: ReaderType,
         writer: WriterType,
         write_buffer: io.BufferedWriter(4096, WriterType),
-        tcp_conn: ?net.StreamServer.Connection = null,
+        tcp_conn: ?std.x.net.tcp.Connection = null,
 
         // session related
         random: [32]u8,
@@ -214,7 +228,22 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             UnknownServerName,
         };
 
-        pub fn init(server: TLSServer, tcp_conn: net.StreamServer.Connection, allocator: std.mem.Allocator) !Self {
+        // io.Reader, Writer
+        pub const ReadError = ErrorSetOf(Self.recv);
+        pub const WriteError = ErrorSetOf(Self.send);
+
+        pub const Reader = io.Reader(*Self, ReadError, recv);
+        pub const Writer = io.Writer(*Self, WriteError, send);
+
+        pub fn tlsReader(self: *Self) Reader {
+            return .{ .context = self };
+        }
+
+        pub fn tlsWriter(self: *Self) Writer {
+            return .{ .context = self };
+        }
+
+        pub fn init(server: TLSServerType, tcp_conn: std.x.net.tcp.Connection, allocator: std.mem.Allocator) !Self {
             if (!is_tcp) {
                 return Error.NotTCP;
             }
@@ -230,9 +259,9 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
             var res = Self{
                 .tls_server = server,
-                .reader = tcp_conn.stream.reader(),
-                .writer = tcp_conn.stream.writer(),
-                .write_buffer = io.bufferedWriter(tcp_conn.stream.writer()),
+                .reader = tcp_conn.client.reader(0),
+                .writer = tcp_conn.client.writer(0),
+                .write_buffer = io.bufferedWriter(tcp_conn.client.writer(0)),
                 .tcp_conn = tcp_conn,
                 .random = rand,
                 .session_id = undefined,
@@ -254,7 +283,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         pub fn deinit(self: Self) void {
             if (self.tcp_conn) |c| {
-                c.stream.close();
+                c.deinit();
             }
             self.allocator.free(self.msgs_bytes);
         }
@@ -543,7 +572,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
         pub fn close(self: *Self) void {
             defer {
                 if (self.tcp_conn) |c| {
-                    c.stream.close();
+                    c.deinit();
                     self.tcp_conn = null;
                     std.log.debug("tcp connection closed", .{});
                 }

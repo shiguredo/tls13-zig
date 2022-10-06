@@ -43,7 +43,7 @@ pub fn main() !void {
             log.info("HTTP GET received", .{});
             const http_res = "HTTP/1.0 200 ok\r\nContent-type: text/html\r\n\r\n<HTML><BODY>tls13-zig</BODY></HTML>";
             // send contents
-            _ = try con.send(http_res);
+            try con.tlsWriter().writeAll(http_res);
         }
 
         return;

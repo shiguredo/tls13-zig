@@ -34,6 +34,7 @@ const RecordPayloadProtector = @import("protector.zig").RecordPayloadProtector;
 const TLSPlainText = @import("tls_plain.zig").TLSPlainText;
 const TLSCipherText = @import("tls_cipher.zig").TLSCipherText;
 const KeyUpdate = @import("key_update.zig").KeyUpdate;
+const RecordSizeLimit = @import("record_size_limit.zig").RecordSizeLimit;
 
 const Content = @import("content.zig").Content;
 const ContentType = @import("content.zig").ContentType;
@@ -61,6 +62,14 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
         cert_key: x509.PrivateKey,
 
         ca_cert: ?certificate.CertificateEntry = null,
+
+        // record size limitation
+        // RFC 8449 Section 4.  The "record_size_limit" Extension
+        // An endpoint that supports all record sizes can include any limit up
+        // to the protocol-defined limit for maximum record size.  For TLS 1.2
+        // and earlier, that limit is 2^14 octets.  TLS 1.3 uses a limit of
+        // 2^14+1 octets.
+        record_size_limit: u16 = 2 << 13,
 
         // Misc
         allocator: std.mem.Allocator,
@@ -182,6 +191,9 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
         random: [32]u8,
         session_id: msg.SessionID,
 
+        // buffer for received contents
+        recv_contents: ?ArrayList(Content) = null,
+
         // hello retry request
         already_sent_hrr: bool = false,
 
@@ -257,6 +269,9 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             var secp256r1_priv_key: [P256.SecretKey.encoded_length]u8 = undefined;
             random.bytes(secp256r1_priv_key[0..]);
 
+            // configure receive timeout
+            try tcp_conn.client.setReadTimeout(2000);
+
             var res = Self{
                 .tls_server = server,
                 .reader = tcp_conn.client.reader(0),
@@ -284,6 +299,12 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
         pub fn deinit(self: Self) void {
             if (self.tcp_conn) |c| {
                 c.deinit();
+            }
+            if (self.recv_contents) |cs| {
+                for (cs.items) |c| {
+                    c.deinit();
+                }
+                cs.deinit();
             }
             self.allocator.free(self.msgs_bytes);
         }
@@ -490,25 +511,64 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
         }
 
         pub fn send(self: *Self, b: []const u8) !usize {
-            const updated = try self.checkAndUpdateKey();
-            if (updated) {
-                std.log.debug("KeyUpdate updated_request has been sent", .{});
+            var cur_idx: usize = 0;
+            while (cur_idx < b.len) {
+                const updated = try self.checkAndUpdateKey();
+                if (updated) {
+                    std.log.debug("KeyUpdate updated_request has been sent", .{});
+                }
+
+                var end_idx = cur_idx + self.tls_server.record_size_limit - self.ap_protector.getHeaderSize();
+                end_idx = if (end_idx >= b.len) b.len else end_idx;
+
+                const app_c = Content{ .application_data = try ApplicationData.initAsView(b[cur_idx..end_idx]) };
+                defer app_c.deinit();
+
+                _ = try self.ap_protector.encryptFromMessageAndWrite(app_c, self.allocator, self.write_buffer.writer());
+                try self.write_buffer.flush();
+                cur_idx = end_idx;
             }
-
-            const app_c = Content{ .application_data = try ApplicationData.initAsView(b) };
-            defer app_c.deinit();
-
-            _ = try self.ap_protector.encryptFromMessageAndWrite(app_c, self.allocator, self.write_buffer.writer());
-            try self.write_buffer.flush();
 
             return b.len;
         }
 
         pub fn recv(self: *Self, b: []u8) !usize {
-            var ap_recv = false;
             var msg_stream = io.fixedBufferStream(b);
-            while (!ap_recv) {
-                const t = try self.reader.readEnum(ContentType, .Big);
+            while ((try msg_stream.getEndPos()) != (try msg_stream.getPos())) {
+                // writing application_data contents into buffer/
+                if (self.recv_contents) |*cs| {
+                    while (cs.items.len != 0) {
+                        var ap = cs.*.orderedRemove(0).application_data;
+                        const read_size = ap.content.len - ap.read_idx;
+                        const write_size = try msg_stream.getEndPos() - try msg_stream.getPos();
+                        if (read_size >= write_size) {
+                            _ = try msg_stream.write(ap.content[ap.read_idx..(ap.read_idx + write_size)]);
+                            ap.read_idx += write_size;
+                            if (read_size != write_size) {
+                                try cs.*.insert(0, Content{ .application_data = ap });
+                            }
+                            return b.len;
+                        } else {
+                            _ = try msg_stream.write(ap.content[ap.read_idx..]);
+                            ap.deinit();
+                        }
+                    }
+                    cs.deinit();
+                    self.recv_contents = null;
+                }
+
+                const updated = try self.checkAndUpdateKey();
+                if (updated) {
+                    std.log.debug("KeyUpdate updated_request has been sent", .{});
+                }
+
+                const t = self.reader.readEnum(ContentType, .Big) catch |err| {
+                    switch (err) {
+                        error.EndOfStream => return msg_stream.getWritten().len,
+                        error.WouldBlock => return msg_stream.getWritten().len,
+                        else => return err,
+                    }
+                };
                 if (t != .application_data) {
                     // TODO: error
                     std.log.warn("unexpected message type={s}", .{@tagName(t)});
@@ -559,11 +619,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     continue;
                 }
 
-                const content = try plain_record.decodeContent(self.allocator, self.ks.hkdf);
-                defer content.deinit();
-                // TODO: handle oversized content
-                _ = try msg_stream.write(content.application_data.content);
-                ap_recv = true;
+                self.recv_contents = try plain_record.decodeContents(self.allocator, self.ks.hkdf);
             }
 
             return msg_stream.getWritten().len;
@@ -742,7 +798,14 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
         }
 
         fn sendEncryptedExtensions(self: *Self) !void {
-            const ee = EncryptedExtensions.init(self.allocator);
+            var ee = EncryptedExtensions.init(self.allocator);
+
+            // TODO: validate size
+            if (self.tls_server.record_size_limit != (2 << 13)) {
+                const rsl = RecordSizeLimit{ .record_size_limit = self.tls_server.record_size_limit };
+                try ee.extensions.append(.{ .record_size_limit = rsl });
+            }
+
             const cont_ee = Content{ .handshake = .{ .encrypted_extensions = ee } };
             defer cont_ee.deinit();
             _ = try cont_ee.encode(self.msgs_stream.writer());

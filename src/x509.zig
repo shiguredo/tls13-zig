@@ -1168,6 +1168,14 @@ pub const PrivateKeyType = enum(u8) {
 pub const PrivateKey = union(PrivateKeyType) {
     rsa: RSAPrivateKey,
     ec: ECPrivateKey,
+
+    const Self = @This();
+    pub fn deinit(self: Self) void {
+        switch (self) {
+            .rsa => |r| r.deinit(),
+            .ec => |e| e.deinit(),
+        }
+    }
 };
 
 // RFC5915 Section3 Eppliptic Curve Private KEy Format

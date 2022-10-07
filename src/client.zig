@@ -558,6 +558,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 if (self.recv_contents) |*cs| {
                     while (cs.items.len != 0) {
                         var ap = cs.*.orderedRemove(0).application_data;
+                        errdefer ap.deinit();
                         const read_size = ap.content.len - ap.read_idx;
                         const write_size = try msg_stream.getEndPos() - try msg_stream.getPos();
                         if (read_size >= write_size) {
@@ -566,6 +567,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                             if (read_size != write_size) {
                                 try cs.*.insert(0, Content{ .application_data = ap });
                             }
+                            ap.deinit();
                             return b.len;
                         } else {
                             _ = try msg_stream.write(ap.content[ap.read_idx..]);

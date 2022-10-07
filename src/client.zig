@@ -674,6 +674,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     switch (err) {
                         // sometimes the tcp connection is closed after sending close_notify.
                         error.EndOfStream => return,
+                        error.WouldBlock => return,
                         else => return err,
                     }
                 };

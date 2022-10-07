@@ -566,8 +566,9 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                             ap.read_idx += write_size;
                             if (read_size != write_size) {
                                 try cs.*.insert(0, Content{ .application_data = ap });
+                            } else {
+                                ap.deinit();
                             }
-                            ap.deinit();
                             return b.len;
                         } else {
                             _ = try msg_stream.write(ap.content[ap.read_idx..]);

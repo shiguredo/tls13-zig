@@ -1,5 +1,13 @@
 #!/bin/bash
 
+function cleanup() {
+    pkill -SIGKILL server
+    kill $ZIG_SERVER_PID
+    echo "exit"
+}
+
+trap cleanup EXIT
+
 TEST_CIPHER_SUITES=(
     "TLS_AES_128_GCM_SHA256"
     "TLS_AES_256_GCM_SHA384"
@@ -33,7 +41,6 @@ do
     zig run src/test_stream.zig -O ReleaseSafe -- 1038000 1048576
     if [ $? -ne 0 ]; then
         echo "failed."
-        pkill -SIGKILL server
         exit 1
     fi
     echo "OK."
@@ -44,3 +51,23 @@ do
 
     sleep 1
 done
+
+zig run src/test_stream_server.zig &
+ZIG_SERVER_PID=$!
+
+cd test
+
+set +e
+
+# wait for server becoming ready
+until nc -z localhost 8443; do sleep 1; done
+
+# Let's test!
+./go/client  1048000 1048576
+if [ $? -ne 0 ]; then
+    echo "failed."
+    exit 1
+fi
+echo "OK."
+
+set -e

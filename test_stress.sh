@@ -1,6 +1,7 @@
 #!/bin/bash
 
 function cleanup() {
+    set +e
     pkill -SIGKILL server
     echo "exit"
 }

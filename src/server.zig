@@ -144,6 +144,7 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 self.allocator.free(self.host);
             }
             self.cert.deinit();
+            self.cert_key.deinit();
             if (self.ca_cert) |c| {
                 c.deinit();
             }
@@ -466,6 +467,12 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     }
 
                     const hss = try p_record.decodeContents(self.allocator, self.ks.hkdf);
+                    defer {
+                        for (hss.items) |h| {
+                            h.deinit();
+                        }
+                        hss.deinit();
+                    }
                     for (hss.items) |h| {
                         if (h.handshake != .finished) {
                             std.log.warn("unexpected message type={s}", .{@tagName(h.handshake)});

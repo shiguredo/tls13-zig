@@ -52,7 +52,7 @@ do
     sleep 1
 done
 
-zig run src/test_stream_server.zig &
+zig run src/test_stream_server.zig -O ReleaseSafe &
 ZIG_SERVER_PID=$!
 
 cd test

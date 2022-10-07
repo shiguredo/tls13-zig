@@ -1,12 +1,15 @@
 const std = @import("std");
 const log = std.log;
-const allocator = std.heap.page_allocator;
 const key = @import("key.zig");
 const PskIdentity = @import("pre_shared_key.zig").PskIdentity;
 
 const client = @import("client.zig");
 
 pub fn main() !void {
+    try do(std.heap.page_allocator);
+}
+
+fn do(allocator: std.mem.Allocator) !void {
     log.info("started.", .{});
     var tls_client = try client.TLSClientTCP.init(allocator);
     defer tls_client.deinit();
@@ -43,4 +46,8 @@ pub fn main() !void {
     log.info("finished.", .{});
 
     return;
+}
+
+test "e2e with early_data" {
+    try do(std.testing.allocator);
 }

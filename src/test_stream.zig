@@ -1,6 +1,5 @@
 const std = @import("std");
 const log = std.log;
-const allocator = std.heap.page_allocator;
 const assert = std.debug.assert;
 
 const client = @import("client.zig");
@@ -26,6 +25,10 @@ fn get_arg(idx: usize) !usize {
 pub fn main() !void {
     const start_n = try get_arg(1);
     const end_n = try get_arg(2);
+    try do(start_n, end_n, std.heap.page_allocator);
+}
+
+fn do(start_n: usize, end_n: usize, allocator: std.mem.Allocator) !void {
     log.info("started. start={} end={}", .{ start_n, end_n });
     var tls_client = try client.TLSClientTCP.init(allocator);
     defer tls_client.deinit();
@@ -43,7 +46,7 @@ pub fn main() !void {
 
     while (size <= recv_bytes.len) : (size += 1) {
         if ((size - start_n) % 100 == 0) {
-            std.log.info("size = {}", .{size});
+            std.log.warn("size = {}", .{size});
         }
 
         idx = 0;
@@ -72,4 +75,8 @@ pub fn main() !void {
     try tls_client.close();
 
     return;
+}
+
+test "stream" {
+    try do(1048000, 1048576, std.testing.allocator);
 }

@@ -41,7 +41,7 @@ do
         set +e
 
         # Let's test!
-        NUM_OF_OK=`zig run src/main_test.zig  2>&1 | grep "HTTP/1.0 200 ok" | wc -l`
+        NUM_OF_OK=`zig test src/main_test.zig --test-filter 'e2e with early_data'  2>&1 | grep "HTTP/1.0 200 ok" | wc -l`
         if [ $? -ne 0 ]; then
             echo "failed."
             pkill -SIGKILL openssl
@@ -76,7 +76,7 @@ do
     set +e
 
     # Let's test!
-    zig run src/main_test_0rtt.zig 
+    zig test src/main_test_0rtt.zig --test-filter 'e2e with 0rtt'
     if [ $? -ne 0 ]; then
         echo "failed."
         pkill -SIGKILL openssl
@@ -105,7 +105,7 @@ do
     set +e
 
     # Let's test!
-    zig run src/test_stream.zig -O ReleaseSafe --  1048000 1048576
+    zig test src/test_stream.zig --test-filter "stream"
     if [ $? -ne 0 ]; then
         echo "failed."
         pkill -SIGKILL server

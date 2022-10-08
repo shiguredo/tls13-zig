@@ -21,7 +21,7 @@ fn do(allocator: std.mem.Allocator) !void {
 
     var recv_bytes: [4096]u8 = undefined;
     var recv_size = try tls_client.recv(&recv_bytes);
-    log.info("RECV=\n {s}", .{recv_bytes[0..recv_size]});
+    log.warn("RECV=\n {s}", .{recv_bytes[0..recv_size]});
 
     try tls_client.close();
     log.info("finished.", .{});
@@ -40,7 +40,7 @@ fn do(allocator: std.mem.Allocator) !void {
     try tls_client_res.connect("localhost", 8443);
 
     recv_size = try tls_client_res.recv(&recv_bytes);
-    log.info("RECV=\n {s}", .{recv_bytes[0..recv_size]});
+    log.warn("RECV=\n {s}", .{recv_bytes[0..recv_size]});
 
     try tls_client_res.close();
     log.info("finished.", .{});

@@ -8,6 +8,10 @@ const server = @import("server.zig");
 
 pub fn main() !void {
     log.info("started.", .{});
+    // key and certificate need to be der-formatted.
+    // Especially, RSAPrivateKey need to be PKCS#1.
+    // To convert PEM key, use 'openssl rsa -outform der -in key.pem -out key.der -traditional'
+    // Currently, only one CA certificate is supported.
     var tls_server = try server.TLSServerTCP.init("./test-certs/key.der", .rsa, "./test-certs/cert.der", "./test-certs/chain.der", "tls13.pibvt.net", allocator);
     defer tls_server.deinit();
     tls_server.print_keys = true;
@@ -34,7 +38,7 @@ pub fn main() !void {
 
         var fds: [2]std.os.pollfd = undefined;
         fds[0] = .{
-            .fd = con.tcp_conn.?.stream.handle,
+            .fd = con.tcp_conn.?.client.socket.fd,
             .events = std.os.POLL.IN,
             .revents = undefined,
         };

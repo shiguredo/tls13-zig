@@ -1,13 +1,5 @@
 #!/bin/bash
 
-function cleanup() {
-    set +e
-    pkill -SIGKILL server
-    echo "exit"
-}
-
-trap cleanup EXIT
-
 TEST_CIPHER_SUITES=(
     "TLS_AES_128_GCM_SHA256"
     "TLS_AES_256_GCM_SHA384"
@@ -19,6 +11,11 @@ if [ $# == 1 ]; then
 fi
 
 set -eux
+
+TMP_FIFO="/tmp/tls13-zig"
+rm -rf $TMP_FIFO
+
+mkfifo $TMP_FIFO
 
 cd $(dirname $0)
 
@@ -42,9 +39,10 @@ do
     set +e
 
     # Let's test!
-    zig run src/test_stream.zig -O ReleaseSafe -- 1038000 1048576
+    zig test src/test_stream.zig --test-filter "stream"
     if [ $? -ne 0 ]; then
         echo "failed."
+        pkill -SIGKILL server
         exit 1
     fi
     echo "OK."
@@ -55,3 +53,6 @@ do
 
     sleep 1
 done
+
+
+rm -rf $TMP_FIFO

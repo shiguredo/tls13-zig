@@ -133,13 +133,9 @@ pub fn main() !void {
 # TODO
 ## Priority: High
 - [x] Support HelloRetryRequest.
-    - [x] ClientSide
-    - [x] ServerSide
 - [ ] Error handle
   - [ ] Send 'alert' when an error occur.
 - [x] Support KeyUpdate.
-  - [x] ClientSide
-  - [x] ServerSide
 - [ ] Support NewSessionTicket.
   - [x] ClientSide
   - [ ] ServerSide
@@ -160,9 +156,7 @@ pub fn main() !void {
 
 ## Priority: Low
 - [ ] Support Extensions.
-   - [ ] record_size_limit
-     - [x] ClientSide
-     - [ ] ServerSide
+   - [x] record_size_limit
    - [ ] application_layer_protocol_negotiation
    - [x] pks_key_exchange_modes
    - [ ] post_handshake_auth

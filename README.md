@@ -91,6 +91,7 @@ pub fn main() !void {
 
     // Enable KEYLOG output.
     tls_server.print_keys = true;
+    tls_server.record_size_limit = 2 << 12;
 
     try tls_server.listen(8443);
     while (true) {
@@ -119,7 +120,7 @@ pub fn main() !void {
             log.info("HTTP GET received", .{});
             const http_res = "HTTP/1.0 200 ok\r\nContent-type: text/html\r\n\r\n<HTML><BODY>tls13-zig</BODY></HTML>";
             // send contents
-            _ = try con.send(http_res);
+            try con.tlsWriter().writeAll(http_res);
         }
 
         return;
@@ -188,6 +189,7 @@ This sample works on [tls13.pibvt.net](https://tls13.pibvt.net)
 const std = @import("std");
 const log = std.log;
 const net = std.net;
+const io = std.io;
 const allocator = std.heap.page_allocator;
 
 const server = @import("server.zig");
@@ -200,24 +202,22 @@ pub fn main() !void {
     // Currently, only one CA certificate is supported.
     var tls_server = try server.TLSServerTCP.init("./test-certs/key.der", .rsa, "./test-certs/cert.der", "./test-certs/chain.der", "tls13.pibvt.net", allocator);
     defer tls_server.deinit();
-
-    // Enable KEYLOG output.
     tls_server.print_keys = true;
     try tls_server.listen(8443);
     while (true) {
         var con = try tls_server.accept();
         const fork_pid = std.os.fork() catch {
-            log.err("fork failed", .{});
+            std.log.err("fork failed", .{});
             return;
         };
         if (fork_pid != 0) {
             continue;
         }
-        log.debug("forked", .{});
+        std.log.debug("forked", .{});
 
         defer {
             con.close();
-            log.info("connection closed", .{});
+            std.log.info("connection closed", .{});
         }
         try con.handshake();
 
@@ -226,7 +226,7 @@ pub fn main() !void {
 
         var fds: [2]std.os.pollfd = undefined;
         fds[0] = .{
-            .fd = con.tcp_conn.?.stream.handle,
+            .fd = con.tcp_conn.?.client.socket.fd,
             .events = std.os.POLL.IN,
             .revents = undefined,
         };

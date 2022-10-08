@@ -3,6 +3,7 @@
 set -eux
 
 function cleanup() {
+    set +e
     kill $ZIG_SERVER_PID
     echo "exit"
 }
@@ -49,7 +50,7 @@ fi
 
 kill -SIGKILL $ZIG_SERVER_PID
 
-zig run src/test_stream_server.zig &
+zig test src/test_stream_server.zig --test-filter 'stream' &
 ZIG_SERVER_PID=$!
 
 cd test

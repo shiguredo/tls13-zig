@@ -1,6 +1,7 @@
 #!/bin/bash
 
 function cleanup() {
+    set +e
     kill $ZIG_SERVER_PID
     echo "exit"
 }

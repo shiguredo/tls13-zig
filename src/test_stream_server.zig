@@ -1,10 +1,12 @@
 const std = @import("std");
 const log = std.log;
-const allocator = std.heap.page_allocator;
-
 const server = @import("server.zig");
 
 pub fn main() !void {
+    try do(std.heap.page_allocator);
+}
+
+fn do(allocator: std.mem.Allocator) !void {
     log.info("started.", .{});
 
     // key and certificates need to be der-formatted.
@@ -21,20 +23,18 @@ pub fn main() !void {
     var buf: [32768]u8 = undefined;
     while (true) {
         var con = try tls_server.accept();
-        const fork_pid = std.os.fork() catch {
-            log.err("fork failed", .{});
-            return;
-        };
-        if (fork_pid != 0) {
-            continue;
-        }
-        log.debug("forked", .{});
-
         defer {
             con.close();
             log.info("connection closed", .{});
+            con.deinit();
         }
-        try con.handshake();
+
+        con.handshake() catch |err| {
+            switch (err) {
+                error.EndOfStream => continue,
+                else => return err,
+            }
+        };
 
         while (true) {
             const msg_len = con.tlsReader().readIntBig(u64) catch |err| {
@@ -63,4 +63,8 @@ pub fn main() !void {
     }
 
     return;
+}
+
+test "stream" {
+    try do(std.testing.allocator);
 }

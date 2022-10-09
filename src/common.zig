@@ -105,7 +105,7 @@ pub fn ReadEngine(comptime Entity: type, comptime et: EntityType) type {
         pub fn read(self: *Self, b: []u8) !usize {
             var msg_stream = io.fixedBufferStream(b);
 
-            while ((try msg_stream.getPos()) == 0) {
+            while (true) {
                 // writing application_data contents into buffer/
                 if (self.recv_contents) |*cs| {
                     while (cs.items.len != 0) {
@@ -129,6 +129,10 @@ pub fn ReadEngine(comptime Entity: type, comptime et: EntityType) type {
                     }
                     cs.deinit();
                     self.recv_contents = null;
+                }
+
+                if ((try msg_stream.getPos()) != 0) {
+                    return try msg_stream.getPos();
                 }
 
                 const updated = try checkAndUpdateKey(&self.entity.ap_protector, &self.entity.ks, &self.entity.write_buffer, self.entity.allocator, et);

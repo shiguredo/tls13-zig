@@ -64,7 +64,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         io_init: bool = false,
         reader: ReaderType = undefined,
         writer: WriterType = undefined,
-        writeBuffer: io.BufferedWriter(4096, WriterType) = undefined,
+        write_buffer: io.BufferedWriter(4096, WriterType) = undefined,
         tcp_client: ?std.x.net.tcp.Client = null,
 
         // session related
@@ -74,9 +74,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         // engines
         write_engine: common.WriteEngine(io.BufferedWriter(4096, WriterType), .client) = undefined,
-
-        // buffer for receive
-        recv_contents: ?ArrayList(Content) = null,
+        read_engine: ?common.ReadEngine(Self, .server) = null,
 
         // message buffer for KeySchedule
         msgs_bytes: []u8,
@@ -225,11 +223,8 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         pub fn deinit(self: Self) void {
             self.allocator.free(self.msgs_bytes);
-            if (self.recv_contents) |cs| {
-                for (cs.items) |c| {
-                    c.deinit();
-                }
-                cs.deinit();
+            if (self.read_engine) |re| {
+                re.deinit();
             }
             for (self.cert_pubkeys.items) |c| {
                 c.deinit();
@@ -409,7 +404,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 return Error.IoNotConfigured;
             }
 
-            self.writeBuffer = io.bufferedWriter(self.writer);
+            self.write_buffer = io.bufferedWriter(self.writer);
 
             self.state = .SEND_CH;
             self.msgs_stream.reset();
@@ -427,7 +422,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
                     const record_ch = TLSPlainText{ .content = Content{ .handshake = hs_ch } };
                     defer record_ch.deinit();
-                    _ = try record_ch.encode(self.writeBuffer.writer());
+                    _ = try record_ch.encode(self.write_buffer.writer());
 
                     // Sending EarlyData if this is first flight.(not received HRR)
                     if (self.early_data.len != 0 and !self.already_recv_hrr) {
@@ -436,7 +431,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         const app_c = Content{ .application_data = try ApplicationData.initAsView(self.early_data) };
                         defer app_c.deinit();
 
-                        _ = try self.early_protector.encryptFromMessageAndWrite(app_c, self.allocator, self.writeBuffer.writer());
+                        _ = try self.early_protector.encryptFromMessageAndWrite(app_c, self.allocator, self.write_buffer.writer());
                         if (self.print_keys) {
                             std.debug.print("CLIENT_EARLY_TRAFFIC_SECRET {} {}\n", .{ std.fmt.fmtSliceHexLower(&self.random), &std.fmt.fmtSliceHexLower(self.ks.secret.c_early_ap_secret.slice()) });
                         }
@@ -480,14 +475,14 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         }
 
                         if (plain_record.content_type == .handshake) {
-                            try self.handleHandshakeInnerPlaintext(plain_record, self.writeBuffer.writer());
+                            try self.handleHandshakeInnerPlaintext(plain_record, self.write_buffer.writer());
                         } else {
                             unreachable;
                         }
                     }
                 }
 
-                try self.writeBuffer.flush();
+                try self.write_buffer.flush();
             }
 
             if (self.print_keys) {
@@ -497,9 +492,13 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             self.write_engine = .{
                 .protector = &self.ap_protector,
                 .ks = &self.ks,
-                .write_buffer = &self.writeBuffer,
+                .write_buffer = &self.write_buffer,
                 .allocator = self.allocator,
                 .record_size_limit = self.record_size_limit,
+            };
+
+            self.read_engine = .{
+                .entity = self,
             };
 
             // if early_data is not accepted, send early_data after connected.
@@ -517,106 +516,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         }
 
         pub fn recv(self: *Self, b: []u8) !usize {
-            var msg_stream = io.fixedBufferStream(b);
-
-            while ((try msg_stream.getEndPos()) != (try msg_stream.getPos())) {
-                // writing application_data contents into buffer/
-                if (self.recv_contents) |*cs| {
-                    while (cs.items.len != 0) {
-                        var ap = cs.*.orderedRemove(0).application_data;
-                        errdefer ap.deinit();
-                        const read_size = ap.content.len - ap.read_idx;
-                        const write_size = try msg_stream.getEndPos() - try msg_stream.getPos();
-                        if (read_size >= write_size) {
-                            _ = try msg_stream.write(ap.content[ap.read_idx..(ap.read_idx + write_size)]);
-                            ap.read_idx += write_size;
-                            if (read_size != write_size) {
-                                try cs.*.insert(0, Content{ .application_data = ap });
-                            } else {
-                                ap.deinit();
-                            }
-                            return b.len;
-                        } else {
-                            _ = try msg_stream.write(ap.content[ap.read_idx..]);
-                            ap.deinit();
-                        }
-                    }
-                    cs.deinit();
-                    self.recv_contents = null;
-                }
-
-                const updated = try common.checkAndUpdateKey(&self.ap_protector, &self.ks, &self.writeBuffer, self.allocator, .client);
-                if (updated) {
-                    std.log.debug("KeyUpdate updated_request has been sent", .{});
-                }
-
-                const t = self.reader.readEnum(ContentType, .Big) catch |err| {
-                    switch (err) {
-                        error.EndOfStream => return msg_stream.getWritten().len,
-                        error.WouldBlock => return msg_stream.getWritten().len,
-                        else => return err,
-                    }
-                };
-                if (t != .application_data) {
-                    // TODO: error
-                    std.log.err("ERROR!!!", .{});
-                    continue;
-                }
-                const recv_record = try TLSCipherText.decode(self.reader, t, self.allocator);
-                defer recv_record.deinit();
-
-                const plain_record = try self.ap_protector.decrypt(recv_record, self.allocator);
-                defer plain_record.deinit();
-
-                if (plain_record.content_type != .application_data) {
-                    if (plain_record.content_type == .handshake) {
-                        const hs = (try plain_record.decodeContent(self.allocator, self.ks.hkdf)).handshake;
-                        switch (hs) {
-                            .new_session_ticket => |nst| {
-                                if (self.session_ticket) |st| {
-                                    st.deinit();
-                                }
-                                self.session_ticket = nst;
-                                try self.ks.generateResumptionMasterSecret(self.msgs_stream.getWritten(), nst.ticket_nonce.slice());
-                            },
-                            .key_update => |ku| {
-                                switch (ku.request_update) {
-                                    .update_not_requested => {
-                                        std.log.debug("received key update update_not_requested", .{});
-                                        // update decoding key(server key)
-                                        try self.ks.updateServerSecrets();
-                                        self.ap_protector.dec_keys = self.ks.secret.s_ap_keys;
-                                        self.ap_protector.dec_cnt = 0;
-                                    },
-                                    .update_requested => {
-                                        std.log.debug("received key update update_requested", .{});
-                                        // update decoding key(server key)
-                                        try self.ks.updateServerSecrets();
-                                        self.ap_protector.dec_keys = self.ks.secret.s_ap_keys;
-                                        self.ap_protector.dec_cnt = 0;
-
-                                        const update = Content{ .handshake = Handshake{ .key_update = KeyUpdate{ .request_update = .update_not_requested } } };
-                                        defer update.deinit();
-
-                                        _ = try self.ap_protector.encryptFromMessageAndWrite(update, self.allocator, self.writeBuffer.writer());
-                                        try self.writeBuffer.flush();
-
-                                        // update encoding key(clieny key)
-                                        try self.ks.updateClientSecrets();
-                                        self.ap_protector.enc_keys = self.ks.secret.c_ap_keys;
-                                        self.ap_protector.enc_cnt = 0;
-                                    },
-                                }
-                            },
-                            else => continue,
-                        }
-                    }
-                    continue;
-                }
-
-                self.recv_contents = try plain_record.decodeContents(self.allocator, self.ks.hkdf);
-            }
-            return msg_stream.getWritten().len;
+            return try self.read_engine.?.read(b);
         }
 
         pub fn close(self: *Self) !void {
@@ -633,9 +533,9 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             _ = try self.ap_protector.encryptFromMessageAndWrite(
                 close_notify,
                 self.allocator,
-                self.writeBuffer.writer(),
+                self.write_buffer.writer(),
             );
-            try self.writeBuffer.flush();
+            try self.write_buffer.flush();
 
             var close_recv = false;
             while (!close_recv) {

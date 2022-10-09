@@ -195,9 +195,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         // engines
         write_engine: common.WriteEngine(io.BufferedWriter(4096, WriterType), .server) = undefined,
-
-        // buffer for received contents
-        recv_contents: ?ArrayList(Content) = null,
+        read_engine: ?common.ReadEngine(Self, .server) = null,
 
         // hello retry request
         already_sent_hrr: bool = false,
@@ -305,11 +303,8 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             if (self.tcp_conn) |c| {
                 c.deinit();
             }
-            if (self.recv_contents) |cs| {
-                for (cs.items) |c| {
-                    c.deinit();
-                }
-                cs.deinit();
+            if (self.read_engine) |re| {
+                re.deinit();
             }
             self.allocator.free(self.msgs_bytes);
         }
@@ -498,6 +493,10 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 .record_size_limit = self.tls_server.record_size_limit,
             };
 
+            self.read_engine = .{
+                .entity = self,
+            };
+
             std.log.info("handshake done", .{});
         }
 
@@ -506,99 +505,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
         }
 
         pub fn recv(self: *Self, b: []u8) !usize {
-            var msg_stream = io.fixedBufferStream(b);
-            while ((try msg_stream.getEndPos()) != (try msg_stream.getPos())) {
-                // writing application_data contents into buffer/
-                if (self.recv_contents) |*cs| {
-                    while (cs.items.len != 0) {
-                        var ap = cs.*.orderedRemove(0).application_data;
-                        errdefer ap.deinit();
-                        const read_size = ap.content.len - ap.read_idx;
-                        const write_size = try msg_stream.getEndPos() - try msg_stream.getPos();
-                        if (read_size >= write_size) {
-                            _ = try msg_stream.write(ap.content[ap.read_idx..(ap.read_idx + write_size)]);
-                            ap.read_idx += write_size;
-                            if (read_size != write_size) {
-                                try cs.*.insert(0, Content{ .application_data = ap });
-                            } else {
-                                ap.deinit();
-                            }
-                            return b.len;
-                        } else {
-                            _ = try msg_stream.write(ap.content[ap.read_idx..]);
-                            ap.deinit();
-                        }
-                    }
-                    cs.deinit();
-                    self.recv_contents = null;
-                }
-
-                const updated = try common.checkAndUpdateKey(&self.ap_protector, &self.ks, &self.write_buffer, self.allocator, .server);
-                if (updated) {
-                    std.log.debug("KeyUpdate updated_request has been sent", .{});
-                }
-
-                const t = self.reader.readEnum(ContentType, .Big) catch |err| {
-                    switch (err) {
-                        error.EndOfStream => return msg_stream.getWritten().len,
-                        error.WouldBlock => return msg_stream.getWritten().len,
-                        else => return err,
-                    }
-                };
-                if (t != .application_data) {
-                    // TODO: error
-                    std.log.warn("unexpected message type={s}", .{@tagName(t)});
-                    continue;
-                }
-                const recv_record = try TLSCipherText.decode(self.reader, t, self.allocator);
-                defer recv_record.deinit();
-
-                const plain_record = try self.ap_protector.decrypt(recv_record, self.allocator);
-                defer plain_record.deinit();
-
-                if (plain_record.content_type != .application_data) {
-                    if (plain_record.content_type == .handshake) {
-                        const hs = (try plain_record.decodeContent(self.allocator, self.ks.hkdf)).handshake;
-                        switch (hs) {
-                            .key_update => |ku| {
-                                switch (ku.request_update) {
-                                    .update_not_requested => {
-                                        std.log.debug("received key update update_not_requested", .{});
-                                        // update decoding key(client key)
-                                        try self.ks.updateClientSecrets();
-                                        self.ap_protector.dec_keys = self.ks.secret.c_ap_keys;
-                                        self.ap_protector.dec_cnt = 0;
-                                    },
-                                    .update_requested => {
-                                        std.log.debug("received key update update_requested", .{});
-                                        // update decoding key(client key)
-                                        try self.ks.updateClientSecrets();
-                                        self.ap_protector.dec_keys = self.ks.secret.c_ap_keys;
-                                        self.ap_protector.dec_cnt = 0;
-
-                                        const update = Content{ .handshake = Handshake{ .key_update = KeyUpdate{ .request_update = .update_not_requested } } };
-                                        defer update.deinit();
-
-                                        _ = try self.ap_protector.encryptFromMessageAndWrite(update, self.allocator, self.write_buffer.writer());
-                                        try self.write_buffer.flush();
-
-                                        // update encoding key(server key)
-                                        try self.ks.updateServerSecrets();
-                                        self.ap_protector.enc_keys = self.ks.secret.s_ap_keys;
-                                        self.ap_protector.enc_cnt = 0;
-                                    },
-                                }
-                            },
-                            else => continue,
-                        }
-                    }
-                    continue;
-                }
-
-                self.recv_contents = try plain_record.decodeContents(self.allocator, self.ks.hkdf);
-            }
-
-            return msg_stream.getWritten().len;
+            return try self.read_engine.?.read(b);
         }
 
         pub fn close(self: *Self) void {

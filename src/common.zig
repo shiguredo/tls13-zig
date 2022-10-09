@@ -1,10 +1,13 @@
 const std = @import("std");
 const io = std.io;
+const ArrayList = std.ArrayList;
 
 const RecordPayloadProtector = @import("protector.zig").RecordPayloadProtector;
 const KeyScheduler = @import("key.zig").KeyScheduler;
 const Content = @import("content.zig").Content;
+const ContentType = @import("content.zig").ContentType;
 const ApplicationData = @import("application_data.zig").ApplicationData;
+const TLSCipherText = @import("tls_cipher.zig").TLSCipherText;
 
 pub const EntityType = enum(u8) {
     client,
@@ -78,6 +81,160 @@ pub fn WriteEngine(comptime WriteBufferType: type, comptime et: EntityType) type
             }
 
             return b.len;
+        }
+    };
+}
+
+pub fn ReadEngine(comptime Entity: type, comptime et: EntityType) type {
+    return struct {
+        entity: *Entity,
+
+        recv_contents: ?ArrayList(Content) = null,
+
+        const Self = @This();
+
+        pub fn deinit(self: Self) void {
+            if (self.recv_contents) |cs| {
+                for (cs.items) |c| {
+                    c.deinit();
+                }
+                cs.deinit();
+            }
+        }
+
+        pub fn read(self: *Self, b: []u8) !usize {
+            var msg_stream = io.fixedBufferStream(b);
+
+            while ((try msg_stream.getEndPos()) != (try msg_stream.getPos())) {
+                // writing application_data contents into buffer/
+                if (self.recv_contents) |*cs| {
+                    while (cs.items.len != 0) {
+                        var ap = cs.*.orderedRemove(0).application_data;
+                        errdefer ap.deinit();
+                        const read_size = ap.content.len - ap.read_idx;
+                        const write_size = try msg_stream.getEndPos() - try msg_stream.getPos();
+                        if (read_size >= write_size) {
+                            _ = try msg_stream.write(ap.content[ap.read_idx..(ap.read_idx + write_size)]);
+                            ap.read_idx += write_size;
+                            if (read_size != write_size) {
+                                try cs.*.insert(0, Content{ .application_data = ap });
+                            } else {
+                                ap.deinit();
+                            }
+                            return b.len;
+                        } else {
+                            _ = try msg_stream.write(ap.content[ap.read_idx..]);
+                            ap.deinit();
+                        }
+                    }
+                    cs.deinit();
+                    self.recv_contents = null;
+                }
+
+                const updated = try checkAndUpdateKey(&self.entity.ap_protector, &self.entity.ks, &self.entity.write_buffer, self.entity.allocator, et);
+                if (updated) {
+                    std.log.debug("KeyUpdate updated_request has been sent", .{});
+                }
+
+                const t = self.entity.reader.readEnum(ContentType, .Big) catch |err| {
+                    switch (err) {
+                        error.EndOfStream => return msg_stream.getWritten().len,
+                        error.WouldBlock => return msg_stream.getWritten().len,
+                        else => return err,
+                    }
+                };
+                if (t != .application_data) {
+                    // TODO: error
+                    std.log.err("ERROR!!!", .{});
+                    continue;
+                }
+                const recv_record = try TLSCipherText.decode(self.entity.reader, t, self.entity.allocator);
+                defer recv_record.deinit();
+
+                const plain_record = try self.entity.ap_protector.decrypt(recv_record, self.entity.allocator);
+                defer plain_record.deinit();
+
+                if (plain_record.content_type != .application_data) {
+                    if (plain_record.content_type == .handshake) {
+                        const hs = (try plain_record.decodeContent(self.entity.allocator, self.entity.ks.hkdf)).handshake;
+                        switch (hs) {
+                            .new_session_ticket => |nst| {
+                                switch (et) {
+                                    .client => {
+                                        if (self.entity.session_ticket) |st| {
+                                            st.deinit();
+                                        }
+                                        self.entity.session_ticket = nst;
+                                        try self.entity.ks.generateResumptionMasterSecret(self.entity.msgs_stream.getWritten(), nst.ticket_nonce.slice());
+                                    },
+                                    .server => {},
+                                }
+                            },
+                            .key_update => |ku| {
+                                switch (ku.request_update) {
+                                    .update_not_requested => {
+                                        std.log.debug("received key update update_not_requested", .{});
+                                        switch (et) {
+                                            .client => {
+                                                // update decoding key(server key)
+                                                try self.entity.ks.updateServerSecrets();
+                                                self.entity.ap_protector.dec_keys = self.entity.ks.secret.s_ap_keys;
+                                            },
+                                            .server => {
+                                                // update decoding key(client key)
+                                                try self.entity.ks.updateClientSecrets();
+                                                self.entity.ap_protector.dec_keys = self.entity.ks.secret.c_ap_keys;
+                                            },
+                                        }
+                                        self.entity.ap_protector.dec_cnt = 0;
+                                    },
+                                    .update_requested => {
+                                        std.log.debug("received key update update_requested", .{});
+                                        switch (et) {
+                                            .client => {
+                                                // update decoding key(server key)
+                                                try self.entity.ks.updateServerSecrets();
+                                                self.entity.ap_protector.dec_keys = self.entity.ks.secret.s_ap_keys;
+                                            },
+                                            .server => {
+                                                // update decoding key(client key)
+                                                try self.entity.ks.updateClientSecrets();
+                                                self.entity.ap_protector.dec_keys = self.entity.ks.secret.c_ap_keys;
+                                            },
+                                        }
+                                        self.entity.ap_protector.dec_cnt = 0;
+
+                                        const update = Content{ .handshake = .{ .key_update = .{ .request_update = .update_not_requested } } };
+                                        defer update.deinit();
+
+                                        _ = try self.entity.ap_protector.encryptFromMessageAndWrite(update, self.entity.allocator, self.entity.write_buffer.writer());
+                                        try self.entity.write_buffer.flush();
+
+                                        switch (et) {
+                                            .client => {
+                                                // update encoding key(clieny key)
+                                                try self.entity.ks.updateClientSecrets();
+                                                self.entity.ap_protector.enc_keys = self.entity.ks.secret.c_ap_keys;
+                                            },
+                                            .server => {
+                                                // update encoding key(server key)
+                                                try self.entity.ks.updateServerSecrets();
+                                                self.entity.ap_protector.enc_keys = self.entity.ks.secret.s_ap_keys;
+                                            },
+                                        }
+                                        self.entity.ap_protector.enc_cnt = 0;
+                                    },
+                                }
+                            },
+                            else => continue,
+                        }
+                    }
+                    continue;
+                }
+
+                self.recv_contents = try plain_record.decodeContents(self.entity.allocator, self.entity.ks.hkdf);
+            }
+            return msg_stream.getWritten().len;
         }
     };
 }

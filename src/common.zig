@@ -105,7 +105,7 @@ pub fn ReadEngine(comptime Entity: type, comptime et: EntityType) type {
         pub fn read(self: *Self, b: []u8) !usize {
             var msg_stream = io.fixedBufferStream(b);
 
-            while ((try msg_stream.getEndPos()) != (try msg_stream.getPos())) {
+            while ((try msg_stream.getPos()) == 0) {
                 // writing application_data contents into buffer/
                 if (self.recv_contents) |*cs| {
                     while (cs.items.len != 0) {
@@ -138,7 +138,6 @@ pub fn ReadEngine(comptime Entity: type, comptime et: EntityType) type {
 
                 const t = self.entity.reader.readEnum(ContentType, .Big) catch |err| {
                     switch (err) {
-                        error.EndOfStream => return msg_stream.getWritten().len,
                         error.WouldBlock => return msg_stream.getWritten().len,
                         else => return err,
                     }

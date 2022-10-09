@@ -193,6 +193,9 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
         random: [32]u8,
         session_id: msg.SessionID,
 
+        // engines
+        write_engine: common.WriteEngine(io.BufferedWriter(4096, WriterType), .server) = undefined,
+
         // buffer for received contents
         recv_contents: ?ArrayList(Content) = null,
 
@@ -487,29 +490,19 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 }
             }
 
+            self.write_engine = .{
+                .protector = &self.ap_protector,
+                .ks = &self.ks,
+                .write_buffer = &self.write_buffer,
+                .allocator = self.allocator,
+                .record_size_limit = self.tls_server.record_size_limit,
+            };
+
             std.log.info("handshake done", .{});
         }
 
         pub fn send(self: *Self, b: []const u8) !usize {
-            var cur_idx: usize = 0;
-            while (cur_idx < b.len) {
-                const updated = try common.checkAndUpdateKey(&self.ap_protector, &self.ks, &self.write_buffer, self.allocator, .server);
-                if (updated) {
-                    std.log.debug("KeyUpdate updated_request has been sent", .{});
-                }
-
-                var end_idx = cur_idx + self.tls_server.record_size_limit - self.ap_protector.getHeaderSize();
-                end_idx = if (end_idx >= b.len) b.len else end_idx;
-
-                const app_c = Content{ .application_data = try ApplicationData.initAsView(b[cur_idx..end_idx]) };
-                defer app_c.deinit();
-
-                _ = try self.ap_protector.encryptFromMessageAndWrite(app_c, self.allocator, self.write_buffer.writer());
-                try self.write_buffer.flush();
-                cur_idx = end_idx;
-            }
-
-            return b.len;
+            return try self.write_engine.write(b);
         }
 
         pub fn recv(self: *Self, b: []u8) !usize {

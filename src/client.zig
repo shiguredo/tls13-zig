@@ -72,6 +72,9 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         session_id: msg.SessionID,
         host: []u8 = &([_]u8{}),
 
+        // engines
+        write_engine: common.WriteEngine(io.BufferedWriter(4096, WriterType), .client) = undefined,
+
         // buffer for receive
         recv_contents: ?ArrayList(Content) = null,
 
@@ -491,6 +494,14 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 self.ks.printKeys(&self.random);
             }
 
+            self.write_engine = .{
+                .protector = &self.ap_protector,
+                .ks = &self.ks,
+                .write_buffer = &self.writeBuffer,
+                .allocator = self.allocator,
+                .record_size_limit = self.record_size_limit,
+            };
+
             // if early_data is not accepted, send early_data after connected.
             // TODO: Is this ok?
             if (self.early_data.len != 0 and !self.early_data_ok) {
@@ -502,25 +513,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         }
 
         pub fn send(self: *Self, b: []const u8) !usize {
-            var cur_idx: usize = 0;
-            while (cur_idx < b.len) {
-                const updated = try common.checkAndUpdateKey(&self.ap_protector, &self.ks, &self.writeBuffer, self.allocator, .client);
-                if (updated) {
-                    std.log.debug("KeyUpdate updated_request has been sent", .{});
-                }
-
-                var end_idx = cur_idx + self.record_size_limit - self.ap_protector.getHeaderSize();
-                end_idx = if (end_idx >= b.len) b.len else end_idx;
-
-                const app_c = Content{ .application_data = try ApplicationData.initAsView(b[cur_idx..end_idx]) };
-                defer app_c.deinit();
-
-                _ = try self.ap_protector.encryptFromMessageAndWrite(app_c, self.allocator, self.writeBuffer.writer());
-                try self.writeBuffer.flush();
-                cur_idx = end_idx;
-            }
-
-            return b.len;
+            return try self.write_engine.write(b);
         }
 
         pub fn recv(self: *Self, b: []u8) !usize {

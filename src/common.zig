@@ -4,6 +4,7 @@ const io = std.io;
 const RecordPayloadProtector = @import("protector.zig").RecordPayloadProtector;
 const KeyScheduler = @import("key.zig").KeyScheduler;
 const Content = @import("content.zig").Content;
+const ApplicationData = @import("application_data.zig").ApplicationData;
 
 pub const EntityType = enum(u8) {
     client,
@@ -45,4 +46,38 @@ pub fn checkAndUpdateKey(protector: *RecordPayloadProtector, ks: *KeyScheduler, 
     }
 
     return false;
+}
+
+pub fn WriteEngine(comptime WriteBufferType: type, comptime et: EntityType) type {
+    return struct {
+        protector: *RecordPayloadProtector,
+        ks: *KeyScheduler,
+        write_buffer: *WriteBufferType,
+        allocator: std.mem.Allocator,
+        record_size_limit: u16,
+
+        const Self = @This();
+
+        pub fn write(self: *Self, b: []const u8) !usize {
+            var cur_idx: usize = 0;
+            while (cur_idx < b.len) {
+                const updated = try checkAndUpdateKey(self.protector, self.ks, self.write_buffer, self.allocator, et);
+                if (updated) {
+                    std.log.debug("KeyUpdate updated_request has been sent", .{});
+                }
+
+                var end_idx = cur_idx + self.record_size_limit - self.protector.getHeaderSize();
+                end_idx = if (end_idx >= b.len) b.len else end_idx;
+
+                const app_c = Content{ .application_data = try ApplicationData.initAsView(b[cur_idx..end_idx]) };
+                defer app_c.deinit();
+
+                _ = try self.protector.encryptFromMessageAndWrite(app_c, self.allocator, self.write_buffer.writer());
+                try self.write_buffer.flush();
+                cur_idx = end_idx;
+            }
+
+            return b.len;
+        }
+    };
 }

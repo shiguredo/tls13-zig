@@ -74,7 +74,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         // engines
         write_engine: common.WriteEngine(io.BufferedWriter(4096, WriterType), .client) = undefined,
-        read_engine: ?common.ReadEngine(Self, .server) = null,
+        read_engine: ?common.ReadEngine(Self, .client) = null,
 
         // message buffer for KeySchedule
         msgs_bytes: []u8,

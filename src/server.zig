@@ -801,5 +801,31 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             }
             std.log.debug("Finished verify done", .{});
         }
+
+        pub fn handleKeyUpdate(self: *Self, ku: KeyUpdate) !void {
+            // update decoding key(client key)
+            try self.ks.updateClientSecrets();
+            self.ap_protector.dec_keys = self.ks.secret.c_ap_keys;
+            self.ap_protector.dec_cnt = 0;
+
+            switch (ku.request_update) {
+                .update_not_requested => {
+                    std.log.debug("received key update update_not_requested", .{});
+                },
+                .update_requested => {
+                    std.log.debug("received key update update_requested", .{});
+                    const update = Content{ .handshake = .{ .key_update = .{ .request_update = .update_not_requested } } };
+                    defer update.deinit();
+
+                    _ = try self.ap_protector.encryptFromMessageAndWrite(update, self.allocator, self.write_buffer.writer());
+                    try self.write_buffer.flush();
+
+                    // update encoding key(server key)
+                    try self.ks.updateServerSecrets();
+                    self.ap_protector.enc_keys = self.ks.secret.s_ap_keys;
+                    self.ap_protector.enc_cnt = 0;
+                },
+            }
+        }
     };
 }

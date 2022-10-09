@@ -889,6 +889,40 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
             self.state = .SEND_FINISHED;
         }
+
+        pub fn handleNewSessionTicket(self: *Self, nst: NewSessionTicket) !void {
+            if (self.session_ticket) |st| {
+                st.deinit();
+            }
+            self.session_ticket = nst;
+            try self.ks.generateResumptionMasterSecret(self.msgs_stream.getWritten(), nst.ticket_nonce.slice());
+        }
+
+        pub fn handleKeyUpdate(self: *Self, ku: KeyUpdate) !void {
+            // update decoding key(server key)
+            try self.ks.updateServerSecrets();
+            self.ap_protector.dec_keys = self.ks.secret.s_ap_keys;
+            self.ap_protector.dec_cnt = 0;
+
+            switch (ku.request_update) {
+                .update_not_requested => {
+                    std.log.debug("received key update update_not_requested", .{});
+                },
+                .update_requested => {
+                    std.log.debug("received key update update_requested", .{});
+                    const update = Content{ .handshake = .{ .key_update = .{ .request_update = .update_not_requested } } };
+                    defer update.deinit();
+
+                    _ = try self.ap_protector.encryptFromMessageAndWrite(update, self.allocator, self.write_buffer.writer());
+                    try self.write_buffer.flush();
+
+                    // update encoding key(clieny key)
+                    try self.ks.updateClientSecrets();
+                    self.ap_protector.enc_keys = self.ks.secret.c_ap_keys;
+                    self.ap_protector.enc_cnt = 0;
+                },
+            }
+        }
     };
 }
 

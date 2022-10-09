@@ -159,71 +159,12 @@ pub fn ReadEngine(comptime Entity: type, comptime et: EntityType) type {
                         switch (hs) {
                             .new_session_ticket => |nst| {
                                 switch (et) {
-                                    .client => {
-                                        if (self.entity.session_ticket) |st| {
-                                            st.deinit();
-                                        }
-                                        self.entity.session_ticket = nst;
-                                        try self.entity.ks.generateResumptionMasterSecret(self.entity.msgs_stream.getWritten(), nst.ticket_nonce.slice());
-                                    },
-                                    .server => {},
+                                    .client => try self.entity.handleNewSessionTicket(nst),
+                                    .server => unreachable,
                                 }
                             },
                             .key_update => |ku| {
-                                switch (ku.request_update) {
-                                    .update_not_requested => {
-                                        std.log.debug("received key update update_not_requested", .{});
-                                        switch (et) {
-                                            .client => {
-                                                // update decoding key(server key)
-                                                try self.entity.ks.updateServerSecrets();
-                                                self.entity.ap_protector.dec_keys = self.entity.ks.secret.s_ap_keys;
-                                            },
-                                            .server => {
-                                                // update decoding key(client key)
-                                                try self.entity.ks.updateClientSecrets();
-                                                self.entity.ap_protector.dec_keys = self.entity.ks.secret.c_ap_keys;
-                                            },
-                                        }
-                                        self.entity.ap_protector.dec_cnt = 0;
-                                    },
-                                    .update_requested => {
-                                        std.log.debug("received key update update_requested", .{});
-                                        switch (et) {
-                                            .client => {
-                                                // update decoding key(server key)
-                                                try self.entity.ks.updateServerSecrets();
-                                                self.entity.ap_protector.dec_keys = self.entity.ks.secret.s_ap_keys;
-                                            },
-                                            .server => {
-                                                // update decoding key(client key)
-                                                try self.entity.ks.updateClientSecrets();
-                                                self.entity.ap_protector.dec_keys = self.entity.ks.secret.c_ap_keys;
-                                            },
-                                        }
-                                        self.entity.ap_protector.dec_cnt = 0;
-
-                                        const update = Content{ .handshake = .{ .key_update = .{ .request_update = .update_not_requested } } };
-                                        defer update.deinit();
-
-                                        _ = try self.entity.ap_protector.encryptFromMessageAndWrite(update, self.entity.allocator, self.entity.write_buffer.writer());
-                                        try self.entity.write_buffer.flush();
-
-                                        switch (et) {
-                                            .client => {
-                                                // update encoding key(clieny key)
-                                                try self.entity.ks.updateClientSecrets();
-                                                self.entity.ap_protector.enc_keys = self.entity.ks.secret.c_ap_keys;
-                                            },
-                                            .server => {
-                                                // update encoding key(server key)
-                                                try self.entity.ks.updateServerSecrets();
-                                                self.entity.ap_protector.enc_keys = self.entity.ks.secret.s_ap_keys;
-                                            },
-                                        }
-                                        self.entity.ap_protector.enc_cnt = 0;
-                                    },
-                                }
+                                try self.entity.handleKeyUpdate(ku);
                             },
                             else => continue,
                         }

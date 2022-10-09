@@ -18,6 +18,7 @@ const signature_scheme = @import("signature_scheme.zig");
 const server_name = @import("server_name.zig");
 const crypto = @import("crypto.zig");
 const x509 = @import("x509.zig");
+const common = @import("common.zig");
 const ServerHello = @import("server_hello.zig").ServerHello;
 const ClientHello = @import("client_hello.zig").ClientHello;
 const Handshake = @import("handshake.zig").Handshake;
@@ -489,38 +490,10 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             std.log.info("handshake done", .{});
         }
 
-        fn checkAndUpdateKey(self: *Self) !bool {
-            // RFC8446 Section 5.5.  Limits on Key Usage
-            //
-            // For AES-GCM, up to 2^24.5 full-size records (about 24 million) may be
-            // encrypted on a given connection while keeping a safety margin of
-            // approximately 2^-57 for Authenticated Encryption (AE) security.  For
-            // ChaCha20/Poly1305, the record sequence number would wrap before the
-            // safety limit is reached.
-
-            const limit_cnt: usize = 2 << 23;
-            if (self.ap_protector.enc_cnt > limit_cnt or self.ap_protector.dec_cnt > limit_cnt) {
-                const update = Content{ .handshake = Handshake{ .key_update = KeyUpdate{ .request_update = .update_requested } } };
-                defer update.deinit();
-
-                _ = try self.ap_protector.encryptFromMessageAndWrite(update, self.allocator, self.write_buffer.writer());
-                try self.write_buffer.flush();
-
-                // update encoding key(server key)
-                try self.ks.updateServerSecrets();
-                self.ap_protector.enc_keys = self.ks.secret.s_ap_keys;
-                self.ap_protector.enc_cnt = 0;
-
-                return true;
-            }
-
-            return false;
-        }
-
         pub fn send(self: *Self, b: []const u8) !usize {
             var cur_idx: usize = 0;
             while (cur_idx < b.len) {
-                const updated = try self.checkAndUpdateKey();
+                const updated = try common.checkAndUpdateKey(&self.ap_protector, &self.ks, &self.write_buffer, self.allocator, .server);
                 if (updated) {
                     std.log.debug("KeyUpdate updated_request has been sent", .{});
                 }
@@ -567,7 +540,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     self.recv_contents = null;
                 }
 
-                const updated = try self.checkAndUpdateKey();
+                const updated = try common.checkAndUpdateKey(&self.ap_protector, &self.ks, &self.write_buffer, self.allocator, .server);
                 if (updated) {
                     std.log.debug("KeyUpdate updated_request has been sent", .{});
                 }

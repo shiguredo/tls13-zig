@@ -2,11 +2,20 @@ const std = @import("std");
 const log = std.log;
 const net = std.net;
 const io = std.io;
+const os = std.os;
 const allocator = std.heap.page_allocator;
 
 const server = @import("server.zig");
 
 pub fn main() !void {
+    // ignore SIGCHLD
+    var act = os.Sigaction{
+        .handler = .{ .handler = os.SIG.IGN },
+        .mask = os.empty_sigset,
+        .flags = (os.SA.SIGINFO | os.SA.RESTART | os.SA.RESETHAND),
+    };
+    try os.sigaction(os.SIG.CHLD, &act, null);
+
     log.info("started.", .{});
     // key and certificate need to be der-formatted.
     // Especially, RSAPrivateKey need to be PKCS#1.

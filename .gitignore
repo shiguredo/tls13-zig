@@ -7,3 +7,5 @@
 /test_proxy
 /deploy.sh
 /sess.pem
+/key.pem
+/cert.pem

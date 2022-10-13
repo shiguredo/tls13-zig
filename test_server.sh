@@ -47,3 +47,33 @@ if [ $? -eq 0 ]; then
 else
     echo "FAILED"
 fi
+
+# Testing Resumption
+echo "GET / " | openssl s_client -servername localhost -connect localhost:8443 -ign_eof -sess_out sess.pem | grep tls13-zig
+if [ $? -eq 0 ]; then
+    echo "OK"
+else
+    echo "FAILED"
+fi
+
+echo "GET / " | openssl s_client -servername localhost -connect localhost:8443 -ign_eof -sess_in sess.pem | grep tls13-zig
+if [ $? -eq 0 ]; then
+    echo "OK"
+else
+    echo "FAILED"
+fi
+
+# Testing Resumption with Hello Retry Request
+echo "GET / " | openssl s_client -groups x448:x25519 -servername localhost -connect localhost:8443 -ign_eof -sess_out sess.pem | grep tls13-zig
+if [ $? -eq 0 ]; then
+    echo "OK"
+else
+    echo "FAILED"
+fi
+
+echo "GET / " | openssl s_client -groups x448:x25519 -servername localhost -connect localhost:8443 -ign_eof -sess_in sess.pem | grep tls13-zig
+if [ $? -eq 0 ]; then
+    echo "OK"
+else
+    echo "FAILED"
+fi

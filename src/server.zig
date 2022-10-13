@@ -36,6 +36,9 @@ const TLSPlainText = @import("tls_plain.zig").TLSPlainText;
 const TLSCipherText = @import("tls_cipher.zig").TLSCipherText;
 const KeyUpdate = @import("key_update.zig").KeyUpdate;
 const RecordSizeLimit = @import("record_size_limit.zig").RecordSizeLimit;
+const PskKeyExchangeModes = @import("psk_key_exchange_modes.zig").PskKeyExchangeModes;
+const new_session_ticket = @import("new_session_ticket.zig");
+const pre_shared_key = @import("pre_shared_key.zig");
 
 const Content = @import("content.zig").Content;
 const ContentType = @import("content.zig").ContentType;
@@ -71,6 +74,10 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
         // and earlier, that limit is 2^14 octets.  TLS 1.3 uses a limit of
         // 2^14+1 octets.
         record_size_limit: u16 = 2 << 13,
+
+        // session resumption
+        ticket_key_name: [16]u8 = undefined,
+        ticket_key: [Aes128Gcm.key_length]u8 = undefined,
 
         // Misc
         allocator: std.mem.Allocator,
@@ -120,6 +127,9 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
                 .allocator = allocator,
             };
+
+            random.bytes(&res.ticket_key_name);
+            random.bytes(&res.ticket_key);
 
             if (ca_path) |p| {
                 res.ca_cert = try certificate.CertificateEntry.fromDerFile(p, allocator);
@@ -192,6 +202,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
         // session related
         random: [32]u8,
         session_id: msg.SessionID,
+        resumed: bool = false,
 
         // engines
         write_engine: common.WriteEngine(io.BufferedWriter(4096, WriterType), .server) = undefined,
@@ -334,6 +345,22 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             }
             try server_hello.extensions.append(.{ .key_share = ks });
 
+            if (self.resumed) {
+                // Exntension PskKeyExchangeModes
+                var pkem = PskKeyExchangeModes.init(self.allocator);
+                try pkem.modes.append(.psk_dhe_ke);
+                defer pkem.deinit();
+                //try server_hello.extensions.append(.{ .psk_key_exchange_modes = pkem });
+
+                // Extension PreSharedKey
+                // TODO: Currently, only the first identity is accepted.
+                var psk = pre_shared_key.PreSharedKey{
+                    .msg_type = .server_hello,
+                    .selected_identify = 0,
+                };
+                try server_hello.extensions.append(.{ .pre_shared_key = psk });
+            }
+
             return server_hello;
         }
 
@@ -421,8 +448,10 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             self.hs_protector = RecordPayloadProtector.init(self.ks.aead, self.ks.secret.s_hs_keys, self.ks.secret.c_hs_keys);
 
             try self.sendEncryptedExtensions();
-            try self.sendCertificate();
-            try self.sendCertificateVerify();
+            if (!self.resumed) {
+                try self.sendCertificate();
+                try self.sendCertificateVerify();
+            }
             try self.sendFinished();
 
             try self.write_buffer.flush();
@@ -452,7 +481,13 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     const c_record = try TLSCipherText.decode(self.reader, t, self.allocator);
                     defer c_record.deinit();
 
-                    var p_record = try self.hs_protector.decrypt(c_record, self.allocator);
+                    // client may send early_data. Currently, server does not accept early_data.
+                    var p_record = self.hs_protector.decrypt(c_record, self.allocator) catch |err| {
+                        switch (err) {
+                            error.AuthenticationFailed => continue,
+                            else => return err,
+                        }
+                    };
                     defer p_record.deinit();
                     if (p_record.content_type == .alert) {
                         const alert = (try p_record.decodeContent(self.allocator, null)).alert;
@@ -496,6 +531,10 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             self.read_engine = .{
                 .entity = self,
             };
+
+            try self.sendNewSessionTicket();
+            try self.write_buffer.flush();
+            std.log.debug("sent all contents in write buffer", .{});
 
             std.log.info("handshake done", .{});
         }
@@ -549,45 +588,85 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 return Error.UnsupportedProtocolVersion;
             }
 
-            // Selecting CiperSuite
-            // CiperSuite is selected on First Flight
-            if (!self.already_sent_hrr) {
-                var cs_ok = ch.cipher_suites.items.len != 0;
-                var hkdf: crypto.Hkdf = undefined;
-                var aead: crypto.Aead = undefined;
-                for (ch.cipher_suites.items) |cs| {
-                    self.cipher_suite = cs;
-                    switch (cs) {
-                        .TLS_AES_128_GCM_SHA256 => {
-                            hkdf = crypto.Hkdf.Sha256.hkdf;
-                            aead = crypto.Aead.Aes128Gcm.aead;
-                            cs_ok = true;
-                            break;
-                        },
-                        .TLS_AES_256_GCM_SHA384 => {
-                            hkdf = crypto.Hkdf.Sha384.hkdf;
-                            aead = crypto.Aead.Aes256Gcm.aead;
-                            cs_ok = true;
-                            break;
-                        },
-                        .TLS_CHACHA20_POLY1305_SHA256 => {
-                            hkdf = crypto.Hkdf.Sha256.hkdf;
-                            aead = crypto.Aead.ChaCha20Poly1305.aead;
-                            cs_ok = true;
-                            break;
-                        },
-                        else => cs_ok = false,
+            // Checking pre_shared_key provided(for session resumption)
+            if (msg.getExtension(ch.extensions, .pre_shared_key)) |p| {
+                // Currently, supports only PSK with DHE key establishment.
+                const pkem = (try msg.getExtension(ch.extensions, .psk_key_exchange_modes)).psk_key_exchange_modes;
+                var pkem_ok = false;
+                for (pkem.modes.items) |mode| {
+                    if (mode == .psk_dhe_ke) {
+                        pkem_ok = true;
                     }
                 }
-                if (!cs_ok) {
-                    return Error.UnsupportedCipherSuite;
+                if (!pkem_ok) {
+                    return Error.IllegalParameter;
                 }
-                self.ks = try key.KeyScheduler.init(hkdf, aead);
-                const zero_bytes = &([_]u8{0} ** 64);
-                try self.ks.generateEarlySecrets1(zero_bytes[0..self.ks.hkdf.digest_length]);
-                try self.ks.generateEarlySecrets2(self.msgs_stream.getWritten());
-                std.log.debug("selected cipher_suite={s}", .{@tagName(self.cipher_suite)});
+                const opsk = p.pre_shared_key.offeredPsks;
+                if (opsk.identities.items.len == 0) {
+                    return Error.IllegalParameter;
+                }
+                // TODO: select other identity if selected one is unavailable.
+                const id = opsk.identities.items[0].identity;
+                var id_stream = io.fixedBufferStream(id);
+                const ticket = try new_session_ticket.Ticket.decode(id_stream.reader(), self.allocator);
+                if (!std.mem.eql(u8, &ticket.key_name, &self.tls_server.ticket_key_name)) {
+                    return Error.IllegalParameter;
+                }
+                defer ticket.deinit();
+
+                const state = try ticket.decryptState(self.tls_server.ticket_key);
+
+                self.cipher_suite = state.cipher_suite;
+                self.ks = try key.KeyScheduler.fromCipherSuite(self.cipher_suite);
+
+                // TODO: commonize with client
+                try self.ks.generateEarlySecrets1(state.master_secret.slice());
+                var prk = try crypto.DigestBoundedArray.init(self.ks.hkdf.digest_length);
+                try self.ks.hkdf.deriveSecret(prk.slice(), self.ks.secret.early_secret.slice(), "res binder", "");
+                var fin_secret = try crypto.DigestBoundedArray.init(self.ks.hkdf.digest_length);
+                try self.ks.hkdf.hkdfExpandLabel(fin_secret.slice(), prk.slice(), "finished", "", self.ks.hkdf.digest_length);
+
+                // retrieving client hello without binders
+                // Below index calculation considers resumptions containing both non-HRR and HRR.
+                // TODO: is this OK?
+                const last_chb_idx = (try self.msgs_stream.getPos()) - opsk.binders.len - 2;
+                var binder_bytes: [1024 * 4]u8 = undefined;
+                var binder_stream = io.fixedBufferStream(&binder_bytes);
+                _ = try binder_stream.write(self.msgs_stream.getWritten()[0..last_chb_idx]);
+
+                const fin = try Finished.fromMessageBytes(binder_stream.getWritten(), fin_secret.slice(), self.ks.hkdf);
+                if (fin.verify_data.len != opsk.binders[0]) {
+                    return Error.IllegalParameter;
+                }
+                if (!std.mem.eql(u8, fin.verify_data.slice(), opsk.binders[1..])) {
+                    return Error.IllegalParameter;
+                }
+                self.resumed = true;
+                std.log.debug("PSK for session resumption has been accepted.", .{});
+            } else |_| {
+                // Selecting CiperSuite
+                // CiperSuite is selected on First Flight
+                if (!self.already_sent_hrr) {
+                    var cs_ok = ch.cipher_suites.items.len != 0;
+                    for (ch.cipher_suites.items) |cs| {
+                        if (key.KeyScheduler.fromCipherSuite(cs)) |ks| {
+                            self.cipher_suite = cs;
+                            self.ks = ks;
+                            cs_ok = true;
+                            break;
+                        } else |_| {
+                            cs_ok = false;
+                        }
+                    }
+                    if (!cs_ok) {
+                        return Error.UnsupportedCipherSuite;
+                    }
+                    const zero_bytes = &([_]u8{0} ** 64);
+                    try self.ks.generateEarlySecrets1(zero_bytes[0..self.ks.hkdf.digest_length]);
+                }
             }
+            try self.ks.generateEarlySecrets2(self.msgs_stream.getWritten());
+            std.log.debug("selected cipher_suite={s}", .{@tagName(self.cipher_suite)});
 
             // Selecting KeyShare and deriving shared secret.
             const ks = (try msg.getExtension(ch.extensions, .key_share)).key_share;
@@ -800,6 +879,30 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 return Error.InvalidFinished;
             }
             std.log.debug("Finished verify done", .{});
+            const cont_fin = Content{ .handshake = Handshake{ .finished = fin } };
+            _ = try cont_fin.encode(self.msgs_stream.writer());
+        }
+
+        fn sendNewSessionTicket(self: *Self) !void {
+            var nonce: [Aes128Gcm.nonce_length]u8 = undefined;
+            std.crypto.random.bytes(&nonce);
+            try self.ks.generateResumptionMasterSecret(self.msgs_stream.getWritten(), &nonce);
+            const state = new_session_ticket.StatePlaintext{
+                .protocol_version = 0x0303,
+                .cipher_suite = self.cipher_suite,
+                .master_secret = self.ks.secret.res_secret,
+                .client_identity = .{ .client_authentication_type = .anonymous },
+                .timestamp = @intCast(u64, std.time.timestamp()),
+            };
+            const ticket = try new_session_ticket.Ticket.fromStatePlaintext(self.tls_server.ticket_key_name, self.tls_server.ticket_key, nonce, state, self.allocator);
+            defer ticket.deinit();
+
+            const nst = try new_session_ticket.NewSessionTicket.fromTicket(ticket, self.allocator);
+            const c = Content{ .handshake = Handshake{ .new_session_ticket = nst } };
+            defer c.deinit();
+
+            _ = try self.ap_protector.encryptFromMessageAndWrite(c, self.allocator, self.write_buffer.writer());
+            std.log.debug("NewSessionTicket has been written to send buffer", .{});
         }
 
         pub fn handleKeyUpdate(self: *Self, ku: KeyUpdate) !void {

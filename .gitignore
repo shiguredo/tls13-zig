@@ -6,3 +6,4 @@
 /*.o
 /test_proxy
 /deploy.sh
+/sess.pem

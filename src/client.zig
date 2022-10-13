@@ -47,6 +47,7 @@ const ContentType = @import("content.zig").ContentType;
 const Aes128Gcm = std.crypto.aead.aes_gcm.Aes128Gcm;
 const Sha256 = std.crypto.hash.sha2.Sha256;
 const P256 = std.crypto.sign.ecdsa.EcdsaP256Sha256;
+const P384 = std.crypto.sign.ecdsa.EcdsaP384Sha384;
 
 const rsa = @import("rsa.zig");
 
@@ -208,6 +209,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             try res.cipher_suites.append(.TLS_CHACHA20_POLY1305_SHA256);
 
             try res.signature_schems.append(.ecdsa_secp256r1_sha256);
+            try res.signature_schems.append(.ecdsa_secp384r1_sha384);
             try res.signature_schems.append(.rsa_pss_rsae_sha256);
 
             return res;
@@ -815,7 +817,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         if (!std.mem.eql(u8, attr.attr_type.id, cn_oid)) {
                             continue;
                         }
-                        if (!std.mem.eql(u8, attr.attr_value, self.host)) {
+                        if (!certHostMatches(attr.attr_value, self.host)) {
                             cert_host = false;
                         }
                     }
@@ -826,7 +828,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 }
 
                 const pubkey = c.cert.tbs_certificate.subjectPublicKeyInfo.publicKey;
-                if (pubkey == .secp256r1 or pubkey == .rsa) {
+                if (pubkey == .secp256r1 or pubkey == .secp384r1 or pubkey == .rsa) {
                     try self.cert_pubkeys.append(try pubkey.copy(self.allocator));
                 } else {
                     return Error.UnsupportedCertificateAlgorithm;
@@ -860,6 +862,11 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 .ecdsa_secp256r1_sha256 => {
                     const pk = (try self.getPublicKey(.secp256r1)).secp256r1;
                     const sig = try P256.Signature.fromDer(cert_verify.signature);
+                    try sig.verify(verify_stream.getWritten(), pk.key);
+                },
+                .ecdsa_secp384r1_sha384 => {
+                    const pk = (try self.getPublicKey(.secp384r1)).secp384r1;
+                    const sig = try P384.Signature.fromDer(cert_verify.signature);
                     try sig.verify(verify_stream.getWritten(), pk.key);
                 },
                 .rsa_pss_rsae_sha256 => {
@@ -1283,6 +1290,10 @@ test "connect e2e with x25519" {
     tls_client.key_shares.clearAndFree();
     try tls_client.key_shares.append(.x25519);
 
+    tls_client.signature_schems.clearAndFree();
+    try tls_client.signature_schems.append(.ecdsa_secp256r1_sha256);
+    try tls_client.signature_schems.append(.rsa_pss_rsae_sha256);
+
     try tls_client.connect("localhost", 443);
     try expect(std.mem.eql(u8, &client_ans, test_send_stream.getWritten()));
 }
@@ -1390,4 +1401,24 @@ test "RFC8448 Section 5. HelloRetryRequest" {
 
     const fin = try Finished.fromMessageBytes(ch_bytes[0..last_chb_idx], &out, hkdf);
     std.log.warn("FIN={}", .{std.fmt.fmtSliceHexLower(fin.verify_data.slice())});
+}
+
+// whether certificate hostname with possible star certificate
+// matches hostname
+fn certHostMatches(cert: []const u8, host: []const u8) bool {
+    if (std.mem.startsWith(u8, cert, "*.")) {
+        // handle star certificate
+        if (std.mem.indexOf(u8, host, ".")) |pos| {
+            return std.mem.eql(u8, host[pos + 1 ..], cert[2..]);
+        }
+    }
+    return std.mem.eql(u8, cert, host);
+}
+
+test "matches host" {
+    try std.testing.expect(certHostMatches("*.google.com", "www.google.com"));
+    try std.testing.expect(certHostMatches("*.google.com", "anything.google.com"));
+
+    try std.testing.expect(!certHostMatches("*.google.com", "www."));
+    try std.testing.expect(!certHostMatches("*.", "www.google.com"));
 }

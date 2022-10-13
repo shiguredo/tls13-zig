@@ -49,7 +49,7 @@ fn do(allocator: std.mem.Allocator) !void {
 
     try tls_client_res.close();
 
-    if (!tls_client_res.early_data_ok) {
+    if (!tls_client_res.resume_accepted or !tls_client_res.early_data_ok) {
         return Error.EarlyDataIsNotAccepted;
     }
     log.info("finished.", .{});

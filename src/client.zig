@@ -97,6 +97,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         // new session tickets
         session_ticket: ?NewSessionTicket = null,
+        resume_accepted: bool = false,
         early_data: []const u8 = &([_]u8{}), // this array is not managed by TLSClient.
         early_data_ok: bool = false,
         early_protector: RecordPayloadProtector = undefined,
@@ -600,6 +601,19 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 else => return Error.UnsupportedCipherSuite,
             }
 
+            // Checking is the PSK for resumption accepted.
+            if (self.pre_shared_key != null) {
+                if (msg.getExtension(sh.extensions, .pre_shared_key)) |psk_raw| {
+                    const psk = psk_raw.pre_shared_key;
+                    if (psk.selected_identify != 0) {
+                        return Error.IllegalParameter;
+                    }
+                    self.resume_accepted = true;
+                } else |_| {
+                    self.resume_accepted = false;
+                }
+            }
+
             if (self.pre_shared_key != null or self.already_recv_hrr) {
                 // check CipherSuites is same as first or previous session's ServerHello.
                 if (self.ks.aead.aead_type != aead.aead_type or self.ks.hkdf.hash_type != hkdf.hash_type) {
@@ -766,7 +780,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         }
 
         fn handleEncryptedExtensions(self: *Self, ee: EncryptedExtensions) !void {
-            if (self.pre_shared_key != null) {
+            if (self.pre_shared_key != null and self.resume_accepted) {
                 self.state = .WAIT_FINISHED;
             } else {
                 self.state = .WAIT_CERT_CR;

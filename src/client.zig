@@ -802,7 +802,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         if (!std.mem.eql(u8, attr.attr_type.id, cn_oid)) {
                             continue;
                         }
-                        if (!std.mem.eql(u8, attr.attr_value, self.host)) {
+                        if (!certHostMatches(attr.attr_value, self.host)) {
                             cert_host = false;
                         }
                     }
@@ -1377,4 +1377,24 @@ test "RFC8448 Section 5. HelloRetryRequest" {
 
     const fin = try Finished.fromMessageBytes(ch_bytes[0..last_chb_idx], &out, hkdf);
     std.log.warn("FIN={}", .{std.fmt.fmtSliceHexLower(fin.verify_data.slice())});
+}
+
+// whether certificate hostname with possible star certificate
+// matches hostname
+fn certHostMatches(cert: []const u8, host: []const u8) bool {
+    if (std.mem.startsWith(u8, cert, "*.")) {
+        // handle star certificate
+        if (std.mem.indexOf(u8, host, ".")) |pos| {
+            return std.mem.eql(u8, host[pos + 1 ..], cert[2..]);
+        }
+    }
+    return std.mem.eql(u8, cert, host);
+}
+
+test "matches host" {
+    try std.testing.expect(certHostMatches("*.google.com", "www.google.com"));
+    try std.testing.expect(certHostMatches("*.google.com", "anything.google.com"));
+
+    try std.testing.expect(!certHostMatches("*.google.com", "www."));
+    try std.testing.expect(!certHostMatches("*.", "www.google.com"));
 }

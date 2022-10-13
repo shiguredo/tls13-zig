@@ -596,24 +596,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 return Error.IllegalParameter;
             }
 
-            var hkdf: crypto.Hkdf = undefined;
-            var aead: crypto.Aead = undefined;
-
-            switch (sh.cipher_suite) {
-                .TLS_AES_128_GCM_SHA256 => {
-                    hkdf = crypto.Hkdf.Sha256.hkdf;
-                    aead = crypto.Aead.Aes128Gcm.aead;
-                },
-                .TLS_AES_256_GCM_SHA384 => {
-                    hkdf = crypto.Hkdf.Sha384.hkdf;
-                    aead = crypto.Aead.Aes256Gcm.aead;
-                },
-                .TLS_CHACHA20_POLY1305_SHA256 => {
-                    hkdf = crypto.Hkdf.Sha256.hkdf;
-                    aead = crypto.Aead.ChaCha20Poly1305.aead;
-                },
-                else => return Error.UnsupportedCipherSuite,
-            }
+            const ks_tmp = try key.KeyScheduler.fromCipherSuite(sh.cipher_suite);
 
             // Checking is the PSK for resumption accepted.
             if (self.pre_shared_key != null) {
@@ -629,12 +612,12 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             }
 
             if (self.pre_shared_key != null or self.already_recv_hrr) {
-                // check CipherSuites is same as first or previous session's ServerHello.
-                if (self.ks.aead.aead_type != aead.aead_type or self.ks.hkdf.hash_type != hkdf.hash_type) {
+                // check CipherSuites is same as first flight or previous session's ServerHello.
+                if (self.ks.aead.aead_type != ks_tmp.aead.aead_type or self.ks.hkdf.hash_type != ks_tmp.hkdf.hash_type) {
                     return Error.IllegalParameter;
                 }
             } else {
-                self.ks = try key.KeyScheduler.init(hkdf, aead);
+                self.ks = ks_tmp;
                 const zero_bytes = &([_]u8{0} ** 64);
                 try self.ks.generateEarlySecrets1(zero_bytes[0..self.ks.hkdf.digest_length]);
             }

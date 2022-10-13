@@ -34,6 +34,10 @@ pub const PreSharedKey = struct {
     pub fn encode(self: Self, writer: anytype) !usize {
         switch (self.msg_type) {
             .client_hello => return try self.offeredPsks.encode(writer),
+            .server_hello => {
+                try writer.writeIntBig(u16, self.selected_identify);
+                return @sizeOf(u16);
+            },
             else => unreachable,
         }
     }

@@ -129,6 +129,7 @@ pub const Handshake = union(HandshakeType) {
         switch (self) {
             .client_hello => |e| len += try e.encode(writer),
             .server_hello => |e| len += try e.encode(writer),
+            .new_session_ticket => |e| len += try e.encode(writer),
             .end_of_early_data => {},
             .encrypted_extensions => |e| len += try e.encode(writer),
             .certificate => |e| len += try e.encode(writer),
@@ -136,7 +137,6 @@ pub const Handshake = union(HandshakeType) {
             .finished => |e| len += try e.encode(writer),
             .key_update => |e| len += try e.encode(writer),
             .message_hash => |e| len += try e.encode(writer),
-            else => unreachable, // TODO: implement remaining.
         }
 
         return len;
@@ -151,6 +151,7 @@ pub const Handshake = union(HandshakeType) {
         switch (self) {
             .client_hello => |e| len += e.length(),
             .server_hello => |e| len += e.length(),
+            .new_session_ticket => |e| len += e.length(),
             .end_of_early_data => {},
             .encrypted_extensions => |e| len += e.length(),
             .certificate => |e| len += e.length(),
@@ -158,7 +159,6 @@ pub const Handshake = union(HandshakeType) {
             .finished => |e| len += e.length(),
             .key_update => |e| len += e.length(),
             .message_hash => |e| len += e.length(),
-            else => unreachable, // TODO: implement remaining.
         }
 
         return len;

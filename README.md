@@ -35,6 +35,7 @@ limitations under the License.
   - secp256r1
 - Supported SignatureAlgorithm
   - ecdsa_secp256r1_sha256
+  - ecdsa_secp384r1_sha384
   - rsa_pss_rsae_sha256
 
 # How to use

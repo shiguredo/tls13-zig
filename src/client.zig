@@ -584,6 +584,18 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         fn handleServerHello(self: *Self, sh: ServerHello, sh_stream: *io.FixedBufferStream([]u8)) !void {
             defer sh_stream.reset();
 
+            if (msg.getExtension(sh.extensions, .supported_versions)) |sv_raw| {
+                const sv = sv_raw.supported_versions;
+                if (sv.versions.len != 1) {
+                    return Error.IllegalParameter;
+                }
+                if (sv.versions.slice()[0] != 0x0304) {
+                    return Error.IllegalParameter;
+                }
+            } else |_| {
+                return Error.IllegalParameter;
+            }
+
             var hkdf: crypto.Hkdf = undefined;
             var aead: crypto.Aead = undefined;
 

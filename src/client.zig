@@ -782,18 +782,17 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         fn handleEncryptedExtensions(self: *Self, ee: EncryptedExtensions) !void {
             if (self.pre_shared_key != null and self.resume_accepted) {
                 self.state = .WAIT_FINISHED;
+                if (self.early_data.len != 0) {
+                    if (msg.getExtension(ee.extensions, .early_data)) |ed| {
+                        if (ed == .early_data) {
+                            self.early_data_ok = true;
+                        }
+                    } else |_| {
+                        self.early_data_ok = false;
+                    }
+                }
             } else {
                 self.state = .WAIT_CERT_CR;
-            }
-
-            if (self.early_data.len != 0) {
-                const ed = msg.getExtension(ee.extensions, .early_data) catch {
-                    self.early_data_ok = false;
-                    return;
-                };
-                if (ed == .early_data) {
-                    self.early_data_ok = true;
-                }
             }
 
             if (msg.getExtension(ee.extensions, .record_size_limit)) |rsl| {

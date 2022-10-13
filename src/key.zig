@@ -4,6 +4,7 @@ const mem = std.mem;
 const dh = std.crypto.dh;
 const expect = std.testing.expect;
 
+const msg = @import("msg.zig");
 const crypto = @import("crypto.zig");
 const Secret = @import("crypto.zig").Secret;
 
@@ -24,6 +25,28 @@ pub const KeyScheduler = struct {
 
     pub fn deinit(self: Self) void {
         _ = self;
+    }
+
+    pub fn fromCipherSuite(cs: msg.CipherSuite) !Self {
+        var hkdf: crypto.Hkdf = undefined;
+        var aead: crypto.Aead = undefined;
+        switch (cs) {
+            .TLS_AES_128_GCM_SHA256 => {
+                hkdf = crypto.Hkdf.Sha256.hkdf;
+                aead = crypto.Aead.Aes128Gcm.aead;
+            },
+            .TLS_AES_256_GCM_SHA384 => {
+                hkdf = crypto.Hkdf.Sha384.hkdf;
+                aead = crypto.Aead.Aes256Gcm.aead;
+            },
+            .TLS_CHACHA20_POLY1305_SHA256 => {
+                hkdf = crypto.Hkdf.Sha256.hkdf;
+                aead = crypto.Aead.ChaCha20Poly1305.aead;
+            },
+            else => return error.UnsupportedCipherSuite,
+        }
+
+        return try Self.init(hkdf, aead);
     }
 
     pub fn generateEarlySecrets1(self: *Self, psk: []const u8) !void {

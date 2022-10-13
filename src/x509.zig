@@ -716,6 +716,8 @@ const SubjectPublicKeyInfo = struct {
 
             if (std.mem.eql(u8, named_curve.id, "1.2.840.10045.3.1.7")) {
                 pub_key_type = PublicKeyType.secp256r1;
+            } else if (std.mem.eql(u8, named_curve.id, "1.3.132.0.34")) {
+                pub_key_type = PublicKeyType.secp384r1;
             } else {
                 return Error.UnsupportedCurve;
             }
@@ -757,11 +759,13 @@ const SubjectPublicKeyInfo = struct {
 pub const PublicKeyType = enum(usize) {
     rsa,
     secp256r1,
+    secp384r1,
 };
 
 pub const PublicKey = union(PublicKeyType) {
     rsa: RSAPublicKey,
     secp256r1: Secp256r1PublicKey,
+    secp384r1: Secp384r1PublicKey,
 
     const Self = @This();
 
@@ -769,6 +773,7 @@ pub const PublicKey = union(PublicKeyType) {
         switch (t) {
             .rsa => return Self{ .rsa = try RSAPublicKey.decode(reader, allocator) },
             .secp256r1 => return Self{ .secp256r1 = try Secp256r1PublicKey.decode(reader, len) },
+            .secp384r1 => return Self{ .secp384r1 = try Secp384r1PublicKey.decode(reader, len) },
         }
     }
 
@@ -776,6 +781,7 @@ pub const PublicKey = union(PublicKeyType) {
         switch (self) {
             .rsa => |p| p.deinit(),
             .secp256r1 => |p| p.deinit(),
+            .secp384r1 => |p| p.deinit(),
         }
     }
 
@@ -783,6 +789,7 @@ pub const PublicKey = union(PublicKeyType) {
         switch (self) {
             .rsa => |p| return Self{ .rsa = try p.copy(allocator) },
             .secp256r1 => |p| return Self{ .secp256r1 = try p.copy(allocator) },
+            .secp384r1 => |p| return Self{ .secp384r1 = try p.copy(allocator) },
         }
     }
 };
@@ -928,6 +935,63 @@ const Secp256r1PublicKey = struct {
     pub fn length(self: Self) usize {
         _ = self;
         return P256.PublicKey.uncompressed_sec1_encoded_length;
+    }
+
+    pub fn copy(self: Self, allocator: std.mem.Allocator) !Self {
+        var buf = try allocator.alloc(u8, self.length());
+        defer allocator.free(buf);
+        var stream = io.fixedBufferStream(buf);
+
+        _ = try self.encode(stream.writer());
+        stream.reset();
+
+        return try decode(stream.reader(), self.length());
+    }
+
+    pub fn eql(a: Self, b: Self) bool {
+        return std.mem.eql(u8, &(a.key.toUncompressedSec1()), &(b.key.toUncompressedSec1()));
+    }
+};
+
+const Secp384r1PublicKey = struct {
+    const P384 = std.crypto.sign.ecdsa.EcdsaP384Sha384;
+
+    key: P384.PublicKey,
+
+    const Self = @This();
+
+    const Error = error{
+        UnsupportedFormat,
+    };
+
+    pub fn deinit(self: Self) void {
+        _ = self;
+    }
+
+    pub fn decode(reader: anytype, len: usize) !Self {
+        var buf: [100]u8 = undefined;
+        // Currently, only uncompressed format supported.
+        if (len != P384.PublicKey.uncompressed_sec1_encoded_length) {
+            return Error.UnsupportedFormat;
+        }
+        _ = try reader.readNoEof(buf[0..len]);
+        const key = try P384.PublicKey.fromSec1(buf[0..len]);
+
+        return Self{
+            .key = key,
+        };
+    }
+
+    pub fn encode(self: Self, writer: anytype) !usize {
+        const uncomp = self.key.toUncompressedSec1();
+        try writer.writeAll(&uncomp);
+
+        return uncomp.len;
+    }
+
+    pub fn length(self: Self) usize {
+        _ = self;
+        return P384.PublicKey.uncompressed_sec1_encoded_length;
     }
 
     pub fn copy(self: Self, allocator: std.mem.Allocator) !Self {

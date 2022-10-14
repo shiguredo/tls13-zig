@@ -1411,9 +1411,9 @@ fn certHostMatches(cert: []const u8, host: []const u8) bool {
 }
 
 test "matches host" {
-    try std.testing.expect(certHostMatches("*.google.com", "www.google.com"));
-    try std.testing.expect(certHostMatches("*.google.com", "anything.google.com"));
+    try std.testing.expect(certHostMatches("*.example.com", "www.example.com"));
+    try std.testing.expect(certHostMatches("*.example.com", "anything.example.com"));
 
-    try std.testing.expect(!certHostMatches("*.google.com", "www."));
-    try std.testing.expect(!certHostMatches("*.", "www.google.com"));
+    try std.testing.expect(!certHostMatches("*.example.com", "www."));
+    try std.testing.expect(!certHostMatches("*.", "www.example.com"));
 }

@@ -1,0 +1,10 @@
+--- zig-linux-x86_64-0.10.0-dev.4342+8bb2e96ac/lib/std/os.zig	2022-10-15 08:54:50.000000000 +0900
++++ /home/naoki/.local/zig-master/lib/std/os.zig	2022-10-15 13:45:31.914487775 +0900
+@@ -5918,6 +5918,7 @@
+         error.NetworkUnreachable => unreachable,
+         error.AddressNotAvailable => unreachable,
+         error.SocketNotConnected => unreachable,
++        error.UnreachableAddress => unreachable,
+         else => |e| return e,
+     };
+ }

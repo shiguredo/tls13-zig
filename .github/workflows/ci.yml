@@ -13,6 +13,7 @@ jobs:
       - run: zig fmt --check *.zig src/*.zig
 
   test:
+    if: $${{ false }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]

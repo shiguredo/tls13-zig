@@ -25,6 +25,7 @@ pub fn main() !void {
     // Enable KEYLOG output.
     tls_server.print_keys = true;
     tls_server.record_size_limit = 2 << 12;
+    tls_server.accept_resume = true;
 
     try tls_server.listen(8443);
     while (true) {

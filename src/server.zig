@@ -78,6 +78,7 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
         // session resumption
         ticket_key_name: [16]u8 = undefined,
         ticket_key: [Aes128Gcm.key_length]u8 = undefined,
+        accept_resume: bool = false,
 
         // Misc
         allocator: std.mem.Allocator,
@@ -588,62 +589,65 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 return Error.UnsupportedProtocolVersion;
             }
 
-            // Checking pre_shared_key provided(for session resumption)
-            if (msg.getExtension(ch.extensions, .pre_shared_key)) |p| {
-                // Currently, supports only PSK with DHE key establishment.
-                const pkem = (try msg.getExtension(ch.extensions, .psk_key_exchange_modes)).psk_key_exchange_modes;
-                var pkem_ok = false;
-                for (pkem.modes.items) |mode| {
-                    if (mode == .psk_dhe_ke) {
-                        pkem_ok = true;
+            if (self.tls_server.accept_resume) {
+                // Checking pre_shared_key provided(for session resumption)
+                if (msg.getExtension(ch.extensions, .pre_shared_key)) |p| {
+                    // Currently, supports only PSK with DHE key establishment.
+                    const pkem = (try msg.getExtension(ch.extensions, .psk_key_exchange_modes)).psk_key_exchange_modes;
+                    var pkem_ok = false;
+                    for (pkem.modes.items) |mode| {
+                        if (mode == .psk_dhe_ke) {
+                            pkem_ok = true;
+                        }
                     }
-                }
-                if (!pkem_ok) {
-                    return Error.IllegalParameter;
-                }
-                const opsk = p.pre_shared_key.offeredPsks;
-                if (opsk.identities.items.len == 0) {
-                    return Error.IllegalParameter;
-                }
-                // TODO: select other identity if selected one is unavailable.
-                const id = opsk.identities.items[0].identity;
-                var id_stream = io.fixedBufferStream(id);
-                const ticket = try new_session_ticket.Ticket.decode(id_stream.reader(), self.allocator);
-                if (!std.mem.eql(u8, &ticket.key_name, &self.tls_server.ticket_key_name)) {
-                    return Error.IllegalParameter;
-                }
-                defer ticket.deinit();
+                    if (!pkem_ok) {
+                        return Error.IllegalParameter;
+                    }
+                    const opsk = p.pre_shared_key.offeredPsks;
+                    if (opsk.identities.items.len == 0) {
+                        return Error.IllegalParameter;
+                    }
+                    // TODO: select other identity if selected one is unavailable.
+                    const id = opsk.identities.items[0].identity;
+                    var id_stream = io.fixedBufferStream(id);
+                    const ticket = try new_session_ticket.Ticket.decode(id_stream.reader(), self.allocator);
+                    if (!std.mem.eql(u8, &ticket.key_name, &self.tls_server.ticket_key_name)) {
+                        return Error.IllegalParameter;
+                    }
+                    defer ticket.deinit();
 
-                const state = try ticket.decryptState(self.tls_server.ticket_key);
+                    const state = try ticket.decryptState(self.tls_server.ticket_key);
 
-                self.cipher_suite = state.cipher_suite;
-                self.ks = try key.KeyScheduler.fromCipherSuite(self.cipher_suite);
+                    self.cipher_suite = state.cipher_suite;
+                    self.ks = try key.KeyScheduler.fromCipherSuite(self.cipher_suite);
 
-                // TODO: commonize with client
-                try self.ks.generateEarlySecrets1(state.master_secret.slice());
-                var prk = try crypto.DigestBoundedArray.init(self.ks.hkdf.digest_length);
-                try self.ks.hkdf.deriveSecret(prk.slice(), self.ks.secret.early_secret.slice(), "res binder", "");
-                var fin_secret = try crypto.DigestBoundedArray.init(self.ks.hkdf.digest_length);
-                try self.ks.hkdf.hkdfExpandLabel(fin_secret.slice(), prk.slice(), "finished", "", self.ks.hkdf.digest_length);
+                    // TODO: commonize with client
+                    try self.ks.generateEarlySecrets1(state.master_secret.slice());
+                    var prk = try crypto.DigestBoundedArray.init(self.ks.hkdf.digest_length);
+                    try self.ks.hkdf.deriveSecret(prk.slice(), self.ks.secret.early_secret.slice(), "res binder", "");
+                    var fin_secret = try crypto.DigestBoundedArray.init(self.ks.hkdf.digest_length);
+                    try self.ks.hkdf.hkdfExpandLabel(fin_secret.slice(), prk.slice(), "finished", "", self.ks.hkdf.digest_length);
 
-                // retrieving client hello without binders
-                // Below index calculation considers resumptions containing both non-HRR and HRR.
-                // TODO: is this OK?
-                const last_chb_idx = (try self.msgs_stream.getPos()) - opsk.binders.len - 2;
-                var binder_bytes: [1024 * 4]u8 = undefined;
-                var binder_stream = io.fixedBufferStream(&binder_bytes);
-                _ = try binder_stream.write(self.msgs_stream.getWritten()[0..last_chb_idx]);
+                    // retrieving client hello without binders
+                    // Below index calculation considers resumptions containing both non-HRR and HRR.
+                    // TODO: is this OK?
+                    const last_chb_idx = (try self.msgs_stream.getPos()) - opsk.binders.len - 2;
+                    var binder_bytes: [1024 * 4]u8 = undefined;
+                    var binder_stream = io.fixedBufferStream(&binder_bytes);
+                    _ = try binder_stream.write(self.msgs_stream.getWritten()[0..last_chb_idx]);
 
-                const fin = try Finished.fromMessageBytes(binder_stream.getWritten(), fin_secret.slice(), self.ks.hkdf);
-                if (fin.verify_data.len != opsk.binders[0]) {
-                    return Error.IllegalParameter;
-                }
-                if (!std.mem.eql(u8, fin.verify_data.slice(), opsk.binders[1..])) {
-                    return Error.IllegalParameter;
-                }
-                self.resumed = true;
-                std.log.debug("PSK for session resumption has been accepted.", .{});
-            } else |_| {
+                    const fin = try Finished.fromMessageBytes(binder_stream.getWritten(), fin_secret.slice(), self.ks.hkdf);
+                    if (fin.verify_data.len != opsk.binders[0]) {
+                        return Error.IllegalParameter;
+                    }
+                    if (!std.mem.eql(u8, fin.verify_data.slice(), opsk.binders[1..])) {
+                        return Error.IllegalParameter;
+                    }
+                    self.resumed = true;
+                    std.log.debug("PSK for session resumption has been accepted.", .{});
+                } else |_| {}
+            }
+            if (!self.resumed) {
                 // Selecting CiperSuite
                 // CiperSuite is selected on First Flight
                 if (!self.already_sent_hrr) {

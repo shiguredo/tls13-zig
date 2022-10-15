@@ -4,7 +4,7 @@ LABEL maintainer="naoki9911(Naoki MATSUMOTO) <m.naoki9911@gmail.com>"
 
 # install build dependencies
 RUN apt-get update && apt-get upgrade -y
-RUN DEBIAN_FRONTEND=noninteractive apt-get install -y openssl jq curl perl xz-utils bsdmainutils netcat
+RUN DEBIAN_FRONTEND=noninteractive apt-get install -y openssl jq curl perl xz-utils bsdmainutils netcat patch
 
 RUN mkdir /tls13-zig
 COPY . /tls13-zig

@@ -673,6 +673,11 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
                     const state = try ticket.decryptState(self.tls_server.ticket_key);
 
+                    // Check ticket is not expired.
+                    if (std.time.timestamp() > state.timestamp + 3600) {
+                        return Error.IllegalParameter;
+                    }
+
                     self.cipher_suite = state.cipher_suite;
                     self.ks = try key.KeyScheduler.fromCipherSuite(self.cipher_suite);
 

@@ -39,6 +39,7 @@ const RecordSizeLimit = @import("record_size_limit.zig").RecordSizeLimit;
 const PskKeyExchangeModes = @import("psk_key_exchange_modes.zig").PskKeyExchangeModes;
 const new_session_ticket = @import("new_session_ticket.zig");
 const pre_shared_key = @import("pre_shared_key.zig");
+const EarlyData = @import("early_data.zig").EarlyData;
 
 const Content = @import("content.zig").Content;
 const ContentType = @import("content.zig").ContentType;
@@ -79,6 +80,8 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
         ticket_key_name: [16]u8 = undefined,
         ticket_key: [Aes128Gcm.key_length]u8 = undefined,
         accept_resume: bool = false,
+        accept_early_data: bool = false,
+        early_protector: RecordPayloadProtector = undefined,
 
         // Misc
         allocator: std.mem.Allocator,
@@ -204,6 +207,8 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
         random: [32]u8,
         session_id: msg.SessionID,
         resumed: bool = false,
+        accept_early_data: bool = false,
+        early_protector: RecordPayloadProtector = undefined,
 
         // engines
         write_engine: common.WriteEngine(io.BufferedWriter(4096, WriterType), .server) = undefined,
@@ -453,6 +458,11 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 try self.sendCertificate();
                 try self.sendCertificateVerify();
             }
+
+            self.read_engine = .{
+                .entity = self,
+            };
+
             try self.sendFinished();
 
             try self.write_buffer.flush();
@@ -464,6 +474,55 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
             if (self.tls_server.print_keys) {
                 self.ks.printKeys(&self.random);
+            }
+
+            // wait for early_data
+            var early_data_ok = !self.accept_early_data;
+            while (!early_data_ok) {
+                if (self.read_engine.?.recv_contents == null) {
+                    self.read_engine.?.recv_contents = ArrayList(Content).init(self.allocator);
+                }
+                t = try self.reader.readEnum(ContentType, .Big);
+                if (t == .change_cipher_spec) {
+                    const r = try TLSPlainText.decode(self.reader, t, self.allocator, null, null);
+                    defer r.deinit();
+                } else if (t == .alert) {
+                    const r = try TLSPlainText.decode(self.reader, t, self.allocator, null, null);
+                    defer r.deinit();
+                    const alert = r.content.alert;
+                    std.log.err("alert = {}", .{alert});
+                } else if (t == .application_data) {
+                    const c_record = try TLSCipherText.decode(self.reader, t, self.allocator);
+                    defer c_record.deinit();
+
+                    var p_record = try self.early_protector.decrypt(c_record, self.allocator);
+                    defer p_record.deinit();
+                    if (p_record.content_type != .application_data and p_record.content_type != .handshake) {
+                        std.log.warn("unexpected message type={s}", .{@tagName(p_record.content_type)});
+                        continue;
+                    }
+
+                    switch (p_record.content_type) {
+                        .application_data => {
+                            const ap_contents = try p_record.decodeContents(self.allocator, self.ks.hkdf);
+                            defer ap_contents.deinit();
+                            for (ap_contents.items) |c| {
+                                try self.read_engine.?.recv_contents.?.append(c);
+                            }
+                            std.log.debug("received EarlyData", .{});
+                        },
+                        .handshake => {
+                            const eoed = (try p_record.decodeContent(self.allocator, self.ks.hkdf)).handshake;
+                            defer eoed.deinit();
+
+                            // End Of Early Data is also included in Handshake Context.
+                            _ = try eoed.encode(self.msgs_stream.writer());
+                            early_data_ok = true;
+                            std.log.debug("received EndOfEarlyData", .{});
+                        },
+                        else => unreachable,
+                    }
+                }
             }
 
             // wait for Finished.
@@ -527,10 +586,6 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 .write_buffer = &self.write_buffer,
                 .allocator = self.allocator,
                 .record_size_limit = self.tls_server.record_size_limit,
-            };
-
-            self.read_engine = .{
-                .entity = self,
             };
 
             try self.sendNewSessionTicket();
@@ -736,6 +791,19 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             if (!sn_ok) {
                 return Error.UnknownServerName;
             }
+
+            // Checking EarlyData extension
+            if (!self.already_sent_hrr and self.resumed and self.tls_server.accept_early_data) {
+                if (msg.getExtension(ch.extensions, .early_data)) |ed| {
+                    _ = ed.early_data;
+                    self.accept_early_data = true;
+                    std.log.debug("EarlyDatas will be accepted", .{});
+                    self.early_protector = RecordPayloadProtector.init(self.ks.aead, self.ks.secret.c_early_ap_keys, self.ks.secret.c_early_ap_keys);
+                } else |_| {
+                    self.accept_early_data = false;
+                    std.log.debug("EarlyDatas will not be accepted", .{});
+                }
+            }
         }
 
         fn sendServerHello(self: *Self) !void {
@@ -770,6 +838,13 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             if (self.tls_server.record_size_limit != (2 << 13)) {
                 const rsl = RecordSizeLimit{ .record_size_limit = self.tls_server.record_size_limit };
                 try ee.extensions.append(.{ .record_size_limit = rsl });
+            }
+
+            if (self.accept_early_data) {
+                const ed = EarlyData{
+                    .msg_type = .encrypted_extensions,
+                };
+                try ee.extensions.append(.{ .early_data = ed });
             }
 
             const cont_ee = Content{ .handshake = .{ .encrypted_extensions = ee } };
@@ -878,6 +953,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
         }
 
         fn handleFinished(self: *Self, fin: Finished) !void {
+            std.log.debug("FINISHED={}", .{std.fmt.fmtSliceHexLower(self.ks.secret.c_hs_finished_secret.slice())});
             std.log.debug("receieved Finished", .{});
             if (!fin.verify(self.msgs_stream.getWritten(), self.ks.secret.c_hs_finished_secret.slice())) {
                 return Error.InvalidFinished;
@@ -901,7 +977,14 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             const ticket = try new_session_ticket.Ticket.fromStatePlaintext(self.tls_server.ticket_key_name, self.tls_server.ticket_key, nonce, state, self.allocator);
             defer ticket.deinit();
 
-            const nst = try new_session_ticket.NewSessionTicket.fromTicket(ticket, self.allocator);
+            var nst = try new_session_ticket.NewSessionTicket.fromTicket(ticket, self.allocator);
+            // if the server accepts EarlyData, add EarlyData extension into NST extensions.
+            if (self.tls_server.accept_resume and self.tls_server.accept_early_data) {
+                try nst.extensions.append(.{ .early_data = EarlyData{
+                    .msg_type = .new_session_ticket,
+                    .max_early_data_size = self.tls_server.record_size_limit,
+                } });
+            }
             const c = Content{ .handshake = Handshake{ .new_session_ticket = nst } };
             defer c.deinit();
 

@@ -138,11 +138,7 @@ pub fn main() !void {
   - [ ] Send 'alert' when an error occur.
 - [x] Support KeyUpdate.
 - [x] Support NewSessionTicket.
-- [ ] Support 0-RTT handshake(resumption).
-  - [x] Support extension pre_shared_key.
-  - [x] Support extension early_data.
-  - [x] ClientSide
-  - [ ] ServerSide(resumption is supported, but early_data is not supported)
+- [x] Support 0-RTT handshake(resumption). (disabled in server by default)
 - [ ] Add more E2E tests.
     - [ ] Static tests for server.
     - [ ] Server tests with Web browser.

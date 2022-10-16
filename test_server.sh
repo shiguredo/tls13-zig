@@ -77,3 +77,12 @@ if [ $? -eq 0 ]; then
 else
     echo "FAILED"
 fi
+
+# Testing 0-RTT Data
+RESULT=$(openssl s_client -servername localhost -connect localhost:8443 -ign_eof -sess_in sess.pem -early_data early_data.txt)
+echo $RESULT | grep "Early data was accepted.*tls13-zig" > /dev/null
+if [ $? -eq 0 ]; then
+    echo "OK"
+else
+    echo "FAILED"
+fi

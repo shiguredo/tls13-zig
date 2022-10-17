@@ -140,6 +140,8 @@ pub const ECPrivateKey = struct {
     }
 };
 
+// PKCS#1(RFC8017) A.1.2.  RSA Private Key Syntax
+//
 // RSAPrivateKey ::= SEQUENCE {
 //     version           Version,
 //     modulus           INTEGER,  -- n

@@ -2,7 +2,7 @@ const std = @import("std");
 const io = std.io;
 const expect = std.testing.expect;
 const expectError = std.testing.expectError;
-const asn1 = @import("cert/asn1.zig");
+const asn1 = @import("asn1.zig");
 
 const BoundedArray = std.BoundedArray;
 const ArrayList = std.ArrayList;

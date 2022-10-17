@@ -5,7 +5,7 @@ const ArrayList = std.ArrayList;
 const BoundedArray = std.BoundedArray;
 
 const msg = @import("msg.zig");
-const x509 = @import("x509.zig");
+const x509 = @import("crypto/x509.zig");
 const Extension = @import("extension.zig").Extension;
 
 /// RFC8446 Section 4.4.2 Certificate

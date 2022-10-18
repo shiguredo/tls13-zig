@@ -10,7 +10,6 @@ RUN mkdir /tls13-zig
 COPY . /tls13-zig
 
 RUN /tls13-zig/install_zig.sh
-RUN patch -u /root/.local/zig-master/lib/std/os.zig /tls13-zig/os_send.patch
 ENV PATH $PATH:/root/.local/zig-master
 
 # Standby

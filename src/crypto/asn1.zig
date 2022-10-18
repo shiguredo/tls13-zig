@@ -154,6 +154,21 @@ pub const Decoder = struct {
 
         return content;
     }
+
+    pub fn decodeOCTETSTRING(reader: anytype, allocator: std.mem.Allocator) ![]u8 {
+        const t = @intToEnum(Tag, try reader.readByte());
+        if (t != .OCTET_STRING) {
+            return Error.InvalidType;
+        }
+        const len = try decodeLength(reader);
+        var content = try allocator.alloc(u8, len);
+        errdefer allocator.free(content);
+
+        // read all content
+        try reader.readNoEof(content);
+
+        return content;
+    }
 };
 
 pub const ObjectIdentifier = struct {

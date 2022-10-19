@@ -21,22 +21,22 @@ pub const PrivateKey = union(PrivateKeyType) {
     }
 };
 
-// RFC5915 Section3 Eppliptic Curve Private KEy Format
-//
-// ECPrivateKey ::= SEQUENCE {
-//   version        INTEGER { ecPrivkeyVer1(1) } (ecPrivkeyVer1),
-//   privateKey     OCTET STRING,
-//   parameters [0] ECParameters {{ NamedCurve }} OPTIONAL,
-//   publicKey  [1] BIT STRING OPTIONAL
-// }
-//
-// RFC 5480 Section 2.1.1.1 Named Curve
-//
-//ECParameters ::= CHOICE {
-//  namedCurve         OBJECT IDENTIFIER
-//  -- implicitCurve   NULL
-//  -- specifiedCurve  SpecifiedECDomain
-//}
+/// RFC5915 Section3 Eppliptic Curve Private KEy Format
+///
+/// ECPrivateKey ::= SEQUENCE {
+///   version        INTEGER { ecPrivkeyVer1(1) } (ecPrivkeyVer1),
+///   privateKey     OCTET STRING,
+///   parameters [0] ECParameters {{ NamedCurve }} OPTIONAL,
+///   publicKey  [1] BIT STRING OPTIONAL
+/// }
+///
+/// RFC 5480 Section 2.1.1.1 Named Curve
+///
+/// ECParameters ::= CHOICE {
+///   namedCurve         OBJECT IDENTIFIER
+///   -- implicitCurve   NULL
+///   -- specifiedCurve  SpecifiedECDomain
+/// }
 pub const ECPrivateKey = struct {
     privateKey: []u8,
     namedCurve: ?asn1.ObjectIdentifier = null,
@@ -140,20 +140,20 @@ pub const ECPrivateKey = struct {
     }
 };
 
-// PKCS#1(RFC8017) A.1.2.  RSA Private Key Syntax
-//
-// RSAPrivateKey ::= SEQUENCE {
-//     version           Version,
-//     modulus           INTEGER,  -- n
-//     publicExponent    INTEGER,  -- e
-//     privateExponent   INTEGER,  -- d
-//     prime1            INTEGER,  -- p
-//     prime2            INTEGER,  -- q
-//     exponent1         INTEGER,  -- d mod (p-1)
-//     exponent2         INTEGER,  -- d mod (q-1)
-//     coefficient       INTEGER,  -- (inverse of q) mod p
-//     otherPrimeInfos   OtherPrimeInfos OPTIONAL
-// }
+/// PKCS#1(RFC8017) A.1.2.  RSA Private Key Syntax
+///
+/// RSAPrivateKey ::= SEQUENCE {
+///     version           Version,
+///     modulus           INTEGER,  -- n
+///     publicExponent    INTEGER,  -- e
+///     privateExponent   INTEGER,  -- d
+///     prime1            INTEGER,  -- p
+///     prime2            INTEGER,  -- q
+///     exponent1         INTEGER,  -- d mod (p-1)
+///     exponent2         INTEGER,  -- d mod (q-1)
+///     coefficient       INTEGER,  -- (inverse of q) mod p
+///     otherPrimeInfos   OtherPrimeInfos OPTIONAL
+/// }
 pub const RSAPrivateKey = struct {
     version: u8,
     modulus: []u8,

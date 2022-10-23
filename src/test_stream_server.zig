@@ -12,7 +12,7 @@ fn do(allocator: std.mem.Allocator) !void {
     // key and certificates need to be der-formatted.
     // if you want to use RSAPrivateKey, please change '.ec' to '.rsa'.
     // The procedure to generate test certificate is described in test/gen_cert.sh
-    var tls_server = try server.TLSServerTCP.init("./test/key.der", .ec, "./test/cert.der", null, "localhost", allocator);
+    var tls_server = try server.TLSServerTCP.init("./test/key.pem", "./test/cert.der", null, "localhost", allocator);
     defer tls_server.deinit();
 
     // Enable KEYLOG output.

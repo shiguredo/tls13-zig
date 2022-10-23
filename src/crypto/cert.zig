@@ -43,10 +43,16 @@ pub const Error = error{
 
 pub fn decodePrivateKey(k: []const u8, allocator: std.mem.Allocator) !PrivateKey {
     if (isPEMFormatted(k)) {
-        const pem_key = try pkcs8.OneAsymmetricKey.decodeFromPEM(k, allocator);
-        defer pem_key.deinit();
-
-        return try pem_key.decodePrivateKey();
+        if (pkcs8.OneAsymmetricKey.decodeFromPEM(k, allocator)) |pem_key| {
+            defer pem_key.deinit();
+            return try pem_key.decodePrivateKey();
+        } else |_| {
+            if (private_key.RSAPrivateKey.decodeFromPEM(k, allocator)) |pk_rsa| {
+                return .{ .rsa = pk_rsa };
+            } else |_| {
+                return Error.UnsupportedPrivateKeyFormat;
+            }
+        }
     } else {
         var stream = io.fixedBufferStream(k);
         if (private_key.RSAPrivateKey.decode(stream.reader(), allocator)) |pk_rsa| {

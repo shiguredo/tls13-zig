@@ -1,6 +1,7 @@
 const std = @import("std");
 const io = std.io;
 const asn1 = @import("asn1.zig");
+const cert = @import("cert.zig");
 const expect = std.testing.expect;
 
 pub const PrivateKeyType = enum(u8) {
@@ -253,6 +254,16 @@ pub const RSAPrivateKey = struct {
         var stream = io.fixedBufferStream(fb);
 
         return try Self.decode(stream.reader(), allocator);
+    }
+
+    pub fn decodeFromPEM(pem: []const u8, allocator: std.mem.Allocator) !Self {
+        const decoded_content = try cert.convertPEMToDER(pem, "RSA PRIVATE KEY", allocator);
+        defer allocator.free(decoded_content);
+
+        var stream_decode = io.fixedBufferStream(decoded_content);
+        const key = try Self.decode(stream_decode.reader(), allocator);
+
+        return key;
     }
 };
 

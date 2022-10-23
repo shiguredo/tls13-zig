@@ -4,6 +4,7 @@ const base64 = std.base64;
 const private_key = @import("private_key.zig");
 const asn1 = @import("asn1.zig");
 const x509 = @import("x509.zig");
+const cert = @import("cert.zig");
 
 const expect = std.testing.expect;
 
@@ -121,43 +122,10 @@ pub const OneAsymmetricKey = struct {
     }
 
     pub fn decodeFromPEM(pem: []const u8, allocator: std.mem.Allocator) !Self {
-        if (pem.len < BEGIN_PRIVATE_KEY.len) {
-            return Error.InvalidFormat;
-        }
-        const begin = pem[0..BEGIN_PRIVATE_KEY.len];
-        if (!std.mem.eql(u8, BEGIN_PRIVATE_KEY, begin)) {
-            return Error.InvalidFormat;
-        }
-
-        // Searching for "END PRIVATE KEY"
-        var end_idx = BEGIN_PRIVATE_KEY.len;
-        var end_ok = false;
-        while (end_idx < pem.len - END_PRIVATE_KEY.len and !end_ok) : (end_idx += 1) {
-            end_ok = std.mem.eql(u8, END_PRIVATE_KEY, pem[end_idx + 1 .. end_idx + 1 + END_PRIVATE_KEY.len]);
-        }
-        if (!end_ok) {
-            return Error.InvalidFormat;
-        }
-
-        var base64_decoder = base64.Base64Decoder.init(base64.standard_alphabet_chars, null);
-        var decoded_content = try allocator.alloc(u8, end_idx - BEGIN_PRIVATE_KEY.len);
+        const decoded_content = try cert.convertPEMToDER(pem, "PRIVATE KEY", allocator);
         defer allocator.free(decoded_content);
 
-        const content = pem[BEGIN_PRIVATE_KEY.len..end_idx];
         var stream_decode = io.fixedBufferStream(decoded_content);
-        var idx: usize = 0;
-        var content_length: usize = 0;
-        while (idx < content.len) : (idx += 1) {
-            if (content[idx] == '\n' or content[idx] == '=') {
-                continue;
-            }
-            _ = try stream_decode.write(&[_]u8{content[idx]});
-            content_length += 1;
-        }
-
-        try base64_decoder.decode(decoded_content, decoded_content[0..content_length]);
-
-        stream_decode = io.fixedBufferStream(decoded_content[0..content_length]);
         const key = try Self.decode(stream_decode.reader(), allocator);
 
         return key;

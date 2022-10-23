@@ -1,5 +1,6 @@
 const std = @import("std");
 const io = std.io;
+const base64 = std.base64;
 const pkcs8 = @import("pkcs8.zig");
 const private_key = @import("private_key.zig");
 const PrivateKey = private_key.PrivateKey;
@@ -36,6 +37,7 @@ fn isPEMFormatted(content: []const u8) bool {
 }
 
 pub const Error = error{
+    InvalidFormat,
     UnsupportedPrivateKeyFormat,
 };
 
@@ -58,4 +60,50 @@ pub fn decodePrivateKey(k: []const u8, allocator: std.mem.Allocator) !PrivateKey
             }
         }
     }
+}
+
+pub fn convertPEMToDER(pem: []const u8, comptime label: []const u8, allocator: std.mem.Allocator) ![]u8 {
+    const BEGIN_LABEL = "-----BEGIN " ++ label ++ "-----\n";
+    const END_LABEL = "-----END " ++ label ++ "-----";
+
+    if (pem.len < BEGIN_LABEL.len) {
+        return Error.InvalidFormat;
+    }
+    const begin = pem[0..BEGIN_LABEL.len];
+    if (!std.mem.eql(u8, BEGIN_LABEL, begin)) {
+        return Error.InvalidFormat;
+    }
+
+    // Searching for END_LABEL
+    var end_idx = BEGIN_LABEL.len;
+    var end_ok = false;
+    while (end_idx < pem.len - END_LABEL.len and !end_ok) : (end_idx += 1) {
+        end_ok = std.mem.eql(u8, END_LABEL, pem[end_idx + 1 .. end_idx + 1 + END_LABEL.len]);
+    }
+    if (!end_ok) {
+        return Error.InvalidFormat;
+    }
+
+    var base64_decoder = base64.Base64Decoder.init(base64.standard_alphabet_chars, null);
+    var decode_content = try allocator.alloc(u8, end_idx - BEGIN_LABEL.len);
+    defer allocator.free(decode_content);
+
+    const content = pem[BEGIN_LABEL.len..end_idx];
+    var stream_decode = io.fixedBufferStream(decode_content);
+    var idx: usize = 0;
+    var content_length: usize = 0;
+    while (idx < content.len) : (idx += 1) {
+        if (content[idx] == '\n' or content[idx] == '=') {
+            continue;
+        }
+        _ = try stream_decode.write(&[_]u8{content[idx]});
+        content_length += 1;
+    }
+
+    var decoded_content = try allocator.alloc(u8, content_length);
+    errdefer allocator.free(decoded_content);
+
+    try base64_decoder.decode(decoded_content, decode_content[0..content_length]);
+
+    return decoded_content;
 }

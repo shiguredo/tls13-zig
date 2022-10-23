@@ -18,7 +18,6 @@ const signature_scheme = @import("signature_scheme.zig");
 const server_name = @import("server_name.zig");
 const crypto = @import("crypto.zig");
 const x509 = @import("crypto/x509.zig");
-const private_key = @import("crypto/private_key.zig");
 const common = @import("common.zig");
 const ServerHello = @import("server_hello.zig").ServerHello;
 const ClientHello = @import("client_hello.zig").ClientHello;
@@ -65,7 +64,7 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         // certificate
         cert: certificate.CertificateEntry,
-        cert_key: private_key.PrivateKey,
+        cert_key: crypto.PrivateKey,
 
         ca_cert: ?certificate.CertificateEntry = null,
 
@@ -92,11 +91,7 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         const Self = @This();
 
-        const Error = error{
-            UnsupportedPrivateKey,
-        };
-
-        pub fn init(key_path: []const u8, key_type: private_key.PrivateKeyType, cert_path: []const u8, ca_path: ?[]const u8, host: ?[]const u8, allocator: std.mem.Allocator) !Self {
+        pub fn init(key_path: []const u8, cert_path: []const u8, ca_path: ?[]const u8, host: ?[]const u8, allocator: std.mem.Allocator) !Self {
             // ignore SIGPIPE
             var act = os.Sigaction{
                 .handler = .{ .handler = os.SIG.IGN },
@@ -105,30 +100,9 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
             };
             try os.sigaction(os.SIG.PIPE, &act, null);
 
-            var pkey: private_key.PrivateKey = undefined;
-            switch (key_type) {
-                .rsa => {
-                    const cert_keys = try private_key.RSAPrivateKey.fromDer(key_path, allocator);
-                    pkey = .{ .rsa = cert_keys };
-                },
-                .ec => {
-                    const cert_keys = try private_key.ECPrivateKey.fromDer(key_path, allocator);
-                    if (cert_keys.namedCurve) |n| {
-                        if (!std.mem.eql(u8, n.id, "1.2.840.10045.3.1.7")) {
-                            // currently, only accepts secp256r1.
-                            return Error.UnsupportedPrivateKey;
-                        }
-                    } else {
-                        return Error.UnsupportedPrivateKey;
-                    }
-
-                    pkey = .{ .ec = cert_keys };
-                },
-            }
-
             var res = Self{
                 .cert = try certificate.CertificateEntry.fromDerFile(cert_path, allocator),
-                .cert_key = pkey,
+                .cert_key = try crypto.cert.readPrivateKeyFromFile(key_path, allocator),
 
                 .allocator = allocator,
             };

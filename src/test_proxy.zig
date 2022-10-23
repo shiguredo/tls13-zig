@@ -21,7 +21,7 @@ pub fn main() !void {
     // Especially, RSAPrivateKey need to be PKCS#1.
     // To convert PEM key, use 'openssl rsa -outform der -in key.pem -out key.der -traditional'
     // Currently, only one CA certificate is supported.
-    var tls_server = try server.TLSServerTCP.init("./test-certs/key.der", .rsa, "./test-certs/cert.der", "./test-certs/chain.der", "tls13.pibvt.net", allocator);
+    var tls_server = try server.TLSServerTCP.init("./test-certs/key.pem", "./test-certs/cert.der", "./test-certs/chain.der", "tls13.pibvt.net", allocator);
     defer tls_server.deinit();
     tls_server.print_keys = true;
     try tls_server.listen(8443);

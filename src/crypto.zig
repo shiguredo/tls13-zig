@@ -1,7 +1,9 @@
 const std = @import("std");
 const mem = std.mem;
-
 const BoundedArray = std.BoundedArray;
+
+pub const cert = @import("crypto/cert.zig");
+pub const PrivateKey = @import("crypto/private_key.zig").PrivateKey;
 
 pub const HashType = enum {
     SHA256,

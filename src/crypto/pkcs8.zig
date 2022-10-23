@@ -129,16 +129,18 @@ pub const OneAsymmetricKey = struct {
             return Error.InvalidFormat;
         }
 
-        const end_idx = pem.len - END_PRIVATE_KEY.len;
-        if (end_idx < 0) {
-            return Error.InvalidFormat;
+        // Searching for "END PRIVATE KEY"
+        var end_idx = BEGIN_PRIVATE_KEY.len;
+        var end_ok = false;
+        while (end_idx < pem.len - END_PRIVATE_KEY.len and !end_ok) : (end_idx += 1) {
+            end_ok = std.mem.eql(u8, END_PRIVATE_KEY, pem[end_idx + 1 .. end_idx + 1 + END_PRIVATE_KEY.len]);
         }
-        if (!std.mem.eql(u8, END_PRIVATE_KEY, pem[end_idx..])) {
+        if (!end_ok) {
             return Error.InvalidFormat;
         }
 
         var base64_decoder = base64.Base64Decoder.init(base64.standard_alphabet_chars, null);
-        var decoded_content = try allocator.alloc(u8, pem.len - BEGIN_PRIVATE_KEY.len - END_PRIVATE_KEY.len);
+        var decoded_content = try allocator.alloc(u8, end_idx - BEGIN_PRIVATE_KEY.len);
         defer allocator.free(decoded_content);
 
         const content = pem[BEGIN_PRIVATE_KEY.len..end_idx];

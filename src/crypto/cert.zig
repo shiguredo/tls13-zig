@@ -44,10 +44,14 @@ pub fn readPrivateKeyFromFile(key_path: []const u8, allocator: std.mem.Allocator
 /// RFC7468
 fn isPEMFormatted(content: []const u8) bool {
     const BEGIN = "-----BEGIN ";
-    if (content.len < BEGIN.len) {
-        return false;
+    var begin_idx: usize = 0;
+    while(begin_idx < content.len - BEGIN.len) : (begin_idx += 1) {
+        if (std.mem.eql(u8, content[begin_idx..begin_idx + BEGIN.len], BEGIN)) {
+            return true;
+        }
     }
-    return std.mem.eql(u8, content[0..BEGIN.len], BEGIN);
+
+    return false;
 }
 
 pub const Error = error{
@@ -86,16 +90,21 @@ pub fn convertPEMToDER(pem: []const u8, comptime label: []const u8, allocator: s
     const BEGIN_LABEL = "-----BEGIN " ++ label ++ "-----\n";
     const END_LABEL = "-----END " ++ label ++ "-----";
 
-    if (pem.len < BEGIN_LABEL.len) {
-        return Error.InvalidFormat;
+    // Searching for BEGIN_LABEL
+    var begin_idx: usize = 0;
+    var begin_ok = false;
+    while (begin_idx < pem.len - BEGIN_LABEL.len and !begin_ok) : (begin_idx += 1) {
+        begin_ok = std.mem.eql(u8, BEGIN_LABEL, pem[begin_idx .. begin_idx + BEGIN_LABEL.len]);
+        if (begin_ok) {
+            break;
+        }
     }
-    const begin = pem[0..BEGIN_LABEL.len];
-    if (!std.mem.eql(u8, BEGIN_LABEL, begin)) {
+    if (!begin_ok) {
         return Error.InvalidFormat;
     }
 
     // Searching for END_LABEL
-    var end_idx = BEGIN_LABEL.len;
+    var end_idx = begin_idx + BEGIN_LABEL.len;
     var end_ok = false;
     while (end_idx < pem.len - END_LABEL.len and !end_ok) : (end_idx += 1) {
         end_ok = std.mem.eql(u8, END_LABEL, pem[end_idx + 1 .. end_idx + 1 + END_LABEL.len]);
@@ -105,10 +114,10 @@ pub fn convertPEMToDER(pem: []const u8, comptime label: []const u8, allocator: s
     }
 
     var base64_decoder = base64.Base64Decoder.init(base64.standard_alphabet_chars, null);
-    var decode_content = try allocator.alloc(u8, end_idx - BEGIN_LABEL.len);
+    var decode_content = try allocator.alloc(u8, end_idx - BEGIN_LABEL.len - begin_idx);
     defer allocator.free(decode_content);
 
-    const content = pem[BEGIN_LABEL.len..end_idx];
+    const content = pem[begin_idx + BEGIN_LABEL.len .. end_idx];
     var stream_decode = io.fixedBufferStream(decode_content);
     var idx: usize = 0;
     var content_length: usize = 0;

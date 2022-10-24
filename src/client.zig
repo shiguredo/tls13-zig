@@ -1394,8 +1394,7 @@ test "RFC8448 Section 5. HelloRetryRequest" {
     try hkdf.hkdfExpandLabel(&out, &prk, "finished", "", 32);
     try expect(std.mem.eql(u8, &out, &expand_ans));
 
-    const fin = try Finished.fromMessageBytes(ch_bytes[0..last_chb_idx], &out, hkdf);
-    std.log.warn("FIN={}", .{std.fmt.fmtSliceHexLower(fin.verify_data.slice())});
+    _ = try Finished.fromMessageBytes(ch_bytes[0..last_chb_idx], &out, hkdf);
 }
 
 // whether certificate hostname with possible star certificate

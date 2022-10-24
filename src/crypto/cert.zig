@@ -106,10 +106,10 @@ pub fn convertPEMToDER(pem: []const u8, comptime label: []const u8, allocator: s
         content_length += 1;
     }
 
-    var decoded_content = try allocator.alloc(u8, content_length);
+    var decoded_content = try allocator.alloc(u8, try base64_decoder.calcSizeForSlice(stream_decode.getWritten()));
     errdefer allocator.free(decoded_content);
 
-    try base64_decoder.decode(decoded_content, decode_content[0..content_length]);
+    try base64_decoder.decode(decoded_content, stream_decode.getWritten());
 
     return decoded_content;
 }

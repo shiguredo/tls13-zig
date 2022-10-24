@@ -101,7 +101,7 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
             try os.sigaction(os.SIG.PIPE, &act, null);
 
             var res = Self{
-                .cert = try certificate.CertificateEntry.fromDerFile(cert_path, allocator),
+                .cert = try certificate.CertificateEntry.fromFile(cert_path, allocator),
                 .cert_key = try crypto.cert.readPrivateKeyFromFile(key_path, allocator),
 
                 .allocator = allocator,
@@ -111,7 +111,7 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
             random.bytes(&res.ticket_key);
 
             if (ca_path) |p| {
-                res.ca_cert = try certificate.CertificateEntry.fromDerFile(p, allocator);
+                res.ca_cert = try certificate.CertificateEntry.fromFile(p, allocator);
             }
 
             if (host) |h| {

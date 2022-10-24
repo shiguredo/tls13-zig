@@ -6,6 +6,7 @@ const BoundedArray = std.BoundedArray;
 
 const msg = @import("msg.zig");
 const x509 = @import("crypto/x509.zig");
+const crypto = @import("crypto.zig");
 const Extension = @import("extension.zig").Extension;
 
 /// RFC8446 Section 4.4.2 Certificate
@@ -143,28 +144,18 @@ pub const CertificateEntry = struct {
 
     const Error = error{UnsupportedCertificate};
 
-    /// load x509 der formatted certificate from file.
-    /// @param der_path  path to certificate(both relative and absolute path are allowed).
+    /// load x509 certificate from file.
+    /// @param cert_path  path to certificate(both relative and absolute path are allowed).
     /// @param allocator allocator to allocate CertificateEntry.
     /// @return CertificateEntry with loaded certificate.
-    pub fn fromDerFile(der_path: []const u8, allocator: std.mem.Allocator) !Self {
-        // Get the path
-        var path_buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-        const path = try std.fs.realpath(der_path, &path_buffer);
-
-        // Open the file
-        const file = try std.fs.openFileAbsolute(path, .{});
-        defer file.close();
-
-        const fb = try file.readToEndAlloc(allocator, 10000);
-
-        var stream = io.fixedBufferStream(fb);
-
+    pub fn fromFile(cert_path: []const u8, allocator: std.mem.Allocator) !Self {
+        const cert_data = try crypto.cert.readCertificateFromFileToDer(cert_path, allocator);
+        var stream = io.fixedBufferStream(cert_data);
         return Self{
             .cert = try x509.Certificate.decode(stream.reader(), allocator),
-            .cert_len = fb.len,
+            .cert_len = cert_data.len,
             .extensions = ArrayList(Extension).init(allocator),
-            .cert_data = fb,
+            .cert_data = cert_data,
             .allocator = allocator,
         };
     }

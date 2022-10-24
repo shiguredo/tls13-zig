@@ -2,10 +2,11 @@ const std = @import("std");
 const io = std.io;
 const base64 = std.base64;
 const pkcs8 = @import("pkcs8.zig");
+const x509 = @import("x509.zig");
 const private_key = @import("private_key.zig");
 const PrivateKey = private_key.PrivateKey;
 
-pub fn readContentsFromFile(path: []const u8, allocator: std.mem.Allocator) ![]u8 {
+fn readContentsFromFile(path: []const u8, allocator: std.mem.Allocator) ![]u8 {
     // Get the path
     var path_buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
     const path_abs = try std.fs.realpath(path, &path_buffer);
@@ -18,6 +19,19 @@ pub fn readContentsFromFile(path: []const u8, allocator: std.mem.Allocator) ![]u
     errdefer allocator.free(fb);
 
     return fb;
+}
+
+pub fn readCertificateFromFileToDer(cert_path: []const u8, allocator: std.mem.Allocator) ![]u8 {
+    const cert_content = try readContentsFromFile(cert_path, allocator);
+    errdefer allocator.free(cert_content);
+
+    if (isPEMFormatted(cert_content)) {
+        const der_content = try convertPEMToDER(cert_content, "CERTIFICATE", allocator);
+        allocator.free(cert_content);
+        return der_content;
+    } else {
+        return cert_content;
+    }
 }
 
 pub fn readPrivateKeyFromFile(key_path: []const u8, allocator: std.mem.Allocator) !PrivateKey {

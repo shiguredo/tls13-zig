@@ -14,6 +14,7 @@ fn do(allocator: std.mem.Allocator) !void {
     var tls_client = try client.TLSClientTCP.init(allocator);
     defer tls_client.deinit();
     tls_client.print_keys = true;
+    tls_client.allow_self_signed = true;
     try tls_client.connect("localhost", 8443);
 
     const http_req = "GET / HTTP/1.1\r\nHost: localhost\r\nUser-Agent: tls13-zig\r\nAccept: */*\r\n\r\n";
@@ -29,6 +30,7 @@ fn do(allocator: std.mem.Allocator) !void {
     var tls_client_res = try client.TLSClientTCP.init(allocator);
     defer tls_client_res.deinit();
     tls_client_res.print_keys = true;
+    tls_client_res.allow_self_signed = true;
     tls_client_res.res_secret = tls_client.ks.secret.res_secret;
     tls_client_res.ks = try key.KeyScheduler.init(tls_client.ks.hkdf, tls_client.ks.aead);
     const nst = tls_client.session_ticket.?;

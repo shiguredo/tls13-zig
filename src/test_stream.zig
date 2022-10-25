@@ -33,6 +33,7 @@ fn do(start_n: usize, end_n: usize, allocator: std.mem.Allocator) !void {
     var tls_client = try client.TLSClientTCP.init(allocator);
     defer tls_client.deinit();
     tls_client.print_keys = true;
+    tls_client.allow_self_signed = true;
     try tls_client.connect("localhost", 8443);
 
     var recv_bytes = try allocator.alloc(u8, end_n);

@@ -195,8 +195,13 @@ pub const Certificate = struct {
 
         switch (issuer_c.tbs_certificate.subjectPublicKeyInfo.publicKey) {
             .rsa => |pubkey| {
-                // Currently, only supports 'sha256WithRSAEncryption'
-                if (!std.mem.eql(u8, self.signature_algorithm.algorithm.id, "1.2.840.113549.1.1.11")) {
+                const algo_id = self.signature_algorithm.algorithm.id;
+                // Currently, only supports '' abd
+                if (!std.mem.eql(u8, algo_id, "1.2.840.113549.1.1.5") and // sha1WithRSAEncryption
+                    !std.mem.eql(u8, algo_id, "1.2.840.113549.1.1.11") and // sha256WithRsaEncryption
+                    !std.mem.eql(u8, algo_id, "1.2.840.113549.1.1.12") and // sha384WithRsaEncryption
+                    !std.mem.eql(u8, algo_id, "1.2.840.113549.1.1.13")) // sha512WithRSAEncryption
+                {
                     std.log.warn("UnsupportedSignatureAlgorithm: {s}", .{self.signature_algorithm.algorithm.id});
                     return Error.UnsupportedSignatureAlgorithm;
                 }
@@ -208,31 +213,72 @@ pub const Certificate = struct {
                     const sig = rsa.Rsa2048.PKCS1V15Signature{ .signature = self.signature_value.value[0 .. 2048 / 8].* };
                     var p = try rsa.Rsa2048.PublicKey.fromBytes(pubkey.publicExponent, pubkey.modulus, self.allocator);
                     defer p.deinit();
-                    try sig.verify(self.cert_data, p, std.crypto.hash.sha2.Sha256, self.allocator);
+                    if (std.mem.eql(u8, algo_id, "1.2.840.113549.1.1.5")) {
+                        try sig.verify(self.cert_data, p, std.crypto.hash.Sha1, self.allocator);
+                    } else if (std.mem.eql(u8, algo_id, "1.2.840.113549.1.1.11")) {
+                        try sig.verify(self.cert_data, p, std.crypto.hash.sha2.Sha256, self.allocator);
+                    } else if (std.mem.eql(u8, algo_id, "1.2.840.113549.1.1.12")) {
+                        try sig.verify(self.cert_data, p, std.crypto.hash.sha2.Sha384, self.allocator);
+                    } else if (std.mem.eql(u8, algo_id, "1.2.840.113549.1.1.13")) {
+                        try sig.verify(self.cert_data, p, std.crypto.hash.sha2.Sha512, self.allocator);
+                    } else {
+                        unreachable;
+                    }
                 } else if (pubkey.modulus_length_bits == 4096) {
                     const sig = rsa.Rsa4096.PKCS1V15Signature{ .signature = self.signature_value.value[0 .. 4096 / 8].* };
                     var p = try rsa.Rsa4096.PublicKey.fromBytes(pubkey.publicExponent, pubkey.modulus, self.allocator);
                     defer p.deinit();
-                    try sig.verify(self.cert_data, p, std.crypto.hash.sha2.Sha256, self.allocator);
+                    if (std.mem.eql(u8, algo_id, "1.2.840.113549.1.1.5")) {
+                        try sig.verify(self.cert_data, p, std.crypto.hash.Sha1, self.allocator);
+                    } else if (std.mem.eql(u8, algo_id, "1.2.840.113549.1.1.11")) {
+                        try sig.verify(self.cert_data, p, std.crypto.hash.sha2.Sha256, self.allocator);
+                    } else if (std.mem.eql(u8, algo_id, "1.2.840.113549.1.1.12")) {
+                        try sig.verify(self.cert_data, p, std.crypto.hash.sha2.Sha384, self.allocator);
+                    } else if (std.mem.eql(u8, algo_id, "1.2.840.113549.1.1.13")) {
+                        try sig.verify(self.cert_data, p, std.crypto.hash.sha2.Sha512, self.allocator);
+                    } else {
+                        unreachable;
+                    }
                 } else {
                     std.log.err("Unknown modulus length {}", .{pubkey.modulus_length_bits});
                     return Error.UnknownModulusLength;
                 }
             },
             .secp256r1 => |pubkey| {
+                // ecdsa-with-SHA256
                 if (!std.mem.eql(u8, self.signature_algorithm.algorithm.id, "1.2.840.10045.4.3.2")) {
-                    std.log.err("UnsupportedSignatureAlgorithm: {s}", .{self.signature_algorithm.algorithm.id});
+                    std.log.err("Secp256r1 UnsupportedSignatureAlgorithm: {s}", .{self.signature_algorithm.algorithm.id});
                     return Error.UnsupportedSignatureAlgorithm;
                 }
                 const ecdsa_sha256 = std.crypto.sign.ecdsa.EcdsaP256Sha256;
                 const sig = try ecdsa_sha256.Signature.fromDer(self.signature_value.value);
                 try sig.verify(self.cert_data, pubkey.key);
             },
-            .secp384r1 => {
-                unreachable;
+            .secp384r1 => |pubkey| {
+                const algo_id = self.signature_algorithm.algorithm.id;
+                if (!std.mem.eql(u8, algo_id, "1.2.840.10045.4.3.3")) // ecdsa-with-SHA384
+                {
+                    std.log.warn("Secp384r1 UnsupportedSignatureAlgorithm: {s}", .{self.signature_algorithm.algorithm.id});
+                    return Error.UnsupportedSignatureAlgorithm;
+                }
+
+                if (std.mem.eql(u8, algo_id, "1.2.840.10045.4.3.2")) {
+                    unreachable;
+                    // ecdsa-with-SHA256 is not supported due to a std's ecdsa issue.
+                    // this code does not work now.
+                    // const ecdsa_sha256 = std.crypto.sign.ecdsa.Ecdsa(std.crypto.ecc.P384, std.crypto.hash.sha2.Sha256);
+                    // const sig = try ecdsa_sha256.Signature.fromDer(self.signature_value.value);
+                    // const pk = try ecdsa_sha256.PublicKey.fromSec1(&pubkey.key.toCompressedSec1());
+                    // try sig.verify(self.cert_data, pk);
+                } else if (std.mem.eql(u8, algo_id, "1.2.840.10045.4.3.3")) {
+                    const ecdsa_sha384 = std.crypto.sign.ecdsa.EcdsaP384Sha384;
+                    const sig = try ecdsa_sha384.Signature.fromDer(self.signature_value.value);
+                    try sig.verify(self.cert_data, pubkey.key);
+                } else {
+                    unreachable;
+                }
             },
         }
-        std.log.warn("VALIDATED!", .{});
     }
 
     pub fn print(self: Self, pf: *const fn ([]const u8, anytype) void) void {
@@ -481,7 +527,7 @@ pub const AlgorithmIdentifier = struct {
 ///       universalString         UniversalString (SIZE (1..MAX)),
 ///       utf8String              UTF8String (SIZE (1..MAX)),
 ///       bmpString               BMPString (SIZE (1..MAX)) }
-const Name = struct {
+pub const Name = struct {
     rdn_sequence: ArrayList(RelativeDistinguishedName),
 
     const Self = @This();

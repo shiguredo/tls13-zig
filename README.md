@@ -77,22 +77,33 @@ If you want to try this, simple executes `zig run src/main_test_server.zig`.
 ```zig
 const std = @import("std");
 const log = std.log;
+const os = std.os;
 const allocator = std.heap.page_allocator;
 
 const server = @import("server.zig");
 
 pub fn main() !void {
+    // ignore SIGCHLD
+    var act = os.Sigaction{
+        .handler = .{ .handler = os.SIG.IGN },
+        .mask = os.empty_sigset,
+        .flags = (os.SA.SIGINFO | os.SA.RESTART | os.SA.RESETHAND),
+    };
+    try os.sigaction(os.SIG.CHLD, &act, null);
+
     log.info("started.", .{});
 
     // key and certificates need to be der-formatted.
     // if you want to use RSAPrivateKey, please change '.ec' to '.rsa'.
     // The procedure to generate test certificate is described in test/gen_cert.sh
-    var tls_server = try server.TLSServerTCP.init("./test/key.der", .ec, "./test/cert.der", null, "localhost", allocator);
+    var tls_server = try server.TLSServerTCP.init("./test/key.pem", "./test/cert.pem", null, "localhost", allocator);
     defer tls_server.deinit();
 
     // Enable KEYLOG output.
     tls_server.print_keys = true;
     tls_server.record_size_limit = 2 << 12;
+    tls_server.accept_resume = true;
+    tls_server.accept_early_data = true;
 
     try tls_server.listen(8443);
     while (true) {
@@ -129,6 +140,7 @@ pub fn main() !void {
 
     return;
 }
+
 ```
 
 # TODO
@@ -146,7 +158,7 @@ pub fn main() !void {
   - [ ] Add more tests.
   - [ ] Implement X.509 Certificate encoder.
   - [ ] Verify implementation with NIST's test vectors.
-- [ ] Verify received X.509 Certificate itself.
+- [x] Verify received X.509 Certificate itself. (RootCA certs signed by ecdsa-with-sha256 with secp384r1 are not supported)
 - [ ] Check the implementation follows RFC8446.
 
 ## Priority: Low
@@ -179,17 +191,26 @@ const std = @import("std");
 const log = std.log;
 const net = std.net;
 const io = std.io;
+const os = std.os;
 const allocator = std.heap.page_allocator;
 
 const server = @import("server.zig");
 
 pub fn main() !void {
+    // ignore SIGCHLD
+    var act = os.Sigaction{
+        .handler = .{ .handler = os.SIG.IGN },
+        .mask = os.empty_sigset,
+        .flags = (os.SA.SIGINFO | os.SA.RESTART | os.SA.RESETHAND),
+    };
+    try os.sigaction(os.SIG.CHLD, &act, null);
+
     log.info("started.", .{});
     // key and certificate need to be der-formatted.
     // Especially, RSAPrivateKey need to be PKCS#1.
     // To convert PEM key, use 'openssl rsa -outform der -in key.pem -out key.der -traditional'
     // Currently, only one CA certificate is supported.
-    var tls_server = try server.TLSServerTCP.init("./test-certs/key.der", .rsa, "./test-certs/cert.der", "./test-certs/chain.der", "tls13.pibvt.net", allocator);
+    var tls_server = try server.TLSServerTCP.init("./test-certs/key.pem", "./test-certs/cert.pem", "./test-certs/chain.pem", "tls13.pibvt.net", allocator);
     defer tls_server.deinit();
     tls_server.print_keys = true;
     try tls_server.listen(8443);

@@ -112,6 +112,8 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         ap_protector: RecordPayloadProtector,
 
         // certificate
+        allow_self_signed: bool = false,
+        rootCA: crypto.root.RootCA,
         signature_schems: ArrayList(signature_scheme.SignatureScheme),
         cert_pubkeys: ArrayList(x509.PublicKey),
 
@@ -143,6 +145,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             UnsupportedKeyShareAlgorithm,
             UnsupportedSignatureScheme,
             CertificateNotFound,
+            InvalidCertificate,
             FailedToConnect,
             CannotSendEarlyData,
         };
@@ -182,11 +185,15 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 .ks = undefined,
                 .hs_protector = undefined,
                 .ap_protector = undefined,
+                .rootCA = crypto.root.RootCA.init(allocator),
                 .signature_schems = ArrayList(signature_scheme.SignatureScheme).init(allocator),
                 .cert_pubkeys = ArrayList(x509.PublicKey).init(allocator),
 
                 .allocator = allocator,
             };
+
+            // Loading rootCA certificates
+            try res.rootCA.loadCAFiles();
 
             random.bytes(&res.x25519_priv_key);
             res.x25519_pub_key = try dh.X25519.recoverPublicKey(res.x25519_priv_key);
@@ -239,6 +246,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             if (self.session_ticket) |st| {
                 st.deinit();
             }
+            self.rootCA.deinit();
             self.cipher_suites.deinit();
             self.ks.deinit();
             self.signature_schems.deinit();
@@ -801,33 +809,79 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         }
 
         fn handleCertificate(self: *Self, cert: certificate.Certificate) !void {
-            for (cert.cert_list.items) |c| {
-                // find certificate for host
-                var cert_host = true;
-                const cn_oid = (try x509.OIDMap.getEntryByName("CN")).oid;
-                for (c.cert.tbs_certificate.subject.rdn_sequence.items) |rs| {
-                    for (rs.attrs.items) |attr| {
-                        if (!std.mem.eql(u8, attr.attr_type.id, cn_oid)) {
-                            continue;
-                        }
-                        if (!certHostMatches(attr.attr_value, self.host)) {
-                            cert_host = false;
-                        }
+            // RFC8446 Section 4.4.2.  Certificate
+            //
+            // he sender's certificate MUST come in the first
+            // CertificateEntry in the list.  Each following certificate SHOULD
+            // directly certify the one immediately preceding it.
+            if (cert.cert_list.items.len == 0) {
+                return Error.CertificateNotFound;
+            }
+            var cert_host = true;
+            const cn_oid = (try x509.OIDMap.getEntryByName("CN")).oid;
+            const host_cert = cert.cert_list.items[0].cert;
+            for (host_cert.tbs_certificate.subject.rdn_sequence.items) |rs| {
+                for (rs.attrs.items) |attr| {
+                    if (!std.mem.eql(u8, attr.attr_type.id, cn_oid)) {
+                        continue;
+                    }
+                    if (!certHostMatches(attr.attr_value, self.host)) {
+                        cert_host = false;
                     }
                 }
-
-                if (!cert_host) {
-                    continue;
-                }
-
-                const pubkey = c.cert.tbs_certificate.subjectPublicKeyInfo.publicKey;
-                if (pubkey == .secp256r1 or pubkey == .secp384r1 or pubkey == .rsa) {
-                    try self.cert_pubkeys.append(try pubkey.copy(self.allocator));
-                } else {
-                    return Error.UnsupportedCertificateAlgorithm;
-                }
+            }
+            if (!cert_host) {
+                return Error.CertificateNotFound;
             }
 
+            const pubkey = host_cert.tbs_certificate.subjectPublicKeyInfo.publicKey;
+            if (pubkey == .secp256r1 or pubkey == .secp384r1 or pubkey == .rsa) {
+                try self.cert_pubkeys.append(try pubkey.copy(self.allocator));
+            } else {
+                std.log.err("PublicKey {} not found", .{pubkey});
+                return Error.UnsupportedCertificateAlgorithm;
+            }
+
+            // Verifying certificates
+            var idx: usize = 0;
+            const certs = cert.cert_list.items;
+            while (idx < certs.len) : (idx += 1) {
+                const c = certs[idx].cert;
+                if (idx + 1 == certs.len) {
+                    const issuer = c.tbs_certificate.issuer;
+                    const subject = c.tbs_certificate.subject;
+                    if (issuer.eql(subject)) {
+                        c.verify(null) catch |err| {
+                            std.log.warn("Failed to verify RootCA certificate", .{});
+                            return err;
+                        };
+                        if (!self.allow_self_signed) {
+                            const rootCA = self.rootCA.getCertificateBySubject(c.tbs_certificate.issuer) catch |err| {
+                                std.log.warn("Failed to get RootCA certificate.", .{});
+                                return err;
+                            };
+                            if (!std.mem.eql(u8, rootCA.signature_value.value, c.signature_value.value)) {
+                                std.log.warn("Invalid RootCA certificate.", .{});
+                                return Error.InvalidCertificate;
+                            }
+                        }
+                    } else {
+                        const rootCA = self.rootCA.getCertificateBySubject(c.tbs_certificate.issuer) catch |err| {
+                            std.log.warn("Failed to get RootCA certificate.", .{});
+                            return err;
+                        };
+                        c.verify(rootCA) catch |err| {
+                            std.log.warn("Failed to verify RootCA certificate", .{});
+                            return err;
+                        };
+                    }
+                } else {
+                    c.verify(certs[idx + 1].cert) catch |err| {
+                        std.log.warn("Failed to verify certificate", .{});
+                        return err;
+                    };
+                }
+            }
             self.state = .WAIT_CV;
         }
 
@@ -1277,6 +1331,8 @@ test "connect e2e with x25519" {
     tls_client.signature_schems.clearAndFree();
     try tls_client.signature_schems.append(.ecdsa_secp256r1_sha256);
     try tls_client.signature_schems.append(.rsa_pss_rsae_sha256);
+
+    tls_client.allow_self_signed = true;
 
     try tls_client.connect("localhost", 443);
     try expect(std.mem.eql(u8, &client_ans, test_send_stream.getWritten()));

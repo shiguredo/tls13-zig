@@ -4,6 +4,7 @@ const BoundedArray = std.BoundedArray;
 
 pub const rsa = @import("crypto/rsa.zig");
 pub const cert = @import("crypto/cert.zig");
+pub const root = @import("crypto/root.zig");
 pub const PrivateKey = @import("crypto/private_key.zig").PrivateKey;
 
 pub const HashType = enum {

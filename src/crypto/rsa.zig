@@ -130,10 +130,19 @@ pub fn Rsa(comptime modulus_bits: usize) type {
             };
 
             fn EMSA_PKCS1_v1_5_ENCODE(msg: []const u8, comptime Hash: type) ![modulus_length]u8 {
-                if (Hash != std.crypto.hash.sha2.Sha256) {
-                    @compileError("Unsupported Hash algorithm");
+                var hash_der: []const u8 = undefined;
+                if (Hash == std.crypto.hash.Sha1) {
+                    hash_der = &[_]u8{ 0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14 };
+                } else if (Hash == std.crypto.hash.sha2.Sha256) {
+                    hash_der = &[_]u8{ 0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20 };
+                } else if (Hash == std.crypto.hash.sha2.Sha384) {
+                    hash_der = &[_]u8{ 0x30, 0x41, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02, 0x05, 0x00, 0x04, 0x30 };
+                } else if (Hash == std.crypto.hash.sha2.Sha512) {
+                    hash_der = &[_]u8{ 0x30, 0x51, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03, 0x05, 0x00, 0x04, 0x40 };
+                } else {
+                    unreachable;
                 }
-                const hash_der = [_]u8{ 0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20 };
+
                 var hashed: [Hash.digest_length]u8 = undefined;
                 Hash.hash(msg, &hashed, .{});
 
@@ -149,7 +158,7 @@ pub fn Rsa(comptime modulus_bits: usize) type {
                 var idx: usize = 2 + ps_len;
                 out[idx] = 0x00;
                 idx += 1;
-                std.mem.copy(u8, out[idx..], &hash_der);
+                std.mem.copy(u8, out[idx..], hash_der);
                 idx += hash_der.len;
                 std.mem.copy(u8, out[idx..], &hashed);
                 idx += hashed.len;

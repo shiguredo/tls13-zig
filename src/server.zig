@@ -61,6 +61,7 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
         host: []u8 = &([_]u8{}),
 
         // certificate
+        rootCA: crypto.root.RootCA,
         cert: certificate.CertificateEntry,
         cert_key: crypto.PrivateKey,
 
@@ -99,20 +100,35 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
             try os.sigaction(os.SIG.PIPE, &act, null);
 
             var res = Self{
+                .rootCA = crypto.root.RootCA.init(allocator),
                 .cert = try certificate.CertificateEntry.fromFile(cert_path, allocator),
                 .cert_key = try crypto.cert.readPrivateKeyFromFile(key_path, allocator),
 
                 .allocator = allocator,
             };
 
+            // Loading rootCA certificates
+            try res.rootCA.loadCAFiles();
+
             random.bytes(&res.ticket_key_name);
             random.bytes(&res.ticket_key);
 
             if (ca_path) |p| {
-                res.ca_cert = try certificate.CertificateEntry.fromFile(p, allocator);
-                try res.cert.cert.verify(res.ca_cert.?.cert);
+                const ca_cert = try certificate.CertificateEntry.fromFile(p, allocator);
+                res.ca_cert = ca_cert;
+                try res.cert.cert.verify(ca_cert.cert);
+                std.log.debug("Certificate has been verified.", .{});
+
+                if (res.rootCA.getCertificateBySubject(ca_cert.cert.tbs_certificate.issuer)) |rootCA| {
+                    try ca_cert.cert.verify(rootCA);
+                    std.log.debug("CA Certificate has been verified.", .{});
+                } else |err| {
+                    std.log.warn("Failed to find rootCA certificate err={}", .{err});
+                }
             } else {
+                // for self-signed certificate
                 try res.cert.cert.verify(null);
+                std.log.debug("Certificate has been verified as self-signed.", .{});
             }
 
             if (host) |h| {
@@ -134,6 +150,7 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
             if (self.host.len != 0) {
                 self.allocator.free(self.host);
             }
+            self.rootCA.deinit();
             self.cert.deinit();
             self.cert_key.deinit();
             if (self.ca_cert) |c| {

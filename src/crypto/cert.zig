@@ -46,6 +46,28 @@ pub fn readCertificateFromFileToDer(cert_path: []const u8, allocator: std.mem.Al
     }
 }
 
+pub fn readCertificatesFromFile(cert_path: []const u8, allocator: std.mem.Allocator) !ArrayList(x509.Certificate) {
+    const cert_content = try readContentsFromFile(cert_path, allocator);
+    defer allocator.free(cert_content);
+
+    const ders = try convertPEMsToDERs(cert_content, "CERTIFICATE", allocator);
+    defer {
+        for (ders.items) |d| {
+            allocator.free(d);
+        }
+        ders.deinit();
+    }
+
+    var res = ArrayList(x509.Certificate).init(allocator);
+    for (ders.items) |d| {
+        var stream = io.fixedBufferStream(d);
+        const cert = try x509.Certificate.decode(stream.reader(), allocator);
+        try res.append(cert);
+    }
+
+    return res;
+}
+
 pub fn readPrivateKeyFromFile(key_path: []const u8, allocator: std.mem.Allocator) !PrivateKey {
     const key_content = try readContentsFromFile(key_path, allocator);
     defer allocator.free(key_content);
@@ -74,6 +96,9 @@ fn splitPEM(src: []const u8, comptime label: []const u8, allocator: std.mem.Allo
     var begin_idx: usize = 0;
     var end_idx: usize = 0;
     while (begin_idx < src.len) {
+        if (src.len < BEGIN_LABEL.len) {
+            return res;
+        }
         var begin_ok = false;
         while (begin_idx < src.len - BEGIN_LABEL.len and !begin_ok) : (begin_idx += 1) {
             begin_ok = std.mem.eql(u8, BEGIN_LABEL, src[begin_idx .. begin_idx + BEGIN_LABEL.len]);

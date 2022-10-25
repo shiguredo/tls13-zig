@@ -204,6 +204,10 @@ pub const ObjectIdentifier = struct {
             .allocator = allocator,
         };
     }
+
+    pub fn eql(a: Self, b: Self) bool {
+        return std.mem.eql(u8, a.id, b.id);
+    }
 };
 
 pub const Encoder = struct {

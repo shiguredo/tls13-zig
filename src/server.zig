@@ -110,6 +110,9 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
             if (ca_path) |p| {
                 res.ca_cert = try certificate.CertificateEntry.fromFile(p, allocator);
+                try res.cert.cert.verify(res.ca_cert.?.cert);
+            } else {
+                try res.cert.cert.verify(null);
             }
 
             if (host) |h| {
@@ -870,26 +873,16 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             var cv: CertificateVerify = undefined;
             switch (self.tls_server.cert_key) {
                 .rsa => |k| {
-                    var modulus_len = k.modulus.len;
-                    var i: usize = 0;
-                    while (i < modulus_len) : (i += 1) {
-                        if (k.modulus[i] != 0) {
-                            break;
-                        }
-                        modulus_len -= 1;
-                    }
-                    const modulus = k.modulus[i..];
-                    const modulus_bits = modulus.len * 8;
-                    if (modulus_bits == 2048) {
-                        var p_key = try crypto.rsa.Rsa2048.SecretKey.fromBytes(k.privateExponent, modulus, self.allocator);
+                    if (k.modulus_length_bits == 2048) {
+                        var p_key = try crypto.rsa.Rsa2048.SecretKey.fromBytes(k.privateExponent, k.modulus, self.allocator);
                         defer p_key.deinit();
-
                         const sig = try crypto.rsa.Rsa2048.PSSSignature.sign(verify_stream.getWritten(), p_key, std.crypto.hash.sha2.Sha256, self.allocator);
                         _ = sig;
-                    } else if (modulus_bits == 4096) {
-                        var p_key = try crypto.rsa.Rsa4096.SecretKey.fromBytes(k.privateExponent, modulus, self.allocator);
+                        unreachable;
+                    } else if (k.modulus_length_bits == 4096) {
+                        var p_key = try crypto.rsa.Rsa4096.SecretKey.fromBytes(k.privateExponent, k.modulus, self.allocator);
                         defer p_key.deinit();
-                        var pub_key = try crypto.rsa.Rsa4096.PublicKey.fromBytes(k.publicExponent, modulus, self.allocator);
+                        var pub_key = try crypto.rsa.Rsa4096.PublicKey.fromBytes(k.publicExponent, k.modulus, self.allocator);
                         defer pub_key.deinit();
 
                         const sig = try crypto.rsa.Rsa4096.PSSSignature.sign(verify_stream.getWritten(), p_key, std.crypto.hash.sha2.Sha256, self.allocator);
@@ -897,7 +890,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         cv = try CertificateVerify.init(.rsa_pss_rsae_sha256, sig.signature.len, self.allocator);
                         std.mem.copy(u8, cv.signature, &sig.signature);
                     } else {
-                        std.log.err("unsupported modulus length: {d} bits", .{modulus_bits});
+                        std.log.err("unsupported modulus length: {d} bits", .{k.modulus_length_bits});
                         return Error.UnsupportedSignatureScheme;
                     }
                 },

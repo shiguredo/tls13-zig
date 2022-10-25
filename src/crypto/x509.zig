@@ -3,6 +3,7 @@ const io = std.io;
 const expect = std.testing.expect;
 const expectError = std.testing.expectError;
 const asn1 = @import("asn1.zig");
+const rsa = @import("rsa.zig");
 
 const BoundedArray = std.BoundedArray;
 const ArrayList = std.ArrayList;
@@ -124,15 +125,27 @@ pub const OIDMap = struct {
 //      signatureValue       BIT STRING  }
 pub const Certificate = struct {
     tbs_certificate: TBSCertificate,
+    cert_data: []u8 = &([_]u8{}),
     signature_algorithm: AlgorithmIdentifier,
     signature_value: SignatureValue,
 
+    allocator: std.mem.Allocator,
+
     const Self = @This();
+
+    const Error = error{
+        UnsupportedSignatureAlgorithm,
+        UnknownModulusLength,
+        InvalidCACertificate,
+    };
 
     pub fn deinit(self: Self) void {
         self.tbs_certificate.deinit();
         self.signature_algorithm.deinit();
         self.signature_value.deinit();
+        if (self.cert_data.len != 0) {
+            self.allocator.free(self.cert_data);
+        }
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
@@ -141,8 +154,15 @@ pub const Certificate = struct {
 
     pub fn decodeContent(stream: *asn1.Stream, allocator: std.mem.Allocator) !Self {
         const reader = stream.reader();
+        const begin_idx = try stream.getPos();
         const tbs_certificate = try TBSCertificate.decode(reader, allocator);
         errdefer tbs_certificate.deinit();
+        const end_idx = try stream.getPos();
+
+        var cert_data = try allocator.alloc(u8, end_idx - begin_idx);
+        errdefer allocator.free(cert_data);
+
+        std.mem.copy(u8, cert_data, stream.buffer[begin_idx..end_idx]);
 
         const signature_algorithm = try AlgorithmIdentifier.decode(reader, allocator);
         errdefer signature_algorithm.deinit();
@@ -152,9 +172,67 @@ pub const Certificate = struct {
 
         return Self{
             .tbs_certificate = tbs_certificate,
+            .cert_data = cert_data,
             .signature_algorithm = signature_algorithm,
             .signature_value = signature_value,
+            .allocator = allocator,
         };
+    }
+
+    pub fn verify(self: Self, issuer_cert: ?Self) !void {
+        var issuer_c: Self = undefined;
+        if (issuer_cert) |c| {
+            issuer_c = c;
+        } else {
+            issuer_c = self;
+        }
+
+        // Check cert's issuer and issuer_cert's subject
+        // TODO: is this ok?
+        if (!self.tbs_certificate.issuer.eql(issuer_c.tbs_certificate.subject)) {
+            return Error.InvalidCACertificate;
+        }
+
+        switch (issuer_c.tbs_certificate.subjectPublicKeyInfo.publicKey) {
+            .rsa => |pubkey| {
+                // Currently, only supports 'sha256WithRSAEncryption'
+                if (!std.mem.eql(u8, self.signature_algorithm.algorithm.id, "1.2.840.113549.1.1.11")) {
+                    std.log.warn("UnsupportedSignatureAlgorithm: {s}", .{self.signature_algorithm.algorithm.id});
+                    return Error.UnsupportedSignatureAlgorithm;
+                }
+                if (pubkey.modulus_length_bits != self.signature_value.value.len * 8) {
+                    std.log.warn("Invalid signature length {}", .{self.signature_value.value.len});
+                    return Error.UnknownModulusLength;
+                }
+                if (pubkey.modulus_length_bits == 2048) {
+                    const sig = rsa.Rsa2048.PKCS1V15Signature{ .signature = self.signature_value.value[0 .. 2048 / 8].* };
+                    var p = try rsa.Rsa2048.PublicKey.fromBytes(pubkey.publicExponent, pubkey.modulus, self.allocator);
+                    defer p.deinit();
+                    try sig.verify(self.cert_data, p, std.crypto.hash.sha2.Sha256, self.allocator);
+                } else if (pubkey.modulus_length_bits == 4096) {
+                    const sig = rsa.Rsa4096.PKCS1V15Signature{ .signature = self.signature_value.value[0 .. 4096 / 8].* };
+                    var p = try rsa.Rsa4096.PublicKey.fromBytes(pubkey.publicExponent, pubkey.modulus, self.allocator);
+                    defer p.deinit();
+                    try sig.verify(self.cert_data, p, std.crypto.hash.sha2.Sha256, self.allocator);
+                } else {
+                    std.log.err("Unknown modulus length {}", .{pubkey.modulus_length_bits});
+                    return Error.UnknownModulusLength;
+                }
+            },
+            .secp256r1 => |pubkey| {
+                if (!std.mem.eql(u8, self.signature_algorithm.algorithm.id, "1.2.840.10045.4.3.2")) {
+                    std.log.err("UnsupportedSignatureAlgorithm: {s}", .{self.signature_algorithm.algorithm.id});
+                    return Error.UnsupportedSignatureAlgorithm;
+                }
+                const ecdsa_sha256 = std.crypto.sign.ecdsa.EcdsaP256Sha256;
+                const sig = try ecdsa_sha256.Signature.fromDer(self.signature_value.value);
+                try sig.verify(self.cert_data, pubkey.key);
+            },
+            .secp384r1 => {
+                unreachable;
+            },
+        }
+        std.log.warn("VALIDATED!", .{});
     }
 
     pub fn print(self: Self, pf: *const fn ([]const u8, anytype) void) void {
@@ -437,6 +515,18 @@ const Name = struct {
         };
     }
 
+    pub fn eql(a: Self, b: Self) bool {
+        var res = a.rdn_sequence.items.len == b.rdn_sequence.items.len;
+        if (!res) {
+            return res;
+        }
+        var i: usize = 0;
+        while (i < a.rdn_sequence.items.len) : (i += 1) {
+            res = res and a.rdn_sequence.items[i].eql(b.rdn_sequence.items[i]);
+        }
+        return res;
+    }
+
     pub fn print(self: Self, comptime pf: fn ([]const u8, anytype) void, comptime prefix: []const u8) void {
         for (self.rdn_sequence.items) |r| {
             r.print(pf, prefix ++ " ");
@@ -464,9 +554,11 @@ const RelativeDistinguishedName = struct {
         }
         const len = try asn1.Decoder.decodeLength(reader);
         var attrs = ArrayList(AttributeTypeAndValue).init(allocator);
+        errdefer attrs.deinit();
         var cur: usize = 0;
         while (cur < len) {
             const a = try AttributeTypeAndValue.decode(reader, allocator);
+            errdefer a.deinit();
             try attrs.append(a);
             cur += a.length();
         }
@@ -478,6 +570,18 @@ const RelativeDistinguishedName = struct {
 
     pub fn length(self: Self) usize {
         return self.len + 1 + asn1.Decoder.getLengthSize(self.len);
+    }
+
+    pub fn eql(a: Self, b: Self) bool {
+        var res = a.attrs.items.len == b.attrs.items.len;
+        if (!res) {
+            return res;
+        }
+        var i: usize = 0;
+        while (i < a.attrs.items.len) : (i += 1) {
+            res = res and a.attrs.items[i].eql(b.attrs.items[i]);
+        }
+        return res;
     }
 
     pub fn print(self: Self, comptime pf: fn ([]const u8, anytype) void, comptime prefix: []const u8) void {
@@ -530,6 +634,12 @@ const AttributeTypeAndValue = struct {
 
     pub fn length(self: Self) usize {
         return self.len + 1 + asn1.Decoder.getLengthSize(self.len);
+    }
+
+    pub fn eql(a: Self, b: Self) bool {
+        var res = a.attr_type.eql(b.attr_type);
+        res = res and std.mem.eql(u8, a.attr_value, b.attr_value);
+        return res;
     }
 
     pub fn print(self: Self, comptime pf: fn ([]const u8, anytype) void, comptime prefix: []const u8) void {
@@ -606,7 +716,10 @@ const Time = struct {
 
         if (res.time_type == .UTCTime) {
             try res.decodeUTCTime(reader);
+        } else if (res.time_type == .GeneralizedTime) {
+            try res.decodeGeneralizedTime(reader);
         } else {
+            std.log.warn("Unknown Tag {s}", .{@tagName(time_type)});
             unreachable;
         }
 
@@ -638,6 +751,51 @@ const Time = struct {
         if ('0' <= s and s <= '9') {
             self.second = c_to_i(s) * 10 + c_to_i(try reader.readByte());
             s = try reader.readByte();
+        }
+
+        //Z or (+|-)
+        if (s == 'Z') {
+            return;
+        } else if (s == '+') {
+            self.plus = true;
+        } else if (s == '-') {
+            self.plus = false;
+        } else {
+            return asn1.Decoder.Error.InvalidFormat;
+        }
+
+        // hhmm
+        self.t_hour = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
+        self.t_minute = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
+
+        return;
+    }
+
+    // "YYYYMMDDhhmm[ss][.d]Z" or "YYYYMMDDhhmm[ss][.d](+|-)hhmm"
+    fn decodeGeneralizedTime(self: *Self, reader: anytype) !void {
+        // TODO: check array length
+        self.year = c_to_i(try reader.readByte()) * 1000 + c_to_i(try reader.readByte()) * 100;
+        self.year += c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte()) * 1;
+        self.month = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
+        self.day = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
+        self.hour = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
+        self.minute = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
+
+        // [ss]
+        var s = try reader.readByte();
+        if ('0' <= s and s <= '9') {
+            self.second = c_to_i(s) * 10 + c_to_i(try reader.readByte());
+            s = try reader.readByte();
+        }
+
+        // .d
+        if (s == '.') {
+            s = try reader.readByte();
+            if (s == 'd') {
+                s = try reader.readByte();
+            } else {
+                return asn1.Decoder.Error.InvalidFormat;
+            }
         }
 
         //Z or (+|-)
@@ -800,6 +958,7 @@ pub const PublicKey = union(PublicKeyType) {
 //    publicExponent     INTEGER  }  -- e
 const RSAPublicKey = struct {
     modulus: []u8,
+    modulus_length_bits: usize,
     publicExponent: []u8,
 
     allocator: std.mem.Allocator,
@@ -819,13 +978,27 @@ const RSAPublicKey = struct {
         const reader = stream.reader();
 
         const modulus = try asn1.Decoder.decodeINTEGER(reader, allocator);
-        errdefer allocator.free(modulus);
+        defer allocator.free(modulus);
+
+        var modulus_len = modulus.len;
+        var i: usize = 0;
+        while (i < modulus_len) : (i += 1) {
+            if (modulus[i] != 0) {
+                break;
+            }
+            modulus_len -= 1;
+        }
+
+        var modulus_new = try allocator.alloc(u8, modulus_len);
+        errdefer allocator.free(modulus_new);
+        std.mem.copy(u8, modulus_new, modulus[i..]);
 
         const publicExponent = try asn1.Decoder.decodeINTEGER(reader, allocator);
         errdefer allocator.free(publicExponent);
 
         return Self{
-            .modulus = modulus,
+            .modulus = modulus_new,
+            .modulus_length_bits = modulus_len * 8,
             .publicExponent = publicExponent,
             .allocator = allocator,
         };
@@ -1732,13 +1905,13 @@ test "RSAPublicKey copy" {
     // zig fmt: on
 
     var stream = io.fixedBufferStream(&rsa_bytes);
-    const rsa = try RSAPublicKey.decode(stream.reader(), std.testing.allocator);
-    defer rsa.deinit();
+    const r = try RSAPublicKey.decode(stream.reader(), std.testing.allocator);
+    defer r.deinit();
 
-    const rsa2 = try rsa.copy(std.testing.allocator);
-    defer rsa2.deinit();
+    const r2 = try r.copy(std.testing.allocator);
+    defer r2.deinit();
 
-    try expect(rsa.eql(rsa2));
+    try expect(r.eql(r2));
 }
 
 test "Secp256r1PublicKey copy" {

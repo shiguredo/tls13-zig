@@ -137,7 +137,7 @@ pub const CertificateEntry = struct {
     cert_len: usize, // TODO: remove this
     extensions: ArrayList(Extension),
 
-    cert_data: []u8 = &[_]u8{},
+    cert_data: []const u8 = &[_]u8{},
     allocator: std.mem.Allocator,
 
     const Self = @This();

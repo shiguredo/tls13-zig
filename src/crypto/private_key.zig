@@ -158,6 +158,7 @@ pub const ECPrivateKey = struct {
 pub const RSAPrivateKey = struct {
     version: u8,
     modulus: []u8,
+    modulus_length_bits: usize,
     publicExponent: []u8,
     privateExponent: []u8,
     prime1: []u8,
@@ -169,6 +170,10 @@ pub const RSAPrivateKey = struct {
     allocator: std.mem.Allocator,
 
     const Self = @This();
+
+    const Error = error{
+        InvalidFormat,
+    };
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
         return try asn1.Decoder.decodeSEQUENCE(reader, allocator, Self);
@@ -191,7 +196,20 @@ pub const RSAPrivateKey = struct {
         }
 
         const modulus = try asn1.Decoder.decodeINTEGER(reader, allocator);
-        errdefer allocator.free(modulus);
+        defer allocator.free(modulus);
+
+        var modulus_len = modulus.len;
+        var i: usize = 0;
+        while (i < modulus_len) : (i += 1) {
+            if (modulus[i] != 0) {
+                break;
+            }
+            modulus_len -= 1;
+        }
+
+        var modulus_new = try allocator.alloc(u8, modulus_len);
+        errdefer allocator.free(modulus_new);
+        std.mem.copy(u8, modulus_new, modulus[i..]);
 
         const publicExponent = try asn1.Decoder.decodeINTEGER(reader, allocator);
         errdefer allocator.free(publicExponent);
@@ -216,7 +234,8 @@ pub const RSAPrivateKey = struct {
 
         return Self{
             .version = version,
-            .modulus = modulus,
+            .modulus = modulus_new,
+            .modulus_length_bits = modulus_len * 8,
             .publicExponent = publicExponent,
             .privateExponent = privateExponent,
             .prime1 = prime1,
@@ -257,10 +276,18 @@ pub const RSAPrivateKey = struct {
     }
 
     pub fn decodeFromPEM(pem: []const u8, allocator: std.mem.Allocator) !Self {
-        const decoded_content = try cert.convertPEMToDER(pem, "RSA PRIVATE KEY", allocator);
-        defer allocator.free(decoded_content);
+        const keys = try cert.convertPEMsToDERs(pem, "RSA PRIVATE KEY", allocator);
+        defer {
+            for (keys.items) |k| {
+                allocator.free(k);
+            }
+            keys.deinit();
+        }
+        if (keys.items.len != 1) {
+            return Error.InvalidFormat;
+        }
 
-        var stream_decode = io.fixedBufferStream(decoded_content);
+        var stream_decode = io.fixedBufferStream(keys.items[0]);
         const key = try Self.decode(stream_decode.reader(), allocator);
 
         return key;

@@ -122,10 +122,18 @@ pub const OneAsymmetricKey = struct {
     }
 
     pub fn decodeFromPEM(pem: []const u8, allocator: std.mem.Allocator) !Self {
-        const decoded_content = try cert.convertPEMToDER(pem, "PRIVATE KEY", allocator);
-        defer allocator.free(decoded_content);
+        const keys = try cert.convertPEMsToDERs(pem, "PRIVATE KEY", allocator);
+        defer {
+            for (keys.items) |k| {
+                allocator.free(k);
+            }
+            keys.deinit();
+        }
+        if (keys.items.len != 1) {
+            return Error.InvalidFormat;
+        }
 
-        var stream_decode = io.fixedBufferStream(decoded_content);
+        var stream_decode = io.fixedBufferStream(keys.items[0]);
         const key = try Self.decode(stream_decode.reader(), allocator);
 
         return key;

@@ -49,8 +49,6 @@ const Sha256 = std.crypto.hash.sha2.Sha256;
 const P256 = std.crypto.sign.ecdsa.EcdsaP256Sha256;
 const P384 = std.crypto.sign.ecdsa.EcdsaP384Sha384;
 
-const rsa = @import("rsa.zig");
-
 const Client = std.x.net.tcp.Client;
 
 pub fn ErrorSetOf(comptime Function: anytype) type {
@@ -866,27 +864,18 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 },
                 .rsa_pss_rsae_sha256 => {
                     const pk = (try self.getPublicKey(.rsa)).rsa;
-                    var modulus_len = pk.modulus.len;
-                    var i: usize = 0;
-                    while (i < modulus_len) : (i += 1) {
-                        if (pk.modulus[i] != 0) {
-                            break;
-                        }
-                        modulus_len -= 1;
-                    }
-                    const modulus = pk.modulus[i..];
-                    const modulus_bits = modulus.len * 8;
-                    if (modulus_bits == 2048) {
-                        var p_key = try rsa.Rsa2048.PublicKey.fromBytes(pk.publicExponent, modulus, self.allocator);
+                    if (pk.modulus_length_bits == 2048) {
+                        var p_key = try crypto.rsa.Rsa2048.PublicKey.fromBytes(pk.publicExponent, pk.modulus, self.allocator);
                         defer p_key.deinit();
-
-                        const sig = rsa.Rsa2048.PSSSignature.fromBytes(cert_verify.signature);
+                        const sig = crypto.rsa.Rsa2048.PSSSignature.fromBytes(cert_verify.signature);
                         try sig.verify(verify_stream.getWritten(), p_key, Sha256, self.allocator);
-                    } else if (modulus_bits == 4096) {
-                        std.log.info("RSA-4096", .{});
-                        unreachable;
+                    } else if (pk.modulus_length_bits == 4096) {
+                        var p_key = try crypto.rsa.Rsa4096.PublicKey.fromBytes(pk.publicExponent, pk.modulus, self.allocator);
+                        defer p_key.deinit();
+                        const sig = crypto.rsa.Rsa4096.PSSSignature.fromBytes(cert_verify.signature);
+                        try sig.verify(verify_stream.getWritten(), p_key, Sha256, self.allocator);
                     } else {
-                        std.log.err("unsupported modulus length: {d} bits", .{modulus_bits});
+                        std.log.err("unsupported modulus length: {d} bits", .{pk.modulus_length_bits});
                         return Error.UnsupportedSignatureScheme;
                     }
                 },

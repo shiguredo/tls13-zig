@@ -125,6 +125,10 @@ pub fn Rsa(comptime modulus_bits: usize) type {
 
             const Self = @This();
 
+            const Error = error{
+                InvalidSignature,
+            };
+
             fn EMSA_PKCS1_v1_5_ENCODE(msg: []const u8, comptime Hash: type) ![modulus_length]u8 {
                 if (Hash != std.crypto.hash.sha2.Sha256) {
                     @compileError("Unsupported Hash algorithm");
@@ -161,10 +165,12 @@ pub fn Rsa(comptime modulus_bits: usize) type {
                 };
             }
 
-            pub fn verify(self: Self, msg: []const u8, public_key: PublicKey, comptime Hash: type, allocator: std.mem.Allocator) !bool {
+            pub fn verify(self: Self, msg: []const u8, public_key: PublicKey, comptime Hash: type, allocator: std.mem.Allocator) !void {
                 const em_dec = try encrypt(self.signature, public_key, allocator);
                 const em = try EMSA_PKCS1_v1_5_ENCODE(msg, Hash);
-                return std.mem.eql(u8, &em, &em_dec);
+                if (!std.mem.eql(u8, &em, &em_dec)) {
+                    return Self.Error.InvalidSignature;
+                }
             }
         };
 
@@ -739,7 +745,7 @@ test "2048-bit RSA PKCS1 v1.5" {
     // zig fmt: on
 
     try expect(std.mem.eql(u8, &sig.signature, &sig_ans));
-    try expect(try sig.verify(msg, public_key, std.crypto.hash.sha2.Sha256, std.testing.allocator));
+    try sig.verify(msg, public_key, std.crypto.hash.sha2.Sha256, std.testing.allocator);
 }
 
 test "2048-bit RSA PSS Sign" {
@@ -812,7 +818,7 @@ test "4096-bit RSA PSS Sign" {
     const msg = "test data 16byte";
     const sig = try Rsa4096.PKCS1V15Signature.sign(msg, secret_key, std.crypto.hash.sha2.Sha256, std.testing.allocator);
 
-    try expect(try sig.verify(msg, public_key, std.crypto.hash.sha2.Sha256, std.testing.allocator));
+    try sig.verify(msg, public_key, std.crypto.hash.sha2.Sha256, std.testing.allocator);
 }
 
 test "1024-bit RSA PSS Sign" {

@@ -48,8 +48,6 @@ const Aes128Gcm = std.crypto.aead.aes_gcm.Aes128Gcm;
 const Sha256 = std.crypto.hash.sha2.Sha256;
 const P256 = std.crypto.sign.ecdsa.EcdsaP256Sha256;
 
-const rsa = @import("rsa.zig");
-
 pub const TLSServerTCP = TLSServerImpl(net.Stream.Reader, net.Stream.Writer, true);
 
 pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, comptime is_tcp: bool) type {
@@ -883,18 +881,18 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     const modulus = k.modulus[i..];
                     const modulus_bits = modulus.len * 8;
                     if (modulus_bits == 2048) {
-                        var p_key = try rsa.Rsa2048.SecretKey.fromBytes(k.privateExponent, modulus, self.allocator);
+                        var p_key = try crypto.rsa.Rsa2048.SecretKey.fromBytes(k.privateExponent, modulus, self.allocator);
                         defer p_key.deinit();
 
-                        const sig = try rsa.Rsa2048.PSSSignature.sign(verify_stream.getWritten(), p_key, std.crypto.hash.sha2.Sha256, self.allocator);
+                        const sig = try crypto.rsa.Rsa2048.PSSSignature.sign(verify_stream.getWritten(), p_key, std.crypto.hash.sha2.Sha256, self.allocator);
                         _ = sig;
                     } else if (modulus_bits == 4096) {
-                        var p_key = try rsa.Rsa4096.SecretKey.fromBytes(k.privateExponent, modulus, self.allocator);
+                        var p_key = try crypto.rsa.Rsa4096.SecretKey.fromBytes(k.privateExponent, modulus, self.allocator);
                         defer p_key.deinit();
-                        var pub_key = try rsa.Rsa4096.PublicKey.fromBytes(k.publicExponent, modulus, self.allocator);
+                        var pub_key = try crypto.rsa.Rsa4096.PublicKey.fromBytes(k.publicExponent, modulus, self.allocator);
                         defer pub_key.deinit();
 
-                        const sig = try rsa.Rsa4096.PSSSignature.sign(verify_stream.getWritten(), p_key, std.crypto.hash.sha2.Sha256, self.allocator);
+                        const sig = try crypto.rsa.Rsa4096.PSSSignature.sign(verify_stream.getWritten(), p_key, std.crypto.hash.sha2.Sha256, self.allocator);
                         try sig.verify(verify_stream.getWritten(), pub_key, std.crypto.hash.sha2.Sha256, self.allocator);
                         cv = try CertificateVerify.init(.rsa_pss_rsae_sha256, sig.signature.len, self.allocator);
                         std.mem.copy(u8, cv.signature, &sig.signature);

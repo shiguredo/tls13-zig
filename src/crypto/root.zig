@@ -36,6 +36,14 @@ pub const RootCA = struct {
     }
 
     pub fn loadCAFiles(self: *Self) !void {
+        switch (@import("builtin").os.tag) {
+            .linux => try self.loadCAFilesLinux(),
+            .macos => try self.loadCAFilesMacOS(),
+            else => unreachable,
+        }
+    }
+
+    fn loadCAFilesLinux(self: *Self) !void {
         for (rootCAFiles) |ca| {
             std.log.debug("Loading RootCA certificate {s}", .{ca});
             const res = cert.readCertificatesFromFile(ca, self.allocator) catch |err| {
@@ -98,6 +106,32 @@ pub const RootCA = struct {
                 }
             }
         }
+    }
+
+    fn loadCAFilesMacOS(self: *Self) !void {
+        std.log.debug("Loading RootCA certificate", .{});
+
+        const result = try std.ChildProcess.exec(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "/usr/bin/security", "find-certificate", "-a", "-p", "/System/Library/Keychains/SystemRootCertificates.keychain" },
+            .max_output_bytes = 1000 * 1024,
+        });
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+
+        const res = try cert.readCertificatesFromPems(result.stdout, self.allocator);
+        defer res.deinit();
+        for (res.items) |c| {
+            c.verify(null) catch |err| {
+                std.log.warn("Failed to verify certificate err={}", .{err});
+                c.deinit();
+                continue;
+            };
+
+            try self.rootCACerts.append(c);
+        }
+
+        std.log.debug("Loaded RootCA certificate", .{});
     }
 
     pub fn getCertificateBySubject(self: Self, name: x509.Name) Error!x509.Certificate {

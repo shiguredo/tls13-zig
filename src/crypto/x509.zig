@@ -315,7 +315,7 @@ pub const TBSCertificate = struct {
     validity: Validity,
     subject: Name,
     subjectPublicKeyInfo: SubjectPublicKeyInfo,
-    extensions: Extensions,
+    extensions: ?Extensions = null,
 
     const Self = @This();
 
@@ -324,7 +324,9 @@ pub const TBSCertificate = struct {
         self.issuer.deinit();
         self.subject.deinit();
         self.subjectPublicKeyInfo.deinit();
-        self.extensions.deinit();
+        if (self.extensions) |ext| {
+            ext.deinit();
+        }
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
@@ -334,14 +336,16 @@ pub const TBSCertificate = struct {
     pub fn decodeContent(stream: *asn1.Stream, allocator: std.mem.Allocator) !Self {
         const reader = stream.reader();
         const v = try reader.readByte();
-        if (v != 0xA0) { // [0] EXPLICIT
-            return asn1.Decoder.Error.InvalidType;
+        var version = Version.v1;
+        if (v == 0xA0) { // [0] EXPLICIT
+            const v_len = try reader.readByte();
+            if (v_len != 0x03) { // length is assumed to be 3
+                return asn1.Decoder.Error.InvalidLength;
+            }
+            version = try Version.decode(reader);
+        } else {
+            stream.reset();
         }
-        const v_len = try reader.readByte();
-        if (v_len != 0x03) { // length is assumed to be 3
-            return asn1.Decoder.Error.InvalidLength;
-        }
-        const version = try Version.decode(reader);
 
         const serial_number = try CertificateSerialNumber.decode(reader);
 
@@ -360,16 +364,7 @@ pub const TBSCertificate = struct {
         const subjectPublicKeyInfo = try SubjectPublicKeyInfo.decode(reader, allocator);
         errdefer subjectPublicKeyInfo.deinit();
 
-        if ((try reader.readByte()) != 0xA3) { // [3] EXPLICIT
-            return asn1.Decoder.Error.InvalidType;
-        }
-        const exts_len = try asn1.Decoder.decodeLength(reader);
-        _ = exts_len;
-
-        const extensions = try Extensions.decode(reader, allocator);
-        errdefer extensions.deinit();
-
-        return Self{
+        var res = Self{
             .version = version,
             .serial_number = serial_number,
             .signature = signature,
@@ -377,8 +372,20 @@ pub const TBSCertificate = struct {
             .validity = validity,
             .subject = subject,
             .subjectPublicKeyInfo = subjectPublicKeyInfo,
-            .extensions = extensions,
         };
+
+        if (version != .v1) {
+            if ((try reader.readByte()) != 0xA3) { // [3] EXPLICIT
+                return asn1.Decoder.Error.InvalidType;
+            }
+            const exts_len = try asn1.Decoder.decodeLength(reader);
+            _ = exts_len;
+
+            res.extensions = try Extensions.decode(reader, allocator);
+            errdefer res.extensions.?.deinit();
+        }
+
+        return res;
     }
 
     pub fn print(self: Self, comptime pf: fn ([]const u8, anytype) void, comptime prefix: []const u8) void {
@@ -422,13 +429,14 @@ pub const Version = enum(u8) {
 const CertificateSerialNumber = struct {
     // RFC5280 4.1.2.2. Serial Number (p.19)
     // Certificate users MUST be able to handle serialNumber values up to 20 octets.
-    serial: BoundedArray(u8, 20),
+    // Some certificates exceeds 20 octets.
+    serial: BoundedArray(u8, 32),
 
     const Self = @This();
 
     pub fn init(len: usize) !Self {
         return Self{
-            .serial = try BoundedArray(u8, 20).init(len),
+            .serial = try BoundedArray(u8, 32).init(len),
         };
     }
 
@@ -1810,7 +1818,7 @@ test "X.509 decode" {
 
     try expect(std.mem.eql(u8, tbs.subjectPublicKeyInfo.algorithm.algorithm.id, "1.2.840.113549.1.1.1")); // rsaEncryption
 
-    const exts = tbs.extensions.extensions.items;
+    const exts = tbs.extensions.?.extensions.items;
     try expect(exts.len == 9);
 
     try expect(std.mem.eql(u8, exts[0].oid.id, "2.5.29.35")); // authorityKeyIdentifier
@@ -1949,7 +1957,7 @@ test "decode Certificate with ecdsa and secp256r1" {
 
     try expect(std.mem.eql(u8, tbs.subjectPublicKeyInfo.algorithm.algorithm.id, (try OIDMap.getEntryByName("id-ecPublicKey")).oid));
 
-    const exts = tbs.extensions.extensions.items;
+    const exts = tbs.extensions.?.extensions.items;
     try expect(exts.len == 3);
 
     try expect(std.mem.eql(u8, exts[0].oid.id, (try OIDMap.getEntryByName("subjectKeyIdentifier")).oid));
@@ -2038,4 +2046,85 @@ test "PublicKey copy" {
     defer pub_key2.deinit();
 
     try expect(secp.eql(pub_key2.secp256r1));
+}
+
+test "PEM certificate 1" {
+    const cert_pem =
+        \\-----BEGIN CERTIFICATE-----
+        \\MIIEGjCCAwICEQCbfgZJoz5iudXukEhxKe9XMA0GCSqGSIb3DQEBBQUAMIHKMQsw
+        \\CQYDVQQGEwJVUzEXMBUGA1UEChMOVmVyaVNpZ24sIEluYy4xHzAdBgNVBAsTFlZl
+        \\cmlTaWduIFRydXN0IE5ldHdvcmsxOjA4BgNVBAsTMShjKSAxOTk5IFZlcmlTaWdu
+        \\LCBJbmMuIC0gRm9yIGF1dGhvcml6ZWQgdXNlIG9ubHkxRTBDBgNVBAMTPFZlcmlT
+        \\aWduIENsYXNzIDMgUHVibGljIFByaW1hcnkgQ2VydGlmaWNhdGlvbiBBdXRob3Jp
+        \\dHkgLSBHMzAeFw05OTEwMDEwMDAwMDBaFw0zNjA3MTYyMzU5NTlaMIHKMQswCQYD
+        \\VQQGEwJVUzEXMBUGA1UEChMOVmVyaVNpZ24sIEluYy4xHzAdBgNVBAsTFlZlcmlT
+        \\aWduIFRydXN0IE5ldHdvcmsxOjA4BgNVBAsTMShjKSAxOTk5IFZlcmlTaWduLCBJ
+        \\bmMuIC0gRm9yIGF1dGhvcml6ZWQgdXNlIG9ubHkxRTBDBgNVBAMTPFZlcmlTaWdu
+        \\IENsYXNzIDMgUHVibGljIFByaW1hcnkgQ2VydGlmaWNhdGlvbiBBdXRob3JpdHkg
+        \\LSBHMzCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMu6nFL8eB8aHm8b
+        \\N3O9+MlrlBIwT/A2R/XQkQr1F8ilYcEWQE37imGQ5XYgwREGfassbqb1EUGO+i2t
+        \\KmFZpGcmTNDovFJbcCAEWNF6yaRpvIMXZK0Fi7zQWM6NjPXr8EJJC52XJ2cybuGu
+        \\kxUccLwgTS8Y3pKI6GyFVxEa6X7jJhFUokWWVYPKMIno3Nij7SqAP395ZVc+FSBm
+        \\CC+Vk7+qRy+oRpfwEuL+wgorUeZ25rdGt+INpsyow0xZVYnm6FNcHOqd8GIWC6fJ
+        \\Xwzw3sJ2zq/3avL6QaaiMxTJ5Xpj055iN9WFZZ4O5lMkdBteHRJTW8cs54NJOxWu
+        \\imi5V5cCAwEAATANBgkqhkiG9w0BAQUFAAOCAQEAERSWwauSCPc/L8my/uRan2Te
+        \\2yFPhpk0djZX3dAVL8WtfxUfN2JzPtTnX84XA9s1+ivbrmAJXx5fj267Cz3qWhMe
+        \\DGBvtcC1IyIuBwvLqXTLR7sdwdela8wv0kL9Sd2nic9TutoAWii/gt/4uhMdUIaC
+        \\/Y4wjylGsB49Ndo4YhYYSq3mtlFs3q9i6wHQHiT+eo8SGhJouPtmmRQURVyu565p
+        \\F4ErWjfJXir0xuKhXFSbplQAz/DxwceYMBo7Nhbbo27q/a2ywtrvAkcTisDxszGt
+        \\TxzhT5yvDwyd93gN2PQ1VoDat20Xj50egWTh/sVFuq1ruQp6Tk9LhO5L8X3dEQ==
+        \\-----END CERTIFICATE-----
+    ;
+
+    const certs = try @import("cert.zig").convertPEMsToDERs(cert_pem, "CERTIFICATE", std.testing.allocator);
+    defer {
+        for (certs.items) |cert| {
+            std.testing.allocator.free(cert);
+        }
+        certs.deinit();
+    }
+
+    try expect(certs.items.len == 1);
+    var stream = io.fixedBufferStream(certs.items[0]);
+    const cert_dec = try Certificate.decode(stream.reader(), std.testing.allocator);
+    defer cert_dec.deinit();
+}
+
+test "PEM certificate 2" {
+    const cert_pem =
+        \\-----BEGIN CERTIFICATE-----
+        \\MIIDcTCCAlmgAwIBAgIVAOYJ/nrqAGiM4CS07SAbH+9StETRMA0GCSqGSIb3DQEB
+        \\BQUAMFAxCzAJBgNVBAYTAlBMMSgwJgYDVQQKDB9LcmFqb3dhIEl6YmEgUm96bGlj
+        \\emVuaW93YSBTLkEuMRcwFQYDVQQDDA5TWkFGSVIgUk9PVCBDQTAeFw0xMTEyMDYx
+        \\MTEwNTdaFw0zMTEyMDYxMTEwNTdaMFAxCzAJBgNVBAYTAlBMMSgwJgYDVQQKDB9L
+        \\cmFqb3dhIEl6YmEgUm96bGljemVuaW93YSBTLkEuMRcwFQYDVQQDDA5TWkFGSVIg
+        \\Uk9PVCBDQTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAKxHL49ZMTml
+        \\6g3wpYwrvQKkvc0Kc6oJ5sxfgmp1qZfluwbv88BdocHSiXlY8NzrVYzuWBp7J/9K
+        \\ULMAoWoTIzOQ6C9TNm4YbA9A1jdX1wYNL5Akylf8W5L/I4BXhT9KnlI6x+a7BVAm
+        \\nr/Ttl+utT/Asms2fRfEsF2vZPMxH4UFqOAhFjxTkmJWf2Cu4nvRQJHcttB+cEAo
+        \\ag/hERt/+tzo4URz6x6r19toYmxx4FjjBkUhWQw1X21re//Hof2+0YgiwYT84zLb
+        \\eqDqCOMOXxvH480yGDkh/QoazWX3U75HQExT/iJlwnu7I1V6HXztKIwCBjsxffbH
+        \\3jOshCJtywcCAwEAAaNCMEAwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMC
+        \\AQYwHQYDVR0OBBYEFFOSo33/gnbwM9TrkmdHYTMbaDsqMA0GCSqGSIb3DQEBBQUA
+        \\A4IBAQA5UFWd5EL/pBviIMm1zD2JLUCpp0mJG7JkwznIOzawhGmFFaxGoxAhQBEg
+        \\haP+E0KR66oAwVC6xe32QUVSHfWqWndzbODzLB8yj7WAR0cDM45ZngSBPBuFE3Wu
+        \\GLJX9g100ETfIX+4YBR/4NR/uvTnpnd9ete7Whl0ZfY94yuu4xQqB5QFv+P7IXXV
+        \\lTOjkjuGXEcyQAjQzbFaT9vIABSbeCXWBbjvOXukJy6WgAiclzGNSYprre8Ryydd
+        \\fmjW9HIGwsIO03EldivvqEYL1Hv1w/Pur+6FUEOaL68PEIUovfgwIB2BAw+vZDuw
+        \\cH0mX548PojGyg434cDjkSXa3mHF
+        \\-----END CERTIFICATE-----
+    ;
+
+    const certs = try @import("cert.zig").convertPEMsToDERs(cert_pem, "CERTIFICATE", std.testing.allocator);
+    defer {
+        for (certs.items) |cert| {
+            std.testing.allocator.free(cert);
+        }
+        certs.deinit();
+    }
+
+    try expect(certs.items.len == 1);
+    var stream = io.fixedBufferStream(certs.items[0]);
+    const cert_dec = try Certificate.decode(stream.reader(), std.testing.allocator);
+    defer cert_dec.deinit();
 }

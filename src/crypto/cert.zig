@@ -50,7 +50,11 @@ pub fn readCertificatesFromFile(cert_path: []const u8, allocator: std.mem.Alloca
     const cert_content = try readContentsFromFile(cert_path, allocator);
     defer allocator.free(cert_content);
 
-    const ders = try convertPEMsToDERs(cert_content, "CERTIFICATE", allocator);
+    return try readCertificatesFromPems(cert_content, allocator);
+}
+
+pub fn readCertificatesFromPems(pems: []const u8, allocator: std.mem.Allocator) !ArrayList(x509.Certificate) {
+    const ders = try convertPEMsToDERs(pems, "CERTIFICATE", allocator);
     defer {
         for (ders.items) |d| {
             allocator.free(d);
@@ -59,6 +63,12 @@ pub fn readCertificatesFromFile(cert_path: []const u8, allocator: std.mem.Alloca
     }
 
     var res = ArrayList(x509.Certificate).init(allocator);
+    errdefer {
+        for (res.items) |c| {
+            c.deinit();
+        }
+        res.deinit();
+    }
     for (ders.items) |d| {
         var stream = io.fixedBufferStream(d);
         const cert = try x509.Certificate.decode(stream.reader(), allocator);
@@ -289,3 +299,13 @@ test "split PEM 2" {
         std.testing.allocator.free(cert);
     }
 }
+
+//test "macos certs" {
+//    const certs = try readCertificatesFromFile("./rootca-pems", std.testing.allocator);
+//    defer {
+//        for (certs.items) |c| {
+//            c.deinit();
+//        }
+//        certs.deinit();
+//    }
+//}

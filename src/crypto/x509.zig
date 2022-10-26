@@ -578,6 +578,18 @@ pub const Name = struct {
             r.print(pf, prefix ++ " ");
         }
     }
+
+    pub fn toString(self: Self, allocator: std.mem.Allocator) !ArrayList(u8) {
+        var res = ArrayList(u8).init(allocator);
+        for (self.rdn_sequence.items) |r| {
+            const r_str = try r.toString(allocator);
+            defer r_str.deinit();
+            try res.appendSlice(r_str.items);
+            try res.appendSlice(",");
+        }
+
+        return res;
+    }
 };
 
 const RelativeDistinguishedName = struct {
@@ -635,6 +647,18 @@ const RelativeDistinguishedName = struct {
         for (self.attrs.items) |a| {
             a.print(pf, prefix ++ " ");
         }
+    }
+
+    pub fn toString(self: Self, allocator: std.mem.Allocator) !ArrayList(u8) {
+        var res = ArrayList(u8).init(allocator);
+        for (self.attrs.items) |a| {
+            const attr_str = try a.toString(allocator);
+            defer attr_str.deinit();
+            try res.appendSlice(attr_str.items);
+            try res.appendSlice(",");
+        }
+
+        return res;
     }
 };
 
@@ -696,6 +720,19 @@ const AttributeTypeAndValue = struct {
         } else |e| {
             pf("{s}{s}({}) = {s} ", .{ prefix, oid[0..oid_len], e, self.attr_value });
         }
+    }
+
+    pub fn toString(self: Self, allocator: std.mem.Allocator) !ArrayList(u8) {
+        var res = ArrayList(u8).init(allocator);
+        if (OIDMap.getEntryByBytes(self.attr_type.id)) |e| {
+            try res.appendSlice(e.display_name);
+        } else |_| {
+            try res.appendSlice(self.attr_type.id);
+        }
+        try res.appendSlice(" = ");
+        try res.appendSlice(self.attr_value);
+
+        return res;
     }
 };
 

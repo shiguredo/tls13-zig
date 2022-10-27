@@ -138,6 +138,7 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
             if (is_tcp) {
                 res.tcp_listener = try std.x.net.tcp.Listener.init(.ip, .{});
+                try res.tcp_listener.?.socket.setReuseAddress(true);
             }
 
             return res;

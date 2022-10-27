@@ -158,7 +158,7 @@ pub fn main() !void {
   - [ ] Add more tests.
   - [ ] Implement X.509 Certificate encoder.
   - [ ] Verify implementation with NIST's test vectors.
-- [x] Verify received X.509 Certificate itself. (RootCA certs signed by ecdsa-with-sha256 with secp384r1 are not supported)
+- [x] Verify X.509 Certificate itself. 
 - [ ] Check the implementation follows RFC8446.
 
 ## Priority: Low

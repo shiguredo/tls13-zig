@@ -48,7 +48,15 @@ pub fn main() !void {
 
         var recv_bytes: [4096]u8 = undefined;
         // receieve contents
-        const recv_size = try con.recv(&recv_bytes);
+        const recv_size = con.recv(&recv_bytes) catch |err| {
+            switch (err) {
+                error.EndOfStream => {
+                    std.log.warn("peer disconnected", .{});
+                    return;
+                },
+                else => return err,
+            }
+        };
         log.info("RECV=\n{s}", .{recv_bytes[0..recv_size]});
         const get_req = "GET / ";
         if (std.mem.eql(u8, recv_bytes[0..get_req.len], get_req)) {

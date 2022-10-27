@@ -4,6 +4,7 @@ const expect = std.testing.expect;
 const expectError = std.testing.expectError;
 const asn1 = @import("asn1.zig");
 const rsa = @import("rsa.zig");
+const errs = @import("errors.zig");
 
 const BoundedArray = std.BoundedArray;
 const ArrayList = std.ArrayList;
@@ -133,12 +134,6 @@ pub const Certificate = struct {
 
     const Self = @This();
 
-    const Error = error{
-        UnsupportedSignatureAlgorithm,
-        UnknownModulusLength,
-        InvalidCACertificate,
-    };
-
     pub fn deinit(self: Self) void {
         self.tbs_certificate.deinit();
         self.signature_algorithm.deinit();
@@ -190,7 +185,7 @@ pub const Certificate = struct {
         // Check cert's issuer and issuer_cert's subject
         // TODO: is this ok?
         if (!self.tbs_certificate.issuer.eql(issuer_c.tbs_certificate.subject)) {
-            return Error.InvalidCACertificate;
+            return errs.CertificateError.InvalidCACertificate;
         }
 
         switch (issuer_c.tbs_certificate.subjectPublicKeyInfo.publicKey) {
@@ -203,11 +198,11 @@ pub const Certificate = struct {
                     !std.mem.eql(u8, algo_id, "1.2.840.113549.1.1.13")) // sha512WithRSAEncryption
                 {
                     std.log.warn("UnsupportedSignatureAlgorithm: {s}", .{self.signature_algorithm.algorithm.id});
-                    return Error.UnsupportedSignatureAlgorithm;
+                    return errs.CertificateError.UnsupportedSignatureAlgorithm;
                 }
                 if (pubkey.modulus_length_bits != self.signature_value.value.len * 8) {
                     std.log.warn("Invalid signature length {}", .{self.signature_value.value.len});
-                    return Error.UnknownModulusLength;
+                    return errs.CertificateError.UnknownModulusLength;
                 }
                 if (pubkey.modulus_length_bits == 2048) {
                     const sig = rsa.Rsa2048.PKCS1V15Signature{ .signature = self.signature_value.value[0 .. 2048 / 8].* };
@@ -241,14 +236,14 @@ pub const Certificate = struct {
                     }
                 } else {
                     std.log.err("Unknown modulus length {}", .{pubkey.modulus_length_bits});
-                    return Error.UnknownModulusLength;
+                    return errs.CertificateError.UnknownModulusLength;
                 }
             },
             .secp256r1 => |pubkey| {
                 // ecdsa-with-SHA256
                 if (!std.mem.eql(u8, self.signature_algorithm.algorithm.id, "1.2.840.10045.4.3.2")) {
                     std.log.err("Secp256r1 UnsupportedSignatureAlgorithm: {s}", .{self.signature_algorithm.algorithm.id});
-                    return Error.UnsupportedSignatureAlgorithm;
+                    return errs.CertificateError.UnsupportedSignatureAlgorithm;
                 }
                 const ecdsa_sha256 = std.crypto.sign.ecdsa.EcdsaP256Sha256;
                 const sig = try ecdsa_sha256.Signature.fromDer(self.signature_value.value);
@@ -260,7 +255,7 @@ pub const Certificate = struct {
                     !std.mem.eql(u8, algo_id, "1.2.840.10045.4.3.3")) // ecdsa-with-SHA384
                 {
                     std.log.warn("Secp384r1 UnsupportedSignatureAlgorithm: {s}", .{self.signature_algorithm.algorithm.id});
-                    return Error.UnsupportedSignatureAlgorithm;
+                    return errs.CertificateError.UnsupportedSignatureAlgorithm;
                 }
 
                 if (std.mem.eql(u8, algo_id, "1.2.840.10045.4.3.2")) {
@@ -338,7 +333,7 @@ pub const TBSCertificate = struct {
         if (v == 0xA0) { // [0] EXPLICIT
             const v_len = try reader.readByte();
             if (v_len != 0x03) { // length is assumed to be 3
-                return asn1.Decoder.Error.InvalidLength;
+                return errs.DecodingError.InvalidLength;
             }
             version = try Version.decode(reader);
         } else {
@@ -374,7 +369,7 @@ pub const TBSCertificate = struct {
 
         if (version != .v1) {
             if ((try reader.readByte()) != 0xA3) { // [3] EXPLICIT
-                return asn1.Decoder.Error.InvalidType;
+                return errs.DecodingError.InvalidType;
             }
             const exts_len = try asn1.Decoder.decodeLength(reader);
             _ = exts_len;
@@ -413,11 +408,11 @@ pub const Version = enum(u8) {
     pub fn decode(reader: anytype) !Self {
         const t = @intToEnum(asn1.Tag, try reader.readByte());
         if (t != .INTEGER) {
-            return asn1.Decoder.Error.InvalidType;
+            return errs.DecodingError.InvalidType;
         }
         const t_len = try reader.readByte();
         if (t_len != 0x01) { // length is assumed to be 1(u8)
-            return asn1.Decoder.Error.InvalidLength;
+            return errs.DecodingError.InvalidLength;
         }
 
         return @intToEnum(Self, try reader.readByte());
@@ -441,7 +436,7 @@ const CertificateSerialNumber = struct {
     pub fn decode(reader: anytype) !Self {
         const t = @intToEnum(asn1.Tag, try reader.readByte());
         if (t != .INTEGER) {
-            return asn1.Decoder.Error.InvalidType;
+            return errs.DecodingError.InvalidType;
         }
         const len = try asn1.Decoder.decodeLength(reader);
         var res = try Self.init(len);
@@ -614,7 +609,7 @@ const RelativeDistinguishedName = struct {
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
         const t = @intToEnum(asn1.Tag, try reader.readByte());
         if (t != .SET) {
-            return asn1.Decoder.Error.InvalidType;
+            return errs.DecodingError.InvalidType;
         }
         const len = try asn1.Decoder.decodeLength(reader);
         var attrs = ArrayList(AttributeTypeAndValue).init(allocator);
@@ -850,7 +845,7 @@ const Time = struct {
         } else if (s == '-') {
             self.plus = false;
         } else {
-            return asn1.Decoder.Error.InvalidFormat;
+            return errs.DecodingError.InvalidFormat;
         }
 
         // hhmm
@@ -883,7 +878,7 @@ const Time = struct {
             if (s == 'd') {
                 s = try reader.readByte();
             } else {
-                return asn1.Decoder.Error.InvalidFormat;
+                return errs.DecodingError.InvalidFormat;
             }
         }
 
@@ -895,7 +890,7 @@ const Time = struct {
         } else if (s == '-') {
             self.plus = false;
         } else {
-            return asn1.Decoder.Error.InvalidFormat;
+            return errs.DecodingError.InvalidFormat;
         }
 
         // hhmm
@@ -924,10 +919,6 @@ const Time = struct {
 const SubjectPublicKeyInfo = struct {
     algorithm: AlgorithmIdentifier,
     publicKey: PublicKey,
-
-    const Error = error{
-        UnsupportedCurve,
-    };
 
     const Self = @This();
 
@@ -966,16 +957,16 @@ const SubjectPublicKeyInfo = struct {
             } else if (std.mem.eql(u8, named_curve.id, "1.3.132.0.34")) {
                 pub_key_type = PublicKeyType.secp384r1;
             } else {
-                return Error.UnsupportedCurve;
+                return errs.DecodingError.UnsupportedFormat;
             }
         } else {
             //currently, only accepts 'rsaEncryption'
-            return asn1.Decoder.Error.InvalidFormat;
+            return errs.DecodingError.InvalidFormat;
         }
 
         const t_key = @intToEnum(asn1.Tag, try reader.readByte());
         if (t_key != .BIT_STRING) {
-            return asn1.Decoder.Error.InvalidType;
+            return errs.DecodingError.InvalidType;
         }
         const key_len = try asn1.Decoder.decodeLength(reader);
 
@@ -984,7 +975,7 @@ const SubjectPublicKeyInfo = struct {
         const b = try reader.readByte();
         if (b != 0x00) {
             // TODO: handle this
-            return asn1.Decoder.Error.InvalidFormat;
+            return errs.DecodingError.InvalidFormat;
         }
 
         const pub_key = try PublicKey.decode(pub_key_type, reader, key_len - 1, allocator);
@@ -1165,10 +1156,6 @@ const Secp256r1PublicKey = struct {
 
     const Self = @This();
 
-    const Error = error{
-        UnsupportedFormat,
-    };
-
     pub fn deinit(self: Self) void {
         _ = self;
     }
@@ -1177,7 +1164,7 @@ const Secp256r1PublicKey = struct {
         var buf: [100]u8 = undefined;
         // Currently, only uncompressed format supported.
         if (len != P256.PublicKey.uncompressed_sec1_encoded_length) {
-            return Error.UnsupportedFormat;
+            return errs.DecodingError.UnsupportedFormat;
         }
         _ = try reader.readNoEof(buf[0..len]);
         const key = try P256.PublicKey.fromSec1(buf[0..len]);
@@ -1222,10 +1209,6 @@ const Secp384r1PublicKey = struct {
 
     const Self = @This();
 
-    const Error = error{
-        UnsupportedFormat,
-    };
-
     pub fn deinit(self: Self) void {
         _ = self;
     }
@@ -1234,7 +1217,7 @@ const Secp384r1PublicKey = struct {
         var buf: [100]u8 = undefined;
         // Currently, only uncompressed format supported.
         if (len != P384.PublicKey.uncompressed_sec1_encoded_length) {
-            return Error.UnsupportedFormat;
+            return errs.DecodingError.UnsupportedFormat;
         }
         _ = try reader.readNoEof(buf[0..len]);
         const key = try P384.PublicKey.fromSec1(buf[0..len]);
@@ -1370,7 +1353,7 @@ const Extension = struct {
         }
 
         if (t_default != .OCTET_STRING) {
-            return asn1.Decoder.Error.InvalidType;
+            return errs.DecodingError.InvalidType;
         }
         const value_len = try asn1.Decoder.decodeLength(reader);
 
@@ -1434,7 +1417,7 @@ pub const SignatureValue = struct {
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
         const t = @intToEnum(asn1.Tag, try reader.readByte());
         if (t != .BIT_STRING) {
-            return asn1.Decoder.Error.InvalidType;
+            return errs.DecodingError.InvalidType;
         }
         const len = try asn1.Decoder.decodeLength(reader);
 
@@ -1443,7 +1426,7 @@ pub const SignatureValue = struct {
         const b = try reader.readByte();
         if (b != 0x00) {
             // TODO: handle this
-            return asn1.Decoder.Error.InvalidFormat;
+            return errs.DecodingError.InvalidFormat;
         }
 
         var value = try allocator.alloc(u8, len - 1);
@@ -1475,7 +1458,7 @@ const Dummy = struct {
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
         const t = @intToEnum(asn1.Tag, try reader.readByte());
         if (t != .SEQUENCE) {
-            return asn1.Error.InvalidType;
+            return errs.DecodingError.InvalidType;
         }
         const len = try asn1.Decoder.decodeLength(reader);
         _ = len;

@@ -6,6 +6,7 @@ const pkcs8 = @import("pkcs8.zig");
 const x509 = @import("x509.zig");
 const private_key = @import("private_key.zig");
 const PrivateKey = private_key.PrivateKey;
+const errs = @import("errors.zig");
 
 fn readContentsFromFile(path: []const u8, allocator: std.mem.Allocator) ![]u8 {
     // Get the path
@@ -38,7 +39,7 @@ pub fn readCertificateFromFileToDer(cert_path: []const u8, allocator: std.mem.Al
         }
         allocator.free(cert_content);
         if (certs.items.len == 0) {
-            return Error.InvalidFormat;
+            return errs.DecodingError.InvalidFormat;
         }
         return certs.items[0];
     } else {
@@ -129,7 +130,7 @@ fn splitPEM(src: []const u8, comptime label: []const u8, allocator: std.mem.Allo
             }
         }
         if (!end_ok) {
-            return Error.InvalidFormat;
+            return errs.DecodingError.InvalidFormat;
         }
         try res.append(src[begin_idx + BEGIN_LABEL.len .. end_idx]);
         begin_idx = end_idx + END_LABEL.len;
@@ -162,11 +163,6 @@ fn convertPEMToDER(pem: []const u8, allocator: std.mem.Allocator) ![]u8 {
     return decoded_content;
 }
 
-pub const Error = error{
-    InvalidFormat,
-    UnsupportedPrivateKeyFormat,
-};
-
 pub fn decodePrivateKey(k: []const u8, allocator: std.mem.Allocator) !PrivateKey {
     if (isPEMFormatted(k)) {
         if (pkcs8.OneAsymmetricKey.decodeFromPEM(k, allocator)) |pem_key| {
@@ -176,7 +172,7 @@ pub fn decodePrivateKey(k: []const u8, allocator: std.mem.Allocator) !PrivateKey
             if (private_key.RSAPrivateKey.decodeFromPEM(k, allocator)) |pk_rsa| {
                 return .{ .rsa = pk_rsa };
             } else |_| {
-                return Error.UnsupportedPrivateKeyFormat;
+                return errs.DecodingError.UnsupportedFormat;
             }
         }
     } else {
@@ -188,7 +184,7 @@ pub fn decodePrivateKey(k: []const u8, allocator: std.mem.Allocator) !PrivateKey
             if (private_key.ECPrivateKey.decode(stream.reader(), allocator)) |pk_ec| {
                 return .{ .ec = pk_ec };
             } else |_| {
-                return Error.UnsupportedPrivateKeyFormat;
+                return errs.DecodingError.UnsupportedFormat;
             }
         }
     }

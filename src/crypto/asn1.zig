@@ -1,5 +1,6 @@
 const std = @import("std");
 const io = std.io;
+const errs = @import("errors.zig");
 
 const expect = std.testing.expect;
 
@@ -19,14 +20,6 @@ pub const Tag = enum(u8) {
 };
 
 pub const Decoder = struct {
-    pub const Error = error{
-        InvalidType,
-        InvalidLength,
-        InvalidFormat,
-        TooLarge,
-        NotAllDecoded,
-    };
-
     pub fn decodeLength(reader: anytype) !u64 {
         const len = try reader.readByte();
 
@@ -40,7 +33,7 @@ pub const Decoder = struct {
 
         // length field larger than u64 is ignored
         if (len_size > 8) {
-            return Error.TooLarge;
+            return errs.DecodingError.TooLarge;
         }
 
         var i: usize = 0;
@@ -120,7 +113,7 @@ pub const Decoder = struct {
     pub fn decodeSEQUENCE(reader: anytype, allocator: std.mem.Allocator, comptime DecodeType: type) !DecodeType {
         const t = @intToEnum(Tag, try reader.readByte());
         if (t != .SEQUENCE) {
-            return Error.InvalidType;
+            return errs.DecodingError.InvalidType;
         }
         const len = try decodeLength(reader);
         var content = try allocator.alloc(u8, len);
@@ -134,7 +127,7 @@ pub const Decoder = struct {
         errdefer res.deinit();
 
         if ((try stream.getPos()) != (try stream.getEndPos())) {
-            return Error.NotAllDecoded;
+            return errs.DecodingError.NotAllDecoded;
         }
 
         return res;
@@ -143,7 +136,7 @@ pub const Decoder = struct {
     pub fn decodeINTEGER(reader: anytype, allocator: std.mem.Allocator) ![]u8 {
         const t = @intToEnum(Tag, try reader.readByte());
         if (t != .INTEGER) {
-            return Error.InvalidType;
+            return errs.DecodingError.InvalidType;
         }
         const len = try decodeLength(reader);
         var content = try allocator.alloc(u8, len);
@@ -158,7 +151,7 @@ pub const Decoder = struct {
     pub fn decodeOCTETSTRING(reader: anytype, allocator: std.mem.Allocator) ![]u8 {
         const t = @intToEnum(Tag, try reader.readByte());
         if (t != .OCTET_STRING) {
-            return Error.InvalidType;
+            return errs.DecodingError.InvalidType;
         }
         const len = try decodeLength(reader);
         var content = try allocator.alloc(u8, len);
@@ -184,7 +177,7 @@ pub const ObjectIdentifier = struct {
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
         const t = @intToEnum(Tag, try reader.readByte());
         if (t != .OBJECT_IDENTIFIER) {
-            return Decoder.Error.InvalidType;
+            return errs.DecodingError.InvalidType;
         }
         const len = try Decoder.decodeLength(reader);
         var id_bin = try allocator.alloc(u8, len);
@@ -211,10 +204,6 @@ pub const ObjectIdentifier = struct {
 };
 
 pub const Encoder = struct {
-    const Error = error{
-        SomethingWrong,
-    };
-
     pub fn encodeLength(len: u64, writer: anytype) !usize {
         if (len < 0x80) {
             try writer.writeByte(@intCast(u8, len));
@@ -226,7 +215,7 @@ pub const Encoder = struct {
         var res: [8]u8 = undefined;
         while (tmp > 0) {
             if (end_idx >= res.len) {
-                return Error.SomethingWrong;
+                return errs.EncodingError.InvalidArgument;
             }
 
             res[end_idx] = @intCast(u8, tmp & 0xFF);

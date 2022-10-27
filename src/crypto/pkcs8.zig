@@ -5,6 +5,7 @@ const private_key = @import("private_key.zig");
 const asn1 = @import("asn1.zig");
 const x509 = @import("x509.zig");
 const cert = @import("cert.zig");
+const errs = @import("errors.zig");
 
 const expect = std.testing.expect;
 
@@ -52,10 +53,6 @@ pub const OneAsymmetricKey = struct {
     const OID_ecPublicKey = "1.2.840.10045.2.1";
     const OID_rsaEncryption = "1.2.840.113549.1.1.1";
 
-    pub const Error = error{
-        InvalidFormat,
-    };
-
     pub fn deinit(self: Self) void {
         self.privateKeyAlgorithmIdentifier.deinit();
         if (self.privateKey.len != 0) {
@@ -79,11 +76,11 @@ pub const OneAsymmetricKey = struct {
         var reader = stream.reader();
         var t = @intToEnum(asn1.Tag, try reader.readByte());
         if (t != .INTEGER) {
-            return asn1.Decoder.Error.InvalidType;
+            return errs.DecodingError.InvalidType;
         }
         const v_len = try asn1.Decoder.decodeLength(reader);
         if (v_len != 1) {
-            return asn1.Decoder.Error.InvalidLength;
+            return errs.DecodingError.InvalidLength;
         }
         const version = try reader.readByte();
 
@@ -106,7 +103,7 @@ pub const OneAsymmetricKey = struct {
         }
 
         // TODO: Implement OPTIONAL
-        return Error.InvalidFormat;
+        return errs.DecodingError.InvalidFormat;
     }
 
     pub fn decodePrivateKey(self: Self) !private_key.PrivateKey {
@@ -118,7 +115,7 @@ pub const OneAsymmetricKey = struct {
             return .{ .rsa = try private_key.RSAPrivateKey.decode(stream.reader(), self.allocator) };
         }
 
-        unreachable;
+        return errs.DecodingError.UnsupportedFormat;
     }
 
     pub fn decodeFromPEM(pem: []const u8, allocator: std.mem.Allocator) !Self {
@@ -130,7 +127,7 @@ pub const OneAsymmetricKey = struct {
             keys.deinit();
         }
         if (keys.items.len != 1) {
-            return Error.InvalidFormat;
+            return errs.DecodingError.InvalidFormat;
         }
 
         var stream_decode = io.fixedBufferStream(keys.items[0]);

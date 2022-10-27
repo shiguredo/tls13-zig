@@ -2,6 +2,7 @@ const std = @import("std");
 const io = std.io;
 const asn1 = @import("asn1.zig");
 const cert = @import("cert.zig");
+const errs = @import("errors.zig");
 const expect = std.testing.expect;
 
 pub const PrivateKeyType = enum(u8) {
@@ -56,20 +57,20 @@ pub const ECPrivateKey = struct {
 
         var t = @intToEnum(asn1.Tag, try reader.readByte());
         if (t != .INTEGER) {
-            return asn1.Decoder.Error.InvalidType;
+            return errs.DecodingError.InvalidType;
         }
         var t_len: usize = try reader.readByte();
         if (t_len != 0x01) { // length is assumed to be 1(u8)
-            return asn1.Decoder.Error.InvalidLength;
+            return errs.DecodingError.InvalidLength;
         }
         const ec_version = try reader.readByte();
         if (ec_version != 0x01) {
-            return asn1.Decoder.Error.InvalidFormat;
+            return errs.DecodingError.InvalidFormat;
         }
 
         t = @intToEnum(asn1.Tag, try reader.readByte());
         if (t != .OCTET_STRING) {
-            return asn1.Decoder.Error.InvalidType;
+            return errs.DecodingError.InvalidType;
         }
         t_len = try asn1.Decoder.decodeLength(reader);
         var privKey = try allocator.alloc(u8, t_len);
@@ -95,7 +96,7 @@ pub const ECPrivateKey = struct {
             t_len = try asn1.Decoder.decodeLength(reader);
             const t_key = @intToEnum(asn1.Tag, try reader.readByte());
             if (t_key != .BIT_STRING) {
-                return asn1.Decoder.Error.InvalidType;
+                return errs.DecodingError.InvalidType;
             }
             const key_len = try asn1.Decoder.decodeLength(reader);
             // the first byte of 'BIT STRING' specifies
@@ -103,7 +104,7 @@ pub const ECPrivateKey = struct {
             const b = try reader.readByte();
             if (b != 0x00) {
                 // TODO: handle this
-                return asn1.Decoder.Error.InvalidFormat;
+                return errs.DecodingError.InvalidFormat;
             }
 
             res.publicKey = try allocator.alloc(u8, key_len - 1);
@@ -171,10 +172,6 @@ pub const RSAPrivateKey = struct {
 
     const Self = @This();
 
-    const Error = error{
-        InvalidFormat,
-    };
-
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
         return try asn1.Decoder.decodeSEQUENCE(reader, allocator, Self);
     }
@@ -184,15 +181,15 @@ pub const RSAPrivateKey = struct {
 
         var t = @intToEnum(asn1.Tag, try reader.readByte());
         if (t != .INTEGER) {
-            return asn1.Decoder.Error.InvalidType;
+            return errs.DecodingError.InvalidType;
         }
         var t_len: usize = try reader.readByte();
         if (t_len != 0x01) { // length is assumed to be 1(u8)
-            return asn1.Decoder.Error.InvalidLength;
+            return errs.DecodingError.InvalidLength;
         }
         const version = try reader.readByte();
         if (version != 0x00) { // currently, only 'two-prime(0)' is supported.
-            return asn1.Decoder.Error.InvalidFormat;
+            return errs.DecodingError.InvalidFormat;
         }
 
         const modulus = try asn1.Decoder.decodeINTEGER(reader, allocator);
@@ -284,7 +281,7 @@ pub const RSAPrivateKey = struct {
             keys.deinit();
         }
         if (keys.items.len != 1) {
-            return Error.InvalidFormat;
+            return errs.DecodingError.InvalidFormat;
         }
 
         var stream_decode = io.fixedBufferStream(keys.items[0]);

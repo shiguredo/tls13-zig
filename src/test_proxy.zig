@@ -27,6 +27,7 @@ pub fn main() !void {
     try tls_server.listen(8443);
     while (true) {
         var con = try tls_server.accept();
+        defer con.deinit();
         const fork_pid = std.os.fork() catch {
             std.log.err("fork failed", .{});
             return;

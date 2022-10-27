@@ -18,6 +18,11 @@ cd test
 
 cd ../
 
+# Checking memory leak
+until nc -z localhost 8443; do sleep 1; done && curl https://localhost:8443 --insecure &
+zig test src/main_test_server.zig --test-filter 'e2e server'
+echo "Memory leak check passed"
+
 zig run src/main_test_server.zig &
 ZIG_SERVER_PID=$!
 

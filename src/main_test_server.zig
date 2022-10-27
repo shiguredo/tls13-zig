@@ -1,11 +1,14 @@
 const std = @import("std");
 const log = std.log;
 const os = std.os;
-const allocator = std.heap.page_allocator;
 
 const server = @import("server.zig");
 
 pub fn main() !void {
+    try do(true, std.heap.page_allocator);
+}
+
+pub fn do(fork: bool, allocator: std.mem.Allocator) !void {
     // ignore SIGCHLD
     var act = os.Sigaction{
         .handler = .{ .handler = os.SIG.IGN },
@@ -31,20 +34,34 @@ pub fn main() !void {
     try tls_server.listen(8443);
     while (true) {
         var con = try tls_server.accept();
-        const fork_pid = std.os.fork() catch {
-            log.err("fork failed", .{});
-            return;
-        };
-        if (fork_pid != 0) {
-            continue;
+        defer con.deinit();
+        if (fork) {
+            const fork_pid = std.os.fork() catch {
+                log.err("fork failed", .{});
+                return;
+            };
+            if (fork_pid != 0) {
+                continue;
+            }
+            log.debug("forked", .{});
         }
-        log.debug("forked", .{});
 
         defer {
             con.close();
             log.info("connection closed", .{});
         }
-        try con.handshake();
+        con.handshake() catch |err| {
+            switch (err) {
+                error.EndOfStream => {
+                    if (fork) {
+                        return err;
+                    } else {
+                        continue;
+                    }
+                },
+                else => return err,
+            }
+        };
 
         var recv_bytes: [4096]u8 = undefined;
         // receieve contents
@@ -70,4 +87,8 @@ pub fn main() !void {
     }
 
     return;
+}
+
+test "e2e server" {
+    try do(false, std.testing.allocator);
 }

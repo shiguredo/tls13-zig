@@ -203,6 +203,8 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
         resumed: bool = false,
         accept_early_data: bool = false,
         early_protector: RecordPayloadProtector = undefined,
+        received_record_size_limit: bool = false,
+        send_record_size_limit: u16 = 2 << 13,
 
         // engines
         write_engine: common.WriteEngine(io.BufferedWriter(4096, WriterType), .server) = undefined,
@@ -579,7 +581,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 .ks = &self.ks,
                 .write_buffer = &self.write_buffer,
                 .allocator = self.allocator,
-                .record_size_limit = self.tls_server.record_size_limit,
+                .record_size_limit = self.send_record_size_limit,
             };
 
             try self.sendNewSessionTicket();
@@ -803,6 +805,15 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     std.log.debug("EarlyDatas will not be accepted", .{});
                 }
             }
+
+            // Checking RecordSizeLimit extension
+            if (msg.getExtension(ch.extensions, .record_size_limit)) |rsl_raw| {
+                const rsl = rsl_raw.record_size_limit;
+                self.send_record_size_limit = rsl.record_size_limit;
+                self.received_record_size_limit = true;
+            } else |_| {
+                self.received_record_size_limit = false;
+            }
         }
 
         fn sendServerHello(self: *Self) !void {
@@ -833,8 +844,17 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
         fn sendEncryptedExtensions(self: *Self) !void {
             var ee = EncryptedExtensions.init(self.allocator);
 
+            // If the peer client sends RecordSizeLimit, send server's RecordSizeLimit.
+            //
+            // RFC 8449 Section 4. The "record_size_limit" Extension
+            // Endpoints SHOULD advertise the "record_size_limit" extension,
+            // even if they have no need to limit the size of records.
+            // For clients, this allows servers to advertise a limit at their discretion.
+            // For servers, this allows clients to know that their limit will be respected.
+            // If this extension is not negotiated, endpoints can send records of any size permitted by the protocol or other negotiated extensions.
+            //
             // TODO: validate size
-            if (self.tls_server.record_size_limit != (2 << 13)) {
+            if (self.received_record_size_limit) {
                 const rsl = RecordSizeLimit{ .record_size_limit = self.tls_server.record_size_limit };
                 try ee.extensions.append(.{ .record_size_limit = rsl });
             }

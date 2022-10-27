@@ -524,7 +524,16 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             // wait for Finished.
             var finished_ok = false;
             while (!finished_ok) {
-                t = try self.reader.readEnum(ContentType, .Big);
+                t = self.reader.readEnum(ContentType, .Big) catch |err| {
+                    switch (err) {
+                        // some clients disconnect without sending Finished
+                        error.EndOfStream => {
+                            finished_ok = true;
+                            break;
+                        },
+                        else => return err,
+                    }
+                };
                 if (t == .change_cipher_spec) {
                     const r = try TLSPlainText.decode(self.reader, t, self.allocator, null, null);
                     defer r.deinit();

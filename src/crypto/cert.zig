@@ -4,8 +4,8 @@ const base64 = std.base64;
 const ArrayList = std.ArrayList;
 const pkcs8 = @import("pkcs8.zig");
 const x509 = @import("x509.zig");
-const private_key = @import("private_key.zig");
-const PrivateKey = private_key.PrivateKey;
+const key = @import("key.zig");
+const PrivateKey = key.PrivateKey;
 const errs = @import("errors.zig");
 
 fn readContentsFromFile(path: []const u8, allocator: std.mem.Allocator) ![]u8 {
@@ -169,7 +169,7 @@ pub fn decodePrivateKey(k: []const u8, allocator: std.mem.Allocator) !PrivateKey
             defer pem_key.deinit();
             return try pem_key.decodePrivateKey();
         } else |_| {
-            if (private_key.RSAPrivateKey.decodeFromPEM(k, allocator)) |pk_rsa| {
+            if (key.RSAPrivateKey.decodeFromPEM(k, allocator)) |pk_rsa| {
                 return .{ .rsa = pk_rsa };
             } else |_| {
                 return errs.DecodingError.UnsupportedFormat;
@@ -177,11 +177,11 @@ pub fn decodePrivateKey(k: []const u8, allocator: std.mem.Allocator) !PrivateKey
         }
     } else {
         var stream = io.fixedBufferStream(k);
-        if (private_key.RSAPrivateKey.decode(stream.reader(), allocator)) |pk_rsa| {
+        if (key.RSAPrivateKey.decode(stream.reader(), allocator)) |pk_rsa| {
             return .{ .rsa = pk_rsa };
         } else |_| {
             stream.reset();
-            if (private_key.ECPrivateKey.decode(stream.reader(), allocator)) |pk_ec| {
+            if (key.ECPrivateKey.decode(stream.reader(), allocator)) |pk_ec| {
                 return .{ .ec = pk_ec };
             } else |_| {
                 return errs.DecodingError.UnsupportedFormat;

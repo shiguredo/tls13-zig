@@ -5,7 +5,8 @@ const BoundedArray = std.BoundedArray;
 pub const rsa = @import("crypto/rsa.zig");
 pub const cert = @import("crypto/cert.zig");
 pub const root = @import("crypto/root.zig");
-pub const PrivateKey = @import("crypto/private_key.zig").PrivateKey;
+pub const key = @import("crypto/key.zig");
+pub const PrivateKey = key.PrivateKey;
 
 pub const HashType = enum {
     SHA256,
@@ -162,12 +163,12 @@ pub const Aead = struct {
     pub const Aes128Gcm = struct {
         const C = std.crypto.aead.aes_gcm.Aes128Gcm;
 
-        fn encrypt(c: []u8, tag: []u8, m: []const u8, ad: []const u8, nonce: []const u8, key: []const u8) void {
-            C.encrypt(c, tag[0..C.tag_length], m, ad, nonce[0..C.nonce_length].*, key[0..C.key_length].*);
+        fn encrypt(c: []u8, tag: []u8, m: []const u8, ad: []const u8, nonce: []const u8, k: []const u8) void {
+            C.encrypt(c, tag[0..C.tag_length], m, ad, nonce[0..C.nonce_length].*, k[0..C.key_length].*);
         }
 
-        fn decrypt(m: []u8, c: []const u8, tag: []const u8, ad: []const u8, nonce: []const u8, key: []const u8) AuthenticationError!void {
-            try C.decrypt(m, c, tag[0..C.tag_length].*, ad, nonce[0..C.nonce_length].*, key[0..C.key_length].*);
+        fn decrypt(m: []u8, c: []const u8, tag: []const u8, ad: []const u8, nonce: []const u8, k: []const u8) AuthenticationError!void {
+            try C.decrypt(m, c, tag[0..C.tag_length].*, ad, nonce[0..C.nonce_length].*, k[0..C.key_length].*);
         }
 
         pub const aead = Aead{
@@ -183,12 +184,12 @@ pub const Aead = struct {
     pub const Aes256Gcm = struct {
         const C = std.crypto.aead.aes_gcm.Aes256Gcm;
 
-        fn encrypt(c: []u8, tag: []u8, m: []const u8, ad: []const u8, nonce: []const u8, key: []const u8) void {
-            C.encrypt(c, tag[0..C.tag_length], m, ad, nonce[0..C.nonce_length].*, key[0..C.key_length].*);
+        fn encrypt(c: []u8, tag: []u8, m: []const u8, ad: []const u8, nonce: []const u8, k: []const u8) void {
+            C.encrypt(c, tag[0..C.tag_length], m, ad, nonce[0..C.nonce_length].*, k[0..C.key_length].*);
         }
 
-        fn decrypt(m: []u8, c: []const u8, tag: []const u8, ad: []const u8, nonce: []const u8, key: []const u8) AuthenticationError!void {
-            try C.decrypt(m, c, tag[0..C.tag_length].*, ad, nonce[0..C.nonce_length].*, key[0..C.key_length].*);
+        fn decrypt(m: []u8, c: []const u8, tag: []const u8, ad: []const u8, nonce: []const u8, k: []const u8) AuthenticationError!void {
+            try C.decrypt(m, c, tag[0..C.tag_length].*, ad, nonce[0..C.nonce_length].*, k[0..C.key_length].*);
         }
 
         pub const aead = Aead{
@@ -204,12 +205,12 @@ pub const Aead = struct {
     pub const ChaCha20Poly1305 = struct {
         const C = std.crypto.aead.chacha_poly.ChaCha20Poly1305;
 
-        fn encrypt(c: []u8, tag: []u8, m: []const u8, ad: []const u8, nonce: []const u8, key: []const u8) void {
-            C.encrypt(c, tag[0..C.tag_length], m, ad, nonce[0..C.nonce_length].*, key[0..C.key_length].*);
+        fn encrypt(c: []u8, tag: []u8, m: []const u8, ad: []const u8, nonce: []const u8, k: []const u8) void {
+            C.encrypt(c, tag[0..C.tag_length], m, ad, nonce[0..C.nonce_length].*, k[0..C.key_length].*);
         }
 
-        fn decrypt(m: []u8, c: []const u8, tag: []const u8, ad: []const u8, nonce: []const u8, key: []const u8) AuthenticationError!void {
-            try C.decrypt(m, c, tag[0..C.tag_length].*, ad, nonce[0..C.nonce_length].*, key[0..C.key_length].*);
+        fn decrypt(m: []u8, c: []const u8, tag: []const u8, ad: []const u8, nonce: []const u8, k: []const u8) AuthenticationError!void {
+            try C.decrypt(m, c, tag[0..C.tag_length].*, ad, nonce[0..C.nonce_length].*, k[0..C.key_length].*);
         }
 
         pub const aead = Aead{
@@ -243,13 +244,13 @@ pub const Secret = struct {
             };
         }
 
-        pub fn fromBytes(key: []const u8, iv: []const u8) !RecordKeys {
+        pub fn fromBytes(k: []const u8, iv: []const u8) !RecordKeys {
             var res = RecordKeys{
-                .key = try KeyBoundedArray.init(key.len),
+                .key = try KeyBoundedArray.init(k.len),
                 .iv = try NonceBoundedArray.init(iv.len),
             };
 
-            std.mem.copy(u8, res.key.slice(), key);
+            std.mem.copy(u8, res.key.slice(), k);
             std.mem.copy(u8, res.iv.slice(), iv);
 
             return res;

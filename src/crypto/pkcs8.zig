@@ -1,7 +1,7 @@
 const std = @import("std");
 const io = std.io;
 const base64 = std.base64;
-const private_key = @import("private_key.zig");
+const key = @import("key.zig");
 const asn1 = @import("asn1.zig");
 const x509 = @import("x509.zig");
 const cert = @import("cert.zig");
@@ -106,13 +106,13 @@ pub const OneAsymmetricKey = struct {
         return errs.DecodingError.InvalidFormat;
     }
 
-    pub fn decodePrivateKey(self: Self) !private_key.PrivateKey {
+    pub fn decodePrivateKey(self: Self) !key.PrivateKey {
         var stream = io.fixedBufferStream(self.privateKey);
         const id = self.privateKeyAlgorithmIdentifier.algorithm.id;
         if (std.mem.eql(u8, id, OID_ecPublicKey)) {
-            return .{ .ec = try private_key.ECPrivateKey.decode(stream.reader(), self.allocator) };
+            return .{ .ec = try key.ECPrivateKey.decode(stream.reader(), self.allocator) };
         } else if (std.mem.eql(u8, id, OID_rsaEncryption)) {
-            return .{ .rsa = try private_key.RSAPrivateKey.decode(stream.reader(), self.allocator) };
+            return .{ .rsa = try key.RSAPrivateKey.decode(stream.reader(), self.allocator) };
         }
 
         return errs.DecodingError.UnsupportedFormat;
@@ -131,9 +131,9 @@ pub const OneAsymmetricKey = struct {
         }
 
         var stream_decode = io.fixedBufferStream(keys.items[0]);
-        const key = try Self.decode(stream_decode.reader(), allocator);
+        const k = try Self.decode(stream_decode.reader(), allocator);
 
-        return key;
+        return k;
     }
 };
 
@@ -154,10 +154,10 @@ test "decode PEM secp256r1 private key" {
     };
     // zig fmt: on
 
-    const key = try OneAsymmetricKey.decodeFromPEM(key_pem, std.testing.allocator);
-    defer key.deinit();
+    const k = try OneAsymmetricKey.decodeFromPEM(key_pem, std.testing.allocator);
+    defer k.deinit();
 
-    const pk = (try key.decodePrivateKey()).ec;
+    const pk = (try k.decodePrivateKey()).ec;
     defer pk.deinit();
     try expect(std.mem.eql(u8, pk.privateKey, &privkey_ans));
 }
@@ -302,8 +302,8 @@ test "decode PEM RSA-2048 private key" {
     };
     // zig fmt: on
 
-    const key = try OneAsymmetricKey.decodeFromPEM(key_pem, std.testing.allocator);
-    defer key.deinit();
+    const k = try OneAsymmetricKey.decodeFromPEM(key_pem, std.testing.allocator);
+    defer k.deinit();
 
     const pk = (try key.decodePrivateKey()).rsa;
     defer pk.deinit();

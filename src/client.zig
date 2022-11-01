@@ -115,7 +115,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         allow_self_signed: bool = false,
         rootCA: crypto.root.RootCA,
         signature_schems: ArrayList(signature_scheme.SignatureScheme),
-        cert_pubkeys: ArrayList(x509.PublicKey),
+        cert_pubkeys: ArrayList(crypto.key.PublicKey),
 
         // record size limitation
         // RFC 8449 Section 4.  The "record_size_limit" Extension
@@ -187,7 +187,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 .ap_protector = undefined,
                 .rootCA = crypto.root.RootCA.init(allocator),
                 .signature_schems = ArrayList(signature_scheme.SignatureScheme).init(allocator),
-                .cert_pubkeys = ArrayList(x509.PublicKey).init(allocator),
+                .cert_pubkeys = ArrayList(crypto.key.PublicKey).init(allocator),
 
                 .allocator = allocator,
             };
@@ -885,7 +885,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             self.state = .WAIT_CV;
         }
 
-        fn getPublicKey(self: Self, t: x509.PublicKeyType) !x509.PublicKey {
+        fn getPublicKey(self: Self, t: crypto.key.PublicKeyType) !crypto.key.PublicKey {
             for (self.cert_pubkeys.items) |cp| {
                 if (cp == t) {
                     return cp;

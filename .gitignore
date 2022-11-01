@@ -10,3 +10,4 @@
 /key.pem
 /cert.pem
 /early_data.txt
+/reverse_mac.sh

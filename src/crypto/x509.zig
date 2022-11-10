@@ -135,6 +135,11 @@ pub const Certificate = struct {
 
     const Self = @This();
 
+    pub const Error = error{
+        BeforeValidTime,
+        AfterValidTime,
+    };
+
     pub fn deinit(self: Self) void {
         self.tbs_certificate.deinit();
         self.signature_algorithm.deinit();
@@ -181,6 +186,17 @@ pub const Certificate = struct {
             issuer_c = c;
         } else {
             issuer_c = self;
+        }
+        const now_sec = std.time.timestamp();
+        const before_sec = self.tbs_certificate.validity.notBefore.toSeconds();
+        if (now_sec < before_sec) {
+            self.tbs_certificate.validity.notBefore.print();
+            return Error.BeforeValidTime;
+        }
+        const after_sec = self.tbs_certificate.validity.notAfter.toSeconds();
+        if (now_sec > after_sec) {
+            self.tbs_certificate.validity.notAfter.print();
+            return Error.AfterValidTime;
         }
 
         // Check cert's issuer and issuer_cert's subject
@@ -779,8 +795,8 @@ const Validity = struct {
 const Time = struct {
     time_type: asn1.Tag,
 
-    year: usize = 0,
-    month: usize = 0,
+    year: u16 = 0,
+    month: u4 = 0,
     day: usize = 0,
     hour: usize = 0,
     minute: usize = 0,
@@ -811,22 +827,22 @@ const Time = struct {
         return res;
     }
 
-    pub fn print(self: Self, comptime pf: fn ([]const u8, anytype) void, comptime prefix: []const u8) void {
+    pub fn print(self: Self) void {
         var out: [100]u8 = undefined;
         const len = self.writeToBuf(&out) catch 0;
-        pf("{s}{s}", .{ prefix, out[0..len] });
+        std.log.debug("{s}", .{out[0..len]});
     }
 
     // "YYMMDDhhmm[ss]Z" or "YYMMDDhhmm[ss](+|-)hhmm"
     fn decodeUTCTime(self: *Self, reader: anytype) !void {
         // TODO: check array length
-        self.year = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
+        self.year = @intCast(u16, c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte()));
         if (self.year >= 50) {
             self.year = self.year + 1900;
         } else {
             self.year = self.year + 2000;
         }
-        self.month = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
+        self.month = @intCast(u4, c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte()));
         self.day = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
         self.hour = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
         self.minute = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
@@ -859,9 +875,9 @@ const Time = struct {
     // "YYYYMMDDhhmm[ss][.d]Z" or "YYYYMMDDhhmm[ss][.d](+|-)hhmm"
     fn decodeGeneralizedTime(self: *Self, reader: anytype) !void {
         // TODO: check array length
-        self.year = c_to_i(try reader.readByte()) * 1000 + c_to_i(try reader.readByte()) * 100;
-        self.year += c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte()) * 1;
-        self.month = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
+        self.year = @intCast(u16, c_to_i(try reader.readByte()) * 1000 + c_to_i(try reader.readByte()) * 100);
+        self.year += @intCast(u16, c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte()) * 1);
+        self.month = @intCast(u4, c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte()));
         self.day = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
         self.hour = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
         self.minute = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
@@ -903,6 +919,52 @@ const Time = struct {
 
     fn c_to_i(c: u8) usize {
         return c - '0';
+    }
+
+    pub fn toSeconds(self: Self) i64 {
+        var sec: u64 = 0;
+
+        var year_idx: u16 = 1970;
+        while (self.year - year_idx > 0) : (year_idx += 1) {
+            const days: u64 = std.time.epoch.getDaysInYear(year_idx);
+            sec += days * std.time.epoch.secs_per_day;
+        }
+
+        const leap_kind: std.time.epoch.YearLeapKind = if (std.time.epoch.isLeapYear(self.year)) .leap else .not_leap;
+        var month_idx: u4 = 1;
+        while (self.month - month_idx > 0) : (month_idx += 1) {
+            const days: u64 = std.time.epoch.getDaysInMonth(leap_kind, @intToEnum(std.time.epoch.Month, month_idx));
+            sec += days * std.time.epoch.secs_per_day;
+        }
+
+        sec += (self.day - 1) * std.time.epoch.secs_per_day;
+        sec += self.hour * 60 * 60;
+        sec += self.minute * 60;
+        sec += self.second;
+
+        if (self.plus) {
+            sec -= self.t_hour * 60 * 60;
+            sec -= self.t_minute * 60;
+        } else {
+            sec += self.t_hour * 60 * 60;
+            sec += self.t_minute * 60;
+        }
+
+        return @intCast(i64, sec);
+    }
+
+    test "toSeconds" {
+        const t = Self{
+            .time_type = .UTCTime,
+            .year = 2037,
+            .month = 12,
+            .day = 31,
+            .hour = 23,
+            .minute = 59,
+            .second = 59,
+        };
+        const ts = t.toSeconds();
+        try expect(ts == 2145916799);
     }
 
     pub fn writeToBuf(self: Self, out: []u8) !usize {
@@ -1687,7 +1749,6 @@ test "decode Certificate with ecdsa and secp256r1" {
 
     try expect(std.mem.eql(u8, cert.signature_algorithm.algorithm.id, (try OIDMap.getEntryByName("ecdsa-with-SHA256")).oid));
 }
-
 
 test "PEM certificate 1" {
     const cert_pem =

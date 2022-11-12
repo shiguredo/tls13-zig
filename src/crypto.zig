@@ -13,13 +13,9 @@ pub const HashType = enum {
     SHA384,
 };
 
-fn max(comptime T: type, comptime a: T, comptime b: T) T {
-    return if (a > b) a else b;
-}
-
 // abstraction struct for Hkdf functions
 pub const Hkdf = struct {
-    pub const MAX_DIGEST_LENGTH = Sha384.Hash.digest_length;
+    pub const MAX_DIGEST_LENGTH = @max(Sha256.Hash.digest_length, Sha384.Hash.digest_length);
 
     hash_type: HashType,
     digest_length: usize,
@@ -147,9 +143,9 @@ pub const AeadType = enum(u8) {
 // abstraction struct for Aead functions
 pub const Aead = struct {
     const MAX_KEY_LEGNTH =
-        max(u8, ChaCha20Poly1305.C.key_length, max(u8, Aes128Gcm.C.key_length, Aes256Gcm.C.key_length));
+        @max(ChaCha20Poly1305.C.key_length, @max(Aes128Gcm.C.key_length, Aes256Gcm.C.key_length));
     const MAX_NONCE_LENGTH =
-        max(u8, ChaCha20Poly1305.C.nonce_length, max(u8, Aes128Gcm.C.nonce_length, Aes256Gcm.C.nonce_length));
+        @max(ChaCha20Poly1305.C.nonce_length, @max(Aes128Gcm.C.nonce_length, Aes256Gcm.C.nonce_length));
 
     aead_type: AeadType,
 

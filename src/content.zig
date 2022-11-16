@@ -65,10 +65,7 @@ pub const Content = union(ContentType) {
     pub fn encode(self: Self, writer: anytype) !usize {
         switch (self) {
             .invalid => unreachable,
-            .change_cipher_spec => |e| return try e.encode(writer),
-            .alert => |e| return try e.encode(writer),
-            .handshake => |e| return try e.encode(writer),
-            .application_data => |e| return try e.encode(writer),
+            inline else => |case| return try case.encode(writer),
         }
     }
 
@@ -78,10 +75,7 @@ pub const Content = union(ContentType) {
     pub fn length(self: Self) usize {
         switch (self) {
             .invalid => unreachable,
-            .change_cipher_spec => |e| return e.length(),
-            .alert => |e| return e.length(),
-            .handshake => |e| return e.length(),
-            .application_data => |e| return e.length(),
+            inline else => |case| return case.length(),
         }
     }
 

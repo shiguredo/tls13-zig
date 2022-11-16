@@ -197,28 +197,7 @@ pub const Extension = union(ExtensionType) {
         len += @sizeOf(u16); // type
         len += @sizeOf(u16); // length
         switch (self) {
-            .server_name => |e| return e.length() + len,
-            .supported_groups => |e| return e.length() + len,
-            .signature_algorithms => |e| return e.length() + len,
-            .record_size_limit => |e| return e.length() + len,
-            .supported_versions => |e| return e.length() + len,
-            .key_share => |e| return e.length() + len,
-            .none => |e| return e.length() + len,
-            .application_layer_protocol_negotiation => |e| return e.length() + len,
-            .psk_key_exchange_modes => |e| return e.length() + len,
-            .post_handshake_auth => |e| return e.length() + len,
-            .ec_points_format => |e| return e.length() + len,
-            .next_protocol_negotiation => |e| return e.length() + len,
-            .encrypt_then_mac => |e| return e.length() + len,
-            .extended_master_secret => |e| return e.length() + len,
-            .padding => |e| return e.length() + len,
-            .status_request => |e| return e.length() + len,
-            .signed_certificate_timestamp => |e| return e.length() + len,
-            .session_ticket => |e| return e.length() + len,
-            .compress_certificate => |e| return e.length() + len,
-            .application_settings => |e| return e.length() + len,
-            .pre_shared_key => |e| return e.length() + len,
-            .early_data => |e| return e.length() + len,
+            inline else => |case| return case.length() + len,
         }
     }
 

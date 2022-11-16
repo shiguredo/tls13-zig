@@ -127,16 +127,8 @@ pub const Handshake = union(HandshakeType) {
 
         // Encoding payload.
         switch (self) {
-            .client_hello => |e| len += try e.encode(writer),
-            .server_hello => |e| len += try e.encode(writer),
-            .new_session_ticket => |e| len += try e.encode(writer),
             .end_of_early_data => {},
-            .encrypted_extensions => |e| len += try e.encode(writer),
-            .certificate => |e| len += try e.encode(writer),
-            .certificate_verify => |e| len += try e.encode(writer),
-            .finished => |e| len += try e.encode(writer),
-            .key_update => |e| len += try e.encode(writer),
-            .message_hash => |e| len += try e.encode(writer),
+            inline else => |case| len += try case.encode(writer),
         }
 
         return len;
@@ -149,16 +141,8 @@ pub const Handshake = union(HandshakeType) {
         len += @sizeOf(u8); // type
         len += 3; // length, @sizeOf(u24) = 4, so that the length is directly specified;
         switch (self) {
-            .client_hello => |e| len += e.length(),
-            .server_hello => |e| len += e.length(),
-            .new_session_ticket => |e| len += e.length(),
             .end_of_early_data => {},
-            .encrypted_extensions => |e| len += e.length(),
-            .certificate => |e| len += e.length(),
-            .certificate_verify => |e| len += e.length(),
-            .finished => |e| len += e.length(),
-            .key_update => |e| len += e.length(),
-            .message_hash => |e| len += e.length(),
+            inline else => |case| len += case.length(),
         }
 
         return len;
@@ -168,16 +152,11 @@ pub const Handshake = union(HandshakeType) {
     /// @param self Handshake to be deinitialized.
     pub fn deinit(self: Self) void {
         switch (self) {
-            .client_hello => |e| e.deinit(),
-            .server_hello => |e| e.deinit(),
-            .new_session_ticket => |e| e.deinit(),
             .end_of_early_data => {},
-            .encrypted_extensions => |e| e.deinit(),
-            .certificate => |e| e.deinit(),
-            .certificate_verify => |e| e.deinit(),
             .finished => {},
             .key_update => {},
             .message_hash => {},
+            inline else => |case| case.deinit(),
         }
     }
 };

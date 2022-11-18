@@ -2,10 +2,18 @@
 
 set -eux
 
+# Thanks to https://stackoverflow.com/questions/3466166/how-to-check-if-running-in-cygwin-mac-or-linux
+unames=$(uname -s)
+case "$unames" in
+    Linux*)     HOST_ARCH="x86_64-linux";;
+    Darwin*)    HOST_ARCH="x86_64-macos";;
+    *)          echo "Unknown HOST_ARCH=$(uname -s)"; exit 1;;
+esac
+
 ZIG_VERSIONS=$(curl https://ziglang.org/download/index.json)
 
-ZIG_MASTER_TAR=$(echo $ZIG_VERSIONS | jq -r '.master."x86_64-linux".tarball')
-ZIG_MASTER_SHA256=$(echo $ZIG_VERSIONS | jq -r '.master."x86_64-linux".shasum')
+ZIG_MASTER_TAR=$(echo $ZIG_VERSIONS | jq -r ".master.\"$HOST_ARCH\".tarball")
+ZIG_MASTER_SHA256=$(echo $ZIG_VERSIONS | jq -r ".master.\"$HOST_ARCH\".shasum")
 
 ZIG_TAR_NAME="zig-master.tar.xz"
 

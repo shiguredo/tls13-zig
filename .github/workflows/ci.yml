@@ -23,6 +23,21 @@ jobs:
         with:
           version: master
       - run: zig build test
+
+  macos-with-openssl:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: install dependencies
+        run: |
+          ./install_macos.sh
+
+      - name: run tests
+        run: |
+          source ~/.bashrc
+          ./test.sh
+          ./test_server.sh
   
   # thanks to https://github.com/docker/build-push-action/issues/225
   create-container:

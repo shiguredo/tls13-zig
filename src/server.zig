@@ -99,13 +99,20 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
             };
             try os.sigaction(os.SIG.PIPE, &act, null);
 
+            const cert = try certificate.CertificateEntry.fromFile(cert_path, allocator);
+            errdefer cert.deinit();
+
+            const cert_key = try crypto.cert.readPrivateKeyFromFile(key_path, allocator);
+            errdefer cert_key.deinit();
+
             var res = Self{
                 .rootCA = crypto.root.RootCA.init(allocator),
-                .cert = try certificate.CertificateEntry.fromFile(cert_path, allocator),
-                .cert_key = try crypto.cert.readPrivateKeyFromFile(key_path, allocator),
+                .cert = cert,
+                .cert_key = cert_key,
 
                 .allocator = allocator,
             };
+            errdefer res.deinit();
 
             // Loading rootCA certificates
             try res.rootCA.loadCAFiles();

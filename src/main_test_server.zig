@@ -8,10 +8,15 @@ pub fn main() !void {
     try do(true, std.heap.page_allocator);
 }
 
+fn handler_sigchld(signum: c_int) callconv(.C) void {
+    // nothing to do
+    _ = signum;
+}
+
 pub fn do(fork: bool, allocator: std.mem.Allocator) !void {
     // ignore SIGCHLD
     var act = os.Sigaction{
-        .handler = .{ .handler = os.SIG.IGN },
+        .handler = .{ .handler = handler_sigchld },
         .mask = os.empty_sigset,
         .flags = (os.SA.SIGINFO | os.SA.RESTART | os.SA.RESETHAND),
     };

@@ -152,7 +152,7 @@ pub fn main() !void {
 - [x] Support NewSessionTicket.
 - [x] Support 0-RTT handshake(resumption). (disabled in server by default)
 - [ ] Add more E2E tests.
-    - [ ] Static tests for server.
+    - [x] Static tests for server.
     - [ ] Server tests with Web browser.
 - [ ] Support X.509(src/x509.zig) fully.
   - [ ] Add more tests.

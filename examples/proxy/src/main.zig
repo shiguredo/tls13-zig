@@ -5,7 +5,7 @@ const io = std.io;
 const os = std.os;
 const allocator = std.heap.page_allocator;
 
-const server = @import("server.zig");
+const server = @import("tls13-server");
 
 pub fn main() !void {
     // ignore SIGCHLD
@@ -16,15 +16,21 @@ pub fn main() !void {
     };
     try os.sigaction(os.SIG.CHLD, &act, null);
 
-    log.info("started.", .{});
-    // key and certificate need to be der-formatted.
-    // Especially, RSAPrivateKey need to be PKCS#1.
-    // To convert PEM key, use 'openssl rsa -outform der -in key.pem -out key.der -traditional'
-    // Currently, only one CA certificate is supported.
-    var tls_server = try server.TLSServerTCP.init("./test-certs/key.pem", "./test-certs/cert.pem", "./test-certs/chain.pem", "tls13.pibvt.net", allocator);
+    const key_file = try getenvWithError("PROXY_TLS_KEYFILE");
+    const cert_file = try getenvWithError("PROXY_TLS_CERTFILE");
+    const ca_file = try getenvWithError("PROXY_TLS_CAFILE");
+    const hostname = try getenvWithError("PROXY_TLS_HOSTNAME");
+    const upstream_host = try getenvWithError("PROXY_UPSTREAM_HOST");
+    const upstream_port_str = try getenvWithError("PROXY_UPSTREAM_PORT");
+    const upstream_port = try std.fmt.parseInt(u16, upstream_port_str, 10);
+    const bind_port_str = try getenvWithError("PROXY_BIND_PORT");
+    const bind_port = try std.fmt.parseInt(u16, bind_port_str, 10);
+
+    var tls_server = try server.TLSServerTCP.init(key_file, cert_file, ca_file, hostname, allocator);
     defer tls_server.deinit();
     tls_server.print_keys = true;
-    try tls_server.listen(8443);
+    try tls_server.listen(bind_port);
+    log.info("started.", .{});
     while (true) {
         var con = try tls_server.accept();
         defer con.deinit();
@@ -43,7 +49,7 @@ pub fn main() !void {
         }
         try con.handshake();
 
-        var conStream = try net.tcpConnectToHost(allocator, "localhost", 8080);
+        var conStream = try net.tcpConnectToHost(allocator, upstream_host, upstream_port);
         defer conStream.close();
 
         var fds: [2]std.os.pollfd = undefined;
@@ -80,4 +86,15 @@ pub fn main() !void {
     }
 
     return;
+}
+
+
+fn getenvWithError(key: []const u8) ![]const u8{
+    const res = std.os.getenv(key);
+    if (res) |r| {
+        return r;
+    } else {
+        return error.InvalidArguemnt;
+    }
+
 }

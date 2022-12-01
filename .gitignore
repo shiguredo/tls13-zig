@@ -11,3 +11,4 @@
 /cert.pem
 /early_data.txt
 /reverse_mac.sh
+/gen_gcm_test.py

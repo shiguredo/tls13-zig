@@ -50,7 +50,7 @@ jobs:
       - uses: docker/build-push-action@v2
         with:
           file: Dockerfile
-          tags: tls13-zig
+          tags: tls13-zig:tls13zig_base
           push: false
           load: true
           cache-from: type=gha,scope=buildx-${{ github.workflow }}-${{ github.job }}
@@ -83,7 +83,7 @@ jobs:
 
       - uses: addnab/docker-run-action@v3
         with:
-          image: tls13-zig
+          image: tls13-zig:tls13zig_base
           run: /tls13-zig/test.sh
 
   server-e2e-test-with-openssl:
@@ -106,7 +106,7 @@ jobs:
 
       - uses: addnab/docker-run-action@v3
         with:
-          image: tls13-zig
+          image: tls13-zig:tls13zig_base
           run: /tls13-zig/test_server.sh
 
   client-test-stream:
@@ -132,7 +132,7 @@ jobs:
 
       - uses: addnab/docker-run-action@v3
         with:
-          image: tls13-zig
+          image: tls13-zig:tls13zig_base
           run: /tls13-zig/test_stream.sh ${{matrix.cipher}}
   
   server-test-stream:
@@ -155,7 +155,7 @@ jobs:
 
       - uses: addnab/docker-run-action@v3
         with:
-          image: tls13-zig
+          image: tls13-zig:tls13zig_base
           run: /tls13-zig/test_stream_server.sh
 
   client-test-stress:
@@ -181,7 +181,7 @@ jobs:
 
       - uses: addnab/docker-run-action@v3
         with:
-          image: tls13-zig
+          image: tls13-zig:tls13zig_base
           run: /tls13-zig/test_stress.sh ${{matrix.cipher}}
 
   server-test-stress:
@@ -204,5 +204,5 @@ jobs:
 
       - uses: addnab/docker-run-action@v3
         with:
-          image: tls13-zig
+          image: tls13-zig:tls13zig_base
           run: /tls13-zig/test_stress_server.sh

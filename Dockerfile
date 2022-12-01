@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM ubuntu:22.04 AS tls13zig_base
 
 LABEL maintainer="naoki9911(Naoki MATSUMOTO) <m.naoki9911@gmail.com>"
 
@@ -13,4 +13,11 @@ RUN /tls13-zig/install_zig.sh
 ENV PATH $PATH:/root/.local/zig-master
 
 # Standby
-CMD [/bin/bash -c 'while true; do sleep 1; done']
+CMD [ "/bin/bash",  "-c",  "'while true; do sleep 1; done'" ]
+
+FROM tls13zig_base AS tls13zig_proxy
+
+WORKDIR /tls13-zig/examples/proxy
+RUN zig build
+
+CMD [ "/bin/bash",  "-c",  "'./zig-out/bin/proxy'" ]

@@ -64,18 +64,54 @@ pub fn main() !void {
             .revents = undefined,
         };
 
+        var req_on_proc = false;
+        var req_done = false;
+        var sendBuf = std.io.bufferedWriter(conStream.writer());
         while (true) {
             _ = try std.os.poll(&fds, -1);
             var recv_bytes: [16 * 1024]u8 = undefined;
+            var tmp_buf: [16 * 1024]u8 = undefined;
 
             if ((fds[0].revents & std.os.POLL.IN) > 0) {
-                const recv_size = con.recv(&recv_bytes) catch |err| {
-                    switch (err) {
-                        error.EndOfStream => return,
-                        else => return err,
+                while (true) {
+                    const line = con.tlsReader().readUntilDelimiter(&tmp_buf, '\n') catch |err| {
+                        switch (err) {
+                            error.EndOfStream => continue,
+                            else => return err,
+                        }
+                    };
+                    if (line.len == 0) {
+                        req_on_proc = false;
+                        req_done = false;
+                        break;
                     }
-                };
-                _ = try conStream.write(recv_bytes[0..recv_size]);
+
+                    if (line.len >= 3 and std.mem.eql(u8, line[0..3], "GET")) {
+                        if (req_on_proc) {
+                            std.log.err("invalid request", .{});
+                            return;
+                        }
+                        req_on_proc = true;
+                        std.log.debug("request is now on processing", .{});
+                    } else if (line.len >= 1 and line[0] == '\r') {
+                        try std.fmt.format(sendBuf.writer(), "X-Forwarded-For: {}\r\n", .{con.tcp_conn.?.address});
+                        req_on_proc = false;
+                        req_done = true;
+                        std.log.debug("request processing is completed", .{});
+                    }
+
+                    _ = try sendBuf.write(line);
+                    _ = try sendBuf.write("\n");
+
+                    if (req_on_proc) {
+                        continue;
+                    }
+                    break;
+                }
+                if (req_done) {
+                    try sendBuf.flush();
+                    req_done = false;
+                }
             } else if ((fds[1].revents & std.os.POLL.IN) > 0) {
                 const recv_size = try conStream.read(&recv_bytes);
                 _ = try con.send(recv_bytes[0..recv_size]);
@@ -88,13 +124,11 @@ pub fn main() !void {
     return;
 }
 
-
-fn getenvWithError(key: []const u8) ![]const u8{
+fn getenvWithError(key: []const u8) ![]const u8 {
     const res = std.os.getenv(key);
     if (res) |r| {
         return r;
     } else {
         return error.InvalidArguemnt;
     }
-
 }

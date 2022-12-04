@@ -1,6 +1,7 @@
 version: '3'
 services:
   web:
+    restart: always
     image: nginx
   proxy:
     restart: always
@@ -16,7 +17,7 @@ services:
       - PROXY_TLS_KEYFILE=/certs/key.pem
       - PROXY_TLS_CERTFILE=/certs/cert.pem
       - PROXY_TLS_CAFILE=/certs/chain.pem
-      - PROXY_TLS_HOSTNAME=example.com
+      - PROXY_TLS_HOSTNAME=localhost
       - PROXY_BIND_PORT=8443
       - PROXY_UPSTREAM_HOST=web
       - PROXY_UPSTREAM_PORT=80

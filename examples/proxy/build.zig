@@ -12,12 +12,10 @@ pub fn build(b: *std.build.Builder) void {
     const mode = b.standardReleaseOptions();
 
     const exe = b.addExecutable("proxy", "src/main.zig");
-    exe.addPackage(
-        .{
-            .name = "tls13-server",
-            .source = .{ .path = "../../src/server.zig" },
-        }
-    );
+    exe.addPackage(.{
+        .name = "tls13-server",
+        .source = .{ .path = "../../src/server.zig" },
+    });
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.install();

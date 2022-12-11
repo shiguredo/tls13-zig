@@ -4,6 +4,7 @@ const mem = std.mem;
 const dh = std.crypto.dh;
 const expect = std.testing.expect;
 
+const log = @import("log.zig");
 const msg = @import("msg.zig");
 const crypto = @import("crypto.zig");
 const Secret = @import("crypto.zig").Secret;
@@ -106,11 +107,11 @@ pub const KeyScheduler = struct {
     }
 
     pub fn printKeys(self: Self, random: []const u8) void {
-        std.debug.print("SERVER_HANDSHAKE_TRAFFIC_SECRET {} {}\n", .{ std.fmt.fmtSliceHexLower(random), &std.fmt.fmtSliceHexLower(self.secret.s_hs_secret.slice()) });
-        std.debug.print("EXPORTER_SECRET {} {}\n", .{ std.fmt.fmtSliceHexLower(random), std.fmt.fmtSliceHexLower(self.secret.exp_master_secret.slice()) });
-        std.debug.print("SERVER_TRAFFIC_SECRET_0 {} {}\n", .{ std.fmt.fmtSliceHexLower(random), std.fmt.fmtSliceHexLower(self.secret.s_ap_secret.slice()) });
-        std.debug.print("CLIENT_HANDSHAKE_TRAFFIC_SECRET {} {}\n", .{ std.fmt.fmtSliceHexLower(random), std.fmt.fmtSliceHexLower(self.secret.c_hs_secret.slice()) });
-        std.debug.print("CLIENT_TRAFFIC_SECRET_0 {} {}\n", .{ std.fmt.fmtSliceHexLower(random), std.fmt.fmtSliceHexLower(self.secret.c_ap_secret.slice()) });
+        log.debug("SERVER_HANDSHAKE_TRAFFIC_SECRET {} {}", .{ std.fmt.fmtSliceHexLower(random), &std.fmt.fmtSliceHexLower(self.secret.s_hs_secret.slice()) });
+        log.debug("EXPORTER_SECRET {} {}", .{ std.fmt.fmtSliceHexLower(random), std.fmt.fmtSliceHexLower(self.secret.exp_master_secret.slice()) });
+        log.debug("SERVER_TRAFFIC_SECRET_0 {} {}", .{ std.fmt.fmtSliceHexLower(random), std.fmt.fmtSliceHexLower(self.secret.s_ap_secret.slice()) });
+        log.debug("CLIENT_HANDSHAKE_TRAFFIC_SECRET {} {}", .{ std.fmt.fmtSliceHexLower(random), std.fmt.fmtSliceHexLower(self.secret.c_hs_secret.slice()) });
+        log.debug("CLIENT_TRAFFIC_SECRET_0 {} {}", .{ std.fmt.fmtSliceHexLower(random), std.fmt.fmtSliceHexLower(self.secret.c_ap_secret.slice()) });
     }
 };
 

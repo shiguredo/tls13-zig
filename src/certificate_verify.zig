@@ -1,10 +1,10 @@
 const std = @import("std");
 const io = std.io;
-const log = std.log;
 const assert = std.debug.assert;
 const expect = std.testing.expect;
 const expectError = std.testing.expectError;
 
+const log = @import("log.zig");
 const SignatureScheme = @import("signature_scheme.zig").SignatureScheme;
 
 /// RFC8446 Section 4.4.3 Certificate Verify

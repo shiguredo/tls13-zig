@@ -8,6 +8,7 @@ const expectError = std.testing.expectError;
 const random = std.crypto.random;
 const ArrayList = std.ArrayList;
 
+const log = @import("log.zig");
 const msg = @import("msg.zig");
 const key = @import("key.zig");
 const extension = @import("extension.zig");
@@ -124,18 +125,18 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 const ca_cert = try certificate.CertificateEntry.fromFile(p, allocator);
                 res.ca_cert = ca_cert;
                 try res.cert.cert.verify(ca_cert.cert);
-                std.log.debug("Certificate has been verified.", .{});
+                log.debug("Certificate has been verified.", .{});
 
                 if (res.rootCA.getCertificateBySubject(ca_cert.cert.tbs_certificate.issuer)) |rootCA| {
                     try ca_cert.cert.verify(rootCA);
-                    std.log.debug("CA Certificate has been verified.", .{});
+                    log.debug("CA Certificate has been verified.", .{});
                 } else |err| {
-                    std.log.warn("Failed to find rootCA certificate err={}", .{err});
+                    log.warn("Failed to find rootCA certificate err={}", .{err});
                 }
             } else {
                 // for self-signed certificate
                 try res.cert.cert.verify(null);
-                std.log.debug("Certificate has been verified as self-signed.", .{});
+                log.debug("Certificate has been verified as self-signed.", .{});
             }
 
             if (host) |h| {
@@ -178,7 +179,7 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         pub fn accept(self: *Self) !TLSStreamTCP {
             var conn = try self.tcp_listener.?.accept(.{});
-            std.log.info("accept remote_addr={}", .{conn.address});
+            log.info("accept remote_addr={}", .{conn.address});
             var stream = try TLSStreamTCP.init(self.*, conn, self.allocator);
             return stream;
         }
@@ -391,7 +392,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
         }
 
         pub fn handshake(self: *Self) !void {
-            std.log.info("handshake started", .{});
+            log.info("handshake started", .{});
             var t = try self.reader.readEnum(ContentType, .Big);
             const ch_record = try TLSPlainText.decode(self.reader, t, self.allocator, null, self.msgs_stream.writer());
             defer ch_record.deinit();
@@ -424,7 +425,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         // send HRR
                         try self.sendHelloRetryRequest();
                         try self.write_buffer.flush();
-                        std.log.debug("sent all contents in write buffer", .{});
+                        log.debug("sent all contents in write buffer", .{});
 
                         // handle ClientHello2
                         while (true) {
@@ -469,11 +470,11 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             try self.sendFinished();
 
             try self.write_buffer.flush();
-            std.log.debug("sent all contents in write buffer", .{});
+            log.debug("sent all contents in write buffer", .{});
 
             try self.ks.generateApplicationSecrets(self.msgs_stream.getWritten());
             self.ap_protector = RecordPayloadProtector.init(self.ks.aead, self.ks.secret.s_ap_keys, self.ks.secret.c_ap_keys);
-            std.log.debug("generated application secrets", .{});
+            log.debug("generated application secrets", .{});
 
             if (self.tls_server.print_keys) {
                 self.ks.printKeys(&self.random);
@@ -493,7 +494,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     const r = try TLSPlainText.decode(self.reader, t, self.allocator, null, null);
                     defer r.deinit();
                     const alert = r.content.alert;
-                    std.log.err("alert = {}", .{alert});
+                    log.err("alert = {}", .{alert});
                 } else if (t == .application_data) {
                     const c_record = try TLSCipherText.decode(self.reader, t, self.allocator);
                     defer c_record.deinit();
@@ -501,7 +502,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     var p_record = try self.early_protector.decrypt(c_record, self.allocator);
                     defer p_record.deinit();
                     if (p_record.content_type != .application_data and p_record.content_type != .handshake) {
-                        std.log.warn("unexpected message type={s}", .{@tagName(p_record.content_type)});
+                        log.warn("unexpected message type={s}", .{@tagName(p_record.content_type)});
                         continue;
                     }
 
@@ -512,7 +513,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                             for (ap_contents.items) |c| {
                                 try self.read_engine.?.recv_contents.?.append(c);
                             }
-                            std.log.debug("received EarlyData", .{});
+                            log.debug("received EarlyData", .{});
                         },
                         .handshake => {
                             const eoed = (try p_record.decodeContent(self.allocator, self.ks.hkdf)).handshake;
@@ -521,7 +522,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                             // End Of Early Data is also included in Handshake Context.
                             _ = try eoed.encode(self.msgs_stream.writer());
                             early_data_ok = true;
-                            std.log.debug("received EndOfEarlyData", .{});
+                            log.debug("received EndOfEarlyData", .{});
                         },
                         else => unreachable,
                     }
@@ -548,7 +549,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     const r = try TLSPlainText.decode(self.reader, t, self.allocator, null, null);
                     defer r.deinit();
                     const alert = r.content.alert;
-                    std.log.err("alert = {}", .{alert});
+                    log.err("alert = {}", .{alert});
                 } else if (t == .application_data) {
                     const c_record = try TLSCipherText.decode(self.reader, t, self.allocator);
                     defer c_record.deinit();
@@ -563,12 +564,12 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     defer p_record.deinit();
                     if (p_record.content_type == .alert) {
                         const alert = (try p_record.decodeContent(self.allocator, null)).alert;
-                        std.log.err("alert = {}", .{alert});
+                        log.err("alert = {}", .{alert});
                         continue;
                     }
 
                     if (p_record.content_type != .handshake) {
-                        std.log.warn("unexpected message type={s}", .{@tagName(p_record.content_type)});
+                        log.warn("unexpected message type={s}", .{@tagName(p_record.content_type)});
                         continue;
                     }
 
@@ -581,14 +582,14 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     }
                     for (hss.items) |h| {
                         if (h.handshake != .finished) {
-                            std.log.warn("unexpected message type={s}", .{@tagName(h.handshake)});
+                            log.warn("unexpected message type={s}", .{@tagName(h.handshake)});
                             continue;
                         }
                         try self.handleFinished(h.handshake.finished);
                         finished_ok = true;
                     }
                 } else {
-                    std.log.err("unexpected message type={s}", .{@tagName(t)});
+                    log.err("unexpected message type={s}", .{@tagName(t)});
                 }
             }
 
@@ -602,9 +603,9 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
             try self.sendNewSessionTicket();
             try self.write_buffer.flush();
-            std.log.debug("sent all contents in write buffer", .{});
+            log.debug("sent all contents in write buffer", .{});
 
-            std.log.info("handshake done", .{});
+            log.info("handshake done", .{});
         }
 
         pub fn send(self: *Self, b: []const u8) !usize {
@@ -620,7 +621,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 if (self.tcp_conn) |c| {
                     c.deinit();
                     self.tcp_conn = null;
-                    std.log.debug("tcp connection closed", .{});
+                    log.debug("tcp connection closed", .{});
                 }
             }
 
@@ -640,7 +641,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
         }
 
         fn handleClientHello(self: *Self, ch: ClientHello) !void {
-            std.log.debug("received ClientHello", .{});
+            log.debug("received ClientHello", .{});
             self.session_id = ch.legacy_session_id;
 
             // Checking TLS version.
@@ -716,7 +717,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         return Error.IllegalParameter;
                     }
                     self.resumed = true;
-                    std.log.debug("PSK for session resumption has been accepted.", .{});
+                    log.debug("PSK for session resumption has been accepted.", .{});
                 } else |_| {}
             }
             if (!self.resumed) {
@@ -742,7 +743,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 }
             }
             try self.ks.generateEarlySecrets2(self.msgs_stream.getWritten());
-            std.log.debug("selected cipher_suite={s}", .{@tagName(self.cipher_suite)});
+            log.debug("selected cipher_suite={s}", .{@tagName(self.cipher_suite)});
 
             // Selecting KeyShare and deriving shared secret.
             const ks = (try msg.getExtension(ch.extensions, .key_share)).key_share;
@@ -755,7 +756,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
                         const shared_key = try dh.X25519.scalarmult(self.x25519_priv_key, ke.key_exchange[0..32].*);
                         try self.ks.generateHandshakeSecrets1(&shared_key);
-                        std.log.debug("generated handshake secrets", .{});
+                        log.debug("generated handshake secrets", .{});
                     },
                     .secp256r1 => |k| {
                         self.key_share = k;
@@ -765,7 +766,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         const mul = try pubkey.p.mulPublic(self.secp256r1_key.secret_key.bytes, .Big);
                         const shared_key = mul.affineCoordinates().x.toBytes(.Big);
                         try self.ks.generateHandshakeSecrets1(&shared_key);
-                        std.log.debug("generated handshake secrets", .{});
+                        log.debug("generated handshake secrets", .{});
                     },
                     else => key_share_ok = false,
                 }
@@ -791,7 +792,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 }
                 return Error.UnsupportedKeyShareAlgorithm;
             }
-            std.log.debug("selected key_share={s}", .{@tagName(self.key_share)});
+            log.debug("selected key_share={s}", .{@tagName(self.key_share)});
 
             var sn_ok = true;
             if (self.tls_server.host.len != 0) {
@@ -800,7 +801,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 for (snl.server_name_list.items) |sn| {
                     if (std.mem.eql(u8, sn.host_name, self.tls_server.host)) {
                         sn_ok = true;
-                        std.log.debug("server_name={s}", .{self.tls_server.host});
+                        log.debug("server_name={s}", .{self.tls_server.host});
                         break;
                     }
                 }
@@ -814,11 +815,11 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 if (msg.getExtension(ch.extensions, .early_data)) |ed| {
                     _ = ed.early_data;
                     self.accept_early_data = true;
-                    std.log.debug("EarlyDatas will be accepted", .{});
+                    log.debug("EarlyDatas will be accepted", .{});
                     self.early_protector = RecordPayloadProtector.init(self.ks.aead, self.ks.secret.c_early_ap_keys, self.ks.secret.c_early_ap_keys);
                 } else |_| {
                     self.accept_early_data = false;
-                    std.log.debug("EarlyDatas will not be accepted", .{});
+                    log.debug("EarlyDatas will not be accepted", .{});
                 }
             }
 
@@ -841,7 +842,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             defer record_sh.deinit();
             _ = try record_sh.encode(self.write_buffer.writer());
 
-            std.log.debug("ServerHello has been written to send buffer", .{});
+            log.debug("ServerHello has been written to send buffer", .{});
         }
 
         fn sendHelloRetryRequest(self: *Self) !void {
@@ -854,7 +855,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             _ = try record_hrr.encode(self.write_buffer.writer());
             self.already_sent_hrr = true;
 
-            std.log.debug("HelloRetryRequest has been written to send buffer", .{});
+            log.debug("HelloRetryRequest has been written to send buffer", .{});
         }
 
         fn sendEncryptedExtensions(self: *Self) !void {
@@ -888,7 +889,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
             _ = try self.hs_protector.encryptFromMessageAndWrite(cont_ee, self.allocator, self.write_buffer.writer());
 
-            std.log.debug("EncryptedExtensions has been written to send buffer", .{});
+            log.debug("EncryptedExtensions has been written to send buffer", .{});
         }
 
         fn sendCertificate(self: *Self) !void {
@@ -909,7 +910,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             _ = try cont_c.encode(self.msgs_stream.writer());
             _ = try self.hs_protector.encryptFromMessageAndWrite(cont_c, self.allocator, self.write_buffer.writer());
 
-            std.log.debug("Certificate has been written to send buffer", .{});
+            log.debug("Certificate has been written to send buffer", .{});
         }
 
         fn sendCertificateVerify(self: *Self) !void {
@@ -944,7 +945,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         cv = try CertificateVerify.init(.rsa_pss_rsae_sha256, sig.signature.len, self.allocator);
                         std.mem.copy(u8, cv.signature, &sig.signature);
                     } else {
-                        std.log.err("unsupported modulus length: {d} bits", .{k.modulus_length_bits});
+                        log.err("unsupported modulus length: {d} bits", .{k.modulus_length_bits});
                         return Error.UnsupportedSignatureScheme;
                     }
                 },
@@ -963,7 +964,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             _ = try cont_cv.encode(self.msgs_stream.writer());
             _ = try self.hs_protector.encryptFromMessageAndWrite(cont_cv, self.allocator, self.write_buffer.writer());
 
-            std.log.debug("CertificateVerify has been written to send buffer", .{});
+            log.debug("CertificateVerify has been written to send buffer", .{});
         }
 
         fn sendFinished(self: *Self) !void {
@@ -974,16 +975,16 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
             _ = try self.hs_protector.encryptFromMessageAndWrite(cont_fin, self.allocator, self.write_buffer.writer());
 
-            std.log.debug("Finished has been written to send buffer", .{});
+            log.debug("Finished has been written to send buffer", .{});
         }
 
         fn handleFinished(self: *Self, fin: Finished) !void {
-            std.log.debug("FINISHED={}", .{std.fmt.fmtSliceHexLower(self.ks.secret.c_hs_finished_secret.slice())});
-            std.log.debug("receieved Finished", .{});
+            log.debug("FINISHED={}", .{std.fmt.fmtSliceHexLower(self.ks.secret.c_hs_finished_secret.slice())});
+            log.debug("receieved Finished", .{});
             if (!fin.verify(self.msgs_stream.getWritten(), self.ks.secret.c_hs_finished_secret.slice())) {
                 return Error.InvalidFinished;
             }
-            std.log.debug("Finished verify done", .{});
+            log.debug("Finished verify done", .{});
             const cont_fin = Content{ .handshake = Handshake{ .finished = fin } };
             _ = try cont_fin.encode(self.msgs_stream.writer());
         }
@@ -1014,7 +1015,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             defer c.deinit();
 
             _ = try self.ap_protector.encryptFromMessageAndWrite(c, self.allocator, self.write_buffer.writer());
-            std.log.debug("NewSessionTicket has been written to send buffer", .{});
+            log.debug("NewSessionTicket has been written to send buffer", .{});
         }
 
         pub fn handleKeyUpdate(self: *Self, ku: KeyUpdate) !void {
@@ -1025,10 +1026,10 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
             switch (ku.request_update) {
                 .update_not_requested => {
-                    std.log.debug("received key update update_not_requested", .{});
+                    log.debug("received key update update_not_requested", .{});
                 },
                 .update_requested => {
-                    std.log.debug("received key update update_requested", .{});
+                    log.debug("received key update update_requested", .{});
                     const update = Content{ .handshake = .{ .key_update = .{ .request_update = .update_not_requested } } };
                     defer update.deinit();
 

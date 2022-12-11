@@ -1,5 +1,5 @@
 const std = @import("std");
-const log = std.log;
+const log = @import("log.zig");
 const key = @import("key.zig");
 const PskIdentity = @import("pre_shared_key.zig").PskIdentity;
 

@@ -2,6 +2,7 @@ const std = @import("std");
 const io = std.io;
 const base64 = std.base64;
 const ArrayList = std.ArrayList;
+const log = @import("log.zig");
 const pkcs8 = @import("pkcs8.zig");
 const x509 = @import("x509.zig");
 const key = @import("key.zig");
@@ -268,7 +269,7 @@ test "split PEM" {
     const certs = try convertPEMsToDERs(cert_pem, "CERTIFICATE", std.testing.allocator);
     defer certs.deinit();
     for (certs.items) |cert| {
-        //std.log.warn("{s}", .{cert});
+        //log.warn("{s}", .{cert});
         std.testing.allocator.free(cert);
     }
 }
@@ -291,7 +292,7 @@ test "split PEM 2" {
     const certs = try convertPEMsToDERs(cert_pem, "CERTIFICATE", std.testing.allocator);
     defer certs.deinit();
     for (certs.items) |cert| {
-        //std.log.warn("{s}", .{cert});
+        //log.warn("{s}", .{cert});
         std.testing.allocator.free(cert);
     }
 }

@@ -1,5 +1,5 @@
 const std = @import("std");
-const log = std.log;
+const log = @import("log.zig");
 const key = @import("key.zig");
 const PskIdentity = @import("pre_shared_key.zig").PskIdentity;
 
@@ -24,7 +24,7 @@ fn do(allocator: std.mem.Allocator) !void {
 
     var recv_bytes: [4096]u8 = undefined;
     var recv_size = tls_client.recv(&recv_bytes) catch |err| blk: {
-        std.log.err("faile to receive, err={}", .{err});
+        log.err("faile to receive, err={}", .{err});
         break :blk 0;
     };
 

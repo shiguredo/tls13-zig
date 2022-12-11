@@ -1,7 +1,7 @@
 const std = @import("std");
+const log = @import("log.zig");
 const utils = @import("utils.zig");
 const io = std.io;
-const log = std.log;
 const assert = std.debug.assert;
 const ArrayList = std.ArrayList;
 
@@ -100,7 +100,7 @@ pub const SignatureSchemeList = struct {
         while (i < algos_len) : (i += 2) {
             const ss_raw = try reader.readIntBig(u16);
             const ss = utils.intToEnum(SignatureScheme, ss_raw) catch {
-                std.log.warn("Unknown SignatureScheme 0x{x:0>4}", .{ss_raw});
+                log.warn("Unknown SignatureScheme 0x{x:0>4}", .{ss_raw});
                 res.grease_length += 2;
                 continue;
             };

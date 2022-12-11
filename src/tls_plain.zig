@@ -1,6 +1,7 @@
 const std = @import("std");
 const io = std.io;
 const crypto = @import("crypto.zig");
+const log = @import("log.zig");
 
 const Content = @import("content.zig").Content;
 const ContentType = @import("content.zig").ContentType;
@@ -35,7 +36,7 @@ pub const TLSPlainText = struct {
     pub fn decode(reader: anytype, t: ContentType, allocator: std.mem.Allocator, hkdf: ?crypto.Hkdf, writer: anytype) !Self {
         // Decoding ProtocolVersion.
         const proto_version = try reader.readIntBig(u16);
-        std.log.debug("protocol_version=0x{x:0>4}", .{proto_version});
+        log.debug("protocol_version=0x{x:0>4}", .{proto_version});
 
         // Decoding length.
         const len = try reader.readIntBig(u16);

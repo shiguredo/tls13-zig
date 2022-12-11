@@ -2,6 +2,7 @@ const std = @import("std");
 const io = std.io;
 const ArrayList = std.ArrayList;
 
+const log = @import("log.zig");
 const RecordPayloadProtector = @import("protector.zig").RecordPayloadProtector;
 const KeyScheduler = @import("key.zig").KeyScheduler;
 const Content = @import("content.zig").Content;
@@ -66,7 +67,7 @@ pub fn WriteEngine(comptime WriteBufferType: type, comptime et: EntityType) type
             while (cur_idx < b.len) {
                 const updated = try checkAndUpdateKey(self.protector, self.ks, self.write_buffer, self.allocator, et);
                 if (updated) {
-                    std.log.debug("KeyUpdate updated_request has been sent", .{});
+                    log.debug("KeyUpdate updated_request has been sent", .{});
                 }
 
                 var end_idx = cur_idx + self.record_size_limit - self.protector.getHeaderSize();
@@ -137,7 +138,7 @@ pub fn ReadEngine(comptime Entity: type, comptime et: EntityType) type {
 
                 const updated = try checkAndUpdateKey(&self.entity.ap_protector, &self.entity.ks, &self.entity.write_buffer, self.entity.allocator, et);
                 if (updated) {
-                    std.log.debug("KeyUpdate updated_request has been sent", .{});
+                    log.debug("KeyUpdate updated_request has been sent", .{});
                 }
 
                 const t = self.entity.reader.readEnum(ContentType, .Big) catch |err| {
@@ -148,7 +149,7 @@ pub fn ReadEngine(comptime Entity: type, comptime et: EntityType) type {
                 };
                 if (t != .application_data) {
                     // TODO: error
-                    std.log.err("ERROR!!!", .{});
+                    log.err("ERROR!!!", .{});
                     continue;
                 }
                 const recv_record = try TLSCipherText.decode(self.entity.reader, t, self.entity.allocator);

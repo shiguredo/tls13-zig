@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = @import("log.zig");
 const utils = @import("utils.zig");
 const NamedGroupList = @import("supported_groups.zig").NamedGroupList;
 const SupportedVersions = @import("supported_versions.zig").SupportedVersions;
@@ -120,7 +121,7 @@ pub const Extension = union(ExtensionType) {
         // none is for GREASE.
         const t_raw = try reader.readIntBig(u16);
         var t = utils.intToEnum(ExtensionType, t_raw) catch blk: {
-            std.log.warn("Unknown ExtensionType 0x{x:0>4}", .{t_raw});
+            log.warn("Unknown ExtensionType 0x{x:0>4}", .{t_raw});
             break :blk .none;
         };
 

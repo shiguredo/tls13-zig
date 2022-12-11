@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = @import("log.zig");
 const x509 = @import("x509.zig");
 const cert = @import("cert.zig");
 const ArrayList = std.ArrayList;
@@ -45,7 +46,7 @@ pub const RootCA = struct {
 
     fn loadCAFilesLinux(self: *Self) !void {
         for (rootCAFiles) |ca| {
-            std.log.debug("Loading RootCA certificate {s}", .{ca});
+            log.debug("Loading RootCA certificate {s}", .{ca});
             const res = cert.readCertificatesFromFile(ca, self.allocator) catch |err| {
                 switch (err) {
                     std.fs.File.OpenError.FileNotFound => continue,
@@ -55,14 +56,14 @@ pub const RootCA = struct {
             defer res.deinit();
             for (res.items) |c| {
                 c.verify(null) catch |err| {
-                    std.log.warn("Failed to verify certificate err={}", .{err});
+                    log.warn("Failed to verify certificate err={}", .{err});
                     c.deinit();
                     continue;
                 };
 
                 try self.rootCACerts.append(c);
             }
-            std.log.debug("Loaded RootCA certificate {s}", .{ca});
+            log.debug("Loaded RootCA certificate {s}", .{ca});
         }
 
         for (rootCAPaths) |caPath| {
@@ -83,21 +84,21 @@ pub const RootCA = struct {
 
                 const path = try std.fs.path.join(self.allocator, &[_][]const u8{ caPath, walking.?.path });
                 defer self.allocator.free(path);
-                std.log.debug("Loading RootCA certificate {s}", .{path});
+                log.debug("Loading RootCA certificate {s}", .{path});
 
                 const res = cert.readCertificatesFromFile(path, self.allocator) catch |err| {
-                    std.log.warn("Failed to load RootCA certificate {s} err={}", .{ path, err });
+                    log.warn("Failed to load RootCA certificate {s} err={}", .{ path, err });
                     continue;
                 };
                 if (res.items.len == 0) {
-                    std.log.warn("No certificates found in {s}", .{path});
+                    log.warn("No certificates found in {s}", .{path});
                     continue;
                 }
-                std.log.debug("Loaded RootCA certificate {s}", .{path});
+                log.debug("Loaded RootCA certificate {s}", .{path});
                 defer res.deinit();
                 for (res.items) |c| {
                     c.verify(null) catch |err| {
-                        std.log.warn("Failed to verify certificate err={}", .{err});
+                        log.warn("Failed to verify certificate err={}", .{err});
                         c.deinit();
                         continue;
                     };
@@ -109,7 +110,7 @@ pub const RootCA = struct {
     }
 
     fn loadCAFilesMacOS(self: *Self) !void {
-        std.log.debug("Loading RootCA certificate", .{});
+        log.debug("Loading RootCA certificate", .{});
 
         const result = try std.ChildProcess.exec(.{
             .allocator = self.allocator,
@@ -123,7 +124,7 @@ pub const RootCA = struct {
         defer res.deinit();
         for (res.items) |c| {
             c.verify(null) catch |err| {
-                std.log.warn("Failed to verify certificate err={}", .{err});
+                log.warn("Failed to verify certificate err={}", .{err});
                 c.deinit();
                 continue;
             };
@@ -131,7 +132,7 @@ pub const RootCA = struct {
             try self.rootCACerts.append(c);
         }
 
-        std.log.debug("Loaded RootCA certificate", .{});
+        log.debug("Loaded RootCA certificate", .{});
     }
 
     pub fn getCertificateBySubject(self: Self, name: x509.Name) Error!x509.Certificate {

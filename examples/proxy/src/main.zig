@@ -1,10 +1,10 @@
 const std = @import("std");
-const log = std.log;
 const net = std.net;
 const io = std.io;
 const os = std.os;
 const allocator = std.heap.page_allocator;
 
+const log = @import("log");
 const server = @import("tls13-server");
 
 pub fn main() !void {
@@ -35,17 +35,17 @@ pub fn main() !void {
         var con = try tls_server.accept();
         defer con.deinit();
         const fork_pid = std.os.fork() catch {
-            std.log.err("fork failed", .{});
+            log.err("fork failed", .{});
             return;
         };
         if (fork_pid != 0) {
             continue;
         }
-        std.log.debug("forked", .{});
+        log.debug("forked", .{});
 
         defer {
             con.close();
-            std.log.info("connection closed", .{});
+            log.info("connection closed", .{});
         }
         try con.handshake();
 
@@ -88,16 +88,16 @@ pub fn main() !void {
 
                     if (line.len >= 3 and std.mem.eql(u8, line[0..3], "GET")) {
                         if (req_on_proc) {
-                            std.log.err("invalid request", .{});
+                            log.err("invalid request", .{});
                             return;
                         }
                         req_on_proc = true;
-                        std.log.debug("request is now on processing", .{});
+                        log.debug("request is now on processing", .{});
                     } else if (line.len >= 1 and line[0] == '\r') {
                         try std.fmt.format(sendBuf.writer(), "X-Forwarded-For: {}\r\n", .{con.tcp_conn.?.address});
                         req_on_proc = false;
                         req_done = true;
-                        std.log.debug("request processing is completed", .{});
+                        log.debug("request processing is completed", .{});
                     }
 
                     _ = try sendBuf.write(line);

@@ -16,6 +16,10 @@ pub fn build(b: *std.build.Builder) void {
         .name = "tls13-server",
         .source = .{ .path = "../../src/server.zig" },
     });
+    exe.addPackage(.{
+        .name = "log",
+        .source = .{ .path = "../../src/log.zig" },
+    });
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.install();

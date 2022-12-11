@@ -1,5 +1,5 @@
 const std = @import("std");
-const log = std.log;
+const log = @import("log.zig");
 const assert = std.debug.assert;
 const ArrayList = std.ArrayList;
 const BoundedArray = std.BoundedArray;
@@ -73,7 +73,7 @@ pub fn decodeCipherSuites(reader: anytype, suites: *ArrayList(CipherSuite)) !voi
     while (i < len) : (i += @sizeOf(u16)) {
         const cs_raw = try reader.readIntBig(u16);
         const cs = utils.intToEnum(CipherSuite, cs_raw) catch {
-            std.log.warn("Unknown CipherSuite 0x{x:0>4}", .{cs_raw});
+            log.warn("Unknown CipherSuite 0x{x:0>4}", .{cs_raw});
             continue;
         };
         try suites.append(cs);

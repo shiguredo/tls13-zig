@@ -2,6 +2,7 @@ const std = @import("std");
 const io = std.io;
 const expect = std.testing.expect;
 const expectError = std.testing.expectError;
+const log = @import("log.zig");
 const asn1 = @import("asn1.zig");
 const rsa = @import("rsa.zig");
 const errs = @import("errors.zig");
@@ -214,11 +215,11 @@ pub const Certificate = struct {
                     !std.mem.eql(u8, algo_id, "1.2.840.113549.1.1.12") and // sha384WithRsaEncryption
                     !std.mem.eql(u8, algo_id, "1.2.840.113549.1.1.13")) // sha512WithRSAEncryption
                 {
-                    std.log.warn("UnsupportedSignatureAlgorithm: {s}", .{self.signature_algorithm.algorithm.id});
+                    log.warn("UnsupportedSignatureAlgorithm: {s}", .{self.signature_algorithm.algorithm.id});
                     return errs.CertificateError.UnsupportedSignatureAlgorithm;
                 }
                 if (pubkey.modulus_length_bits != self.signature_value.value.len * 8) {
-                    std.log.warn("Invalid signature length {}", .{self.signature_value.value.len});
+                    log.warn("Invalid signature length {}", .{self.signature_value.value.len});
                     return errs.CertificateError.UnknownModulusLength;
                 }
                 if (pubkey.modulus_length_bits == 2048) {
@@ -252,14 +253,14 @@ pub const Certificate = struct {
                         unreachable;
                     }
                 } else {
-                    std.log.err("Unknown modulus length {}", .{pubkey.modulus_length_bits});
+                    log.err("Unknown modulus length {}", .{pubkey.modulus_length_bits});
                     return errs.CertificateError.UnknownModulusLength;
                 }
             },
             .secp256r1 => |pubkey| {
                 // ecdsa-with-SHA256
                 if (!std.mem.eql(u8, self.signature_algorithm.algorithm.id, "1.2.840.10045.4.3.2")) {
-                    std.log.err("Secp256r1 UnsupportedSignatureAlgorithm: {s}", .{self.signature_algorithm.algorithm.id});
+                    log.err("Secp256r1 UnsupportedSignatureAlgorithm: {s}", .{self.signature_algorithm.algorithm.id});
                     return errs.CertificateError.UnsupportedSignatureAlgorithm;
                 }
                 const ecdsa_sha256 = std.crypto.sign.ecdsa.EcdsaP256Sha256;
@@ -271,7 +272,7 @@ pub const Certificate = struct {
                 if (!std.mem.eql(u8, algo_id, "1.2.840.10045.4.3.2") and // ecdsa-with-SHA256
                     !std.mem.eql(u8, algo_id, "1.2.840.10045.4.3.3")) // ecdsa-with-SHA384
                 {
-                    std.log.warn("Secp384r1 UnsupportedSignatureAlgorithm: {s}", .{self.signature_algorithm.algorithm.id});
+                    log.warn("Secp384r1 UnsupportedSignatureAlgorithm: {s}", .{self.signature_algorithm.algorithm.id});
                     return errs.CertificateError.UnsupportedSignatureAlgorithm;
                 }
 
@@ -820,7 +821,7 @@ const Time = struct {
         } else if (res.time_type == .GeneralizedTime) {
             try res.decodeGeneralizedTime(reader);
         } else {
-            std.log.warn("Unknown Tag {s}", .{@tagName(time_type)});
+            log.warn("Unknown Tag {s}", .{@tagName(time_type)});
             unreachable;
         }
 
@@ -830,7 +831,7 @@ const Time = struct {
     pub fn print(self: Self) void {
         var out: [100]u8 = undefined;
         const len = self.writeToBuf(&out) catch 0;
-        std.log.debug("{s}", .{out[0..len]});
+        log.debug("{s}", .{out[0..len]});
     }
 
     // "YYMMDDhhmm[ss]Z" or "YYMMDDhhmm[ss](+|-)hhmm"
@@ -1615,12 +1616,12 @@ test "X.509 decode" {
     try expect(std.mem.eql(u8, exts[8].oid.id, "1.3.6.1.4.1.11129.2.4.2")); // Extended validation certificates
 
     try expect(std.mem.eql(u8, cert.signature_algorithm.algorithm.id, "1.2.840.113549.1.1.11")); // sha256WithRSAEncryption
-    //std.log.warn("{}", .{std.fmt.fmtSliceHexLower(cert.signature_value.value)});
+    //log.warn("{}", .{std.fmt.fmtSliceHexLower(cert.signature_value.value)});
 
     // Below line causes compiler crash
     // https://github.com/ziglang/zig/issues/12373
     // TODO: FIX
-    //cert.print(std.log.warn);
+    //cert.print(log.warn);
 }
 
 // openssl req -x509 -nodes -days 365 -subj '/C=JP/ST=Kyoto/L=Kyoto/CN=example.com' -newkey ec:<(openssl ecparam -name prime256v1) -nodes -sha256 -keyout prikey.pem -out cert.pem

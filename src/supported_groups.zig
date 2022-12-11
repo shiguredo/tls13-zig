@@ -1,8 +1,8 @@
 const std = @import("std");
 const io = std.io;
-const log = std.log;
 const assert = std.debug.assert;
 const ArrayList = std.ArrayList;
+const log = @import("log.zig");
 
 /// RFC8446 Section 4.2.7 Supported Groups
 ///

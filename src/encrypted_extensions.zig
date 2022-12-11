@@ -1,10 +1,10 @@
 const std = @import("std");
 const io = std.io;
-const log = std.log;
 const assert = std.debug.assert;
 const expect = std.testing.expect;
 const ArrayList = std.ArrayList;
 
+const log = @import("log.zig");
 const msg = @import("msg.zig");
 const Extension = @import("extension.zig").Extension;
 

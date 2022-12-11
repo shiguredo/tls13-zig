@@ -1,5 +1,5 @@
 const std = @import("std");
-const log = std.log;
+const log = @import("log.zig");
 const allocator = std.heap.page_allocator;
 
 const client = @import("client.zig");

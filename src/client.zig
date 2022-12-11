@@ -7,6 +7,7 @@ const expectError = std.testing.expectError;
 const random = std.crypto.random;
 const ArrayList = std.ArrayList;
 
+const log = @import("log.zig");
 const msg = @import("msg.zig");
 const key = @import("key.zig");
 const extension = @import("extension.zig");
@@ -442,7 +443,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
                         _ = try self.early_protector.encryptFromMessageAndWrite(app_c, self.allocator, self.write_buffer.writer());
                         if (self.print_keys) {
-                            std.debug.print("CLIENT_EARLY_TRAFFIC_SECRET {} {}\n", .{ std.fmt.fmtSliceHexLower(&self.random), &std.fmt.fmtSliceHexLower(self.ks.secret.c_early_ap_secret.slice()) });
+                            log.debug("CLIENT_EARLY_TRAFFIC_SECRET {} {}", .{ std.fmt.fmtSliceHexLower(&self.random), &std.fmt.fmtSliceHexLower(self.ks.secret.c_early_ap_secret.slice()) });
                         }
                     }
 
@@ -468,7 +469,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                             }
 
                             try self.handleServerHello(recv_record.handshake.server_hello, &sh_stream);
-                            std.log.debug("hhr_hash={}", .{std.fmt.fmtSliceHexLower(self.msgs_stream.getWritten())});
+                            log.debug("hhr_hash={}", .{std.fmt.fmtSliceHexLower(self.msgs_stream.getWritten())});
                         }
                     } else {
                         const recv_record = try TLSCipherText.decode(self.reader, t, self.allocator);
@@ -479,7 +480,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
                         if (plain_record.content_type == .alert) {
                             const alert = (try plain_record.decodeContent(self.allocator, null)).alert;
-                            std.log.err("alert = {}", .{alert});
+                            log.err("alert = {}", .{alert});
                             return Error.FailedToConnect;
                         }
 
@@ -514,10 +515,10 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             // TODO: Is this ok?
             if (self.early_data.len != 0 and !self.early_data_ok) {
                 _ = try self.send(self.early_data);
-                std.log.info("sent early_data as application data.", .{});
+                log.info("sent early_data as application data.", .{});
             }
 
-            std.log.info("connected\n", .{});
+            log.info("connected", .{});
         }
 
         pub fn send(self: *Self, b: []const u8) !usize {
@@ -578,13 +579,13 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 const alert = content.alert;
 
                 if (alert.level != .warning or alert.description != .close_notify) {
-                    std.log.warn("invalid close_notify, level={} description={}", .{ alert.level, alert.description });
+                    log.warn("invalid close_notify, level={} description={}", .{ alert.level, alert.description });
                     return;
                 }
                 close_recv = true;
             }
 
-            std.log.info("connection closed", .{});
+            log.info("connection closed", .{});
         }
 
         fn handleServerHello(self: *Self, sh: ServerHello, sh_stream: *io.FixedBufferStream([]u8)) !void {
@@ -804,7 +805,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     return Error.IllegalParameter;
                 }
                 self.record_size_limit = r.record_size_limit;
-                std.log.info("recv record_size_limit={}", .{r.record_size_limit});
+                log.info("recv record_size_limit={}", .{r.record_size_limit});
             } else |_| {}
         }
 
@@ -838,7 +839,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             if (pubkey == .secp256r1 or pubkey == .secp384r1 or pubkey == .rsa) {
                 try self.cert_pubkeys.append(try pubkey.copy(self.allocator));
             } else {
-                std.log.err("PublicKey {} not found", .{pubkey});
+                log.err("PublicKey {} not found", .{pubkey});
                 return Error.UnsupportedCertificateAlgorithm;
             }
 
@@ -852,32 +853,32 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     const subject = c.tbs_certificate.subject;
                     if (issuer.eql(subject)) {
                         c.verify(null) catch |err| {
-                            std.log.warn("Failed to verify RootCA certificate", .{});
+                            log.warn("Failed to verify RootCA certificate", .{});
                             return err;
                         };
                         if (!self.allow_self_signed) {
                             const rootCA = self.rootCA.getCertificateBySubject(c.tbs_certificate.issuer) catch |err| {
-                                std.log.warn("Failed to get RootCA certificate.", .{});
+                                log.warn("Failed to get RootCA certificate.", .{});
                                 return err;
                             };
                             if (!std.mem.eql(u8, rootCA.signature_value.value, c.signature_value.value)) {
-                                std.log.warn("Invalid RootCA certificate.", .{});
+                                log.warn("Invalid RootCA certificate.", .{});
                                 return Error.InvalidCertificate;
                             }
                         }
                     } else {
                         const rootCA = self.rootCA.getCertificateBySubject(c.tbs_certificate.issuer) catch |err| {
-                            std.log.warn("Failed to get RootCA certificate.", .{});
+                            log.warn("Failed to get RootCA certificate.", .{});
                             return err;
                         };
                         c.verify(rootCA) catch |err| {
-                            std.log.warn("Failed to verify RootCA certificate", .{});
+                            log.warn("Failed to verify RootCA certificate", .{});
                             return err;
                         };
                     }
                 } else {
                     c.verify(certs[idx + 1].cert) catch |err| {
-                        std.log.warn("Failed to verify certificate", .{});
+                        log.warn("Failed to verify certificate", .{});
                         return err;
                     };
                 }
@@ -929,7 +930,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         const sig = crypto.rsa.Rsa4096.PSSSignature.fromBytes(cert_verify.signature);
                         try sig.verify(verify_stream.getWritten(), p_key, Sha256, self.allocator);
                     } else {
-                        std.log.err("unsupported modulus length: {d} bits", .{pk.modulus_length_bits});
+                        log.err("unsupported modulus length: {d} bits", .{pk.modulus_length_bits});
                         return Error.UnsupportedSignatureScheme;
                     }
                 },
@@ -964,10 +965,10 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
             switch (ku.request_update) {
                 .update_not_requested => {
-                    std.log.debug("received key update update_not_requested", .{});
+                    log.debug("received key update update_not_requested", .{});
                 },
                 .update_requested => {
-                    std.log.debug("received key update update_requested", .{});
+                    log.debug("received key update update_requested", .{});
                     const update = Content{ .handshake = .{ .key_update = .{ .request_update = .update_not_requested } } };
                     defer update.deinit();
 

@@ -1,5 +1,5 @@
 const std = @import("std");
-const log = std.log;
+const log = @import("log.zig");
 const os = std.os;
 
 const server = @import("server.zig");
@@ -73,7 +73,7 @@ pub fn do(fork: bool, allocator: std.mem.Allocator) !void {
         const recv_size = con.recv(&recv_bytes) catch |err| {
             switch (err) {
                 error.EndOfStream => {
-                    std.log.warn("peer disconnected", .{});
+                    log.warn("peer disconnected", .{});
                     return;
                 },
                 else => return err,

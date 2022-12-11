@@ -1,5 +1,5 @@
 const std = @import("std");
-const log = std.log;
+const log = @import("log.zig");
 const server = @import("server.zig");
 
 pub fn main() !void {

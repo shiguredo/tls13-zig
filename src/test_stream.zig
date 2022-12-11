@@ -1,7 +1,7 @@
 const std = @import("std");
-const log = std.log;
 const assert = std.debug.assert;
 
+const log = @import("log.zig");
 const client = @import("client.zig");
 
 const Error = error{
@@ -47,7 +47,7 @@ fn do(start_n: usize, end_n: usize, allocator: std.mem.Allocator) !void {
 
     while (size <= recv_bytes.len) : (size += 1) {
         if ((size - start_n) % 100 == 0) {
-            std.log.warn("size = {}", .{size});
+            log.warn("size = {}", .{size});
         }
 
         idx = 0;
@@ -67,7 +67,7 @@ fn do(start_n: usize, end_n: usize, allocator: std.mem.Allocator) !void {
         idx = 0;
         while (idx < msg_len) : (idx += 1) {
             if (idx & 0xFF != recv_bytes[idx]) {
-                std.log.err("expected = {} actual = {}", .{ idx & 0xFF, recv_bytes[idx] });
+                log.err("expected = {} actual = {}", .{ idx & 0xFF, recv_bytes[idx] });
                 return Error.InvalidValue;
             }
         }

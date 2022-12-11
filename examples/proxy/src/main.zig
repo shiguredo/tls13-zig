@@ -119,7 +119,7 @@ pub fn main() !void {
             } else if ((fds[1].revents & std.os.POLL.IN) > 0) {
                 const recv_size = try conStream.read(&recv_bytes);
                 if (recv_size == 0) {
-                    log.info("upstream connection closed");
+                    log.info("upstream connection closed", .{});
                     return;
                 }
                 _ = try con.send(recv_bytes[0..recv_size]);

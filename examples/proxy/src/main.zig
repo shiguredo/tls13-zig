@@ -72,6 +72,7 @@ pub fn main() !void {
         var sendBuf = std.io.bufferedWriter(conStream.writer());
         while (true) {
             _ = try std.os.poll(&fds, -1);
+            log.debug("poll done", .{});
             var recv_bytes: [16 * 1024]u8 = undefined;
             var tmp_buf: [16 * 1024]u8 = undefined;
 
@@ -85,7 +86,8 @@ pub fn main() !void {
                     if (line.len == 0) {
                         req_on_proc = false;
                         req_done = false;
-                        continue;
+                        log.err("invalid request {s}", .{sendBuf.buf[0..sendBuf.end]});
+                        return;
                     }
 
                     if (line.len >= 3 and std.mem.eql(u8, line[0..3], "GET")) {
@@ -116,6 +118,10 @@ pub fn main() !void {
                 }
             } else if ((fds[1].revents & std.os.POLL.IN) > 0) {
                 const recv_size = try conStream.read(&recv_bytes);
+                if (recv_size == 0) {
+                    log.info("upstream connection closed");
+                    return;
+                }
                 _ = try con.send(recv_bytes[0..recv_size]);
             }
         }

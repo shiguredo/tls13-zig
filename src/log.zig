@@ -17,7 +17,7 @@ pub fn err(comptime format: []const u8, args: anytype) void {
     log(.err, format, args);
 }
 
-fn log(
+pub fn log(
     comptime message_level: std.log.Level,
     comptime format: []const u8,
     args: anytype,
@@ -50,7 +50,7 @@ fn log(
 
 fn levelAsText(comptime self: std.log.Level) []const u8 {
     return switch (self) {
-        .err => "\x1b[91mERRORx1b[0m",
+        .err => "\x1b[91mERROR\x1b[0m",
         .warn => "\x1b[93mWARN\x1b[0m ",
         .info => "\x1b[94mINFO\x1b[0m ",
         .debug => "DEBUG",

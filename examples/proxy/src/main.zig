@@ -41,13 +41,16 @@ pub fn main() !void {
         if (fork_pid != 0) {
             continue;
         }
-        log.debug("forked", .{});
+        log.info("forked", .{});
+        defer log.info("exit", .{});
+        log.info("connection accepted(remote_addr={})", .{con.tcp_conn.?.address});
 
         defer {
             con.close();
-            log.info("connection closed", .{});
+            log.info("TLS session closed(SessionID={})", .{std.fmt.fmtSliceHexLower(con.session_id.session_id.slice())});
         }
         try con.handshake();
+        log.info("TLS session accepted(SessionID={})", .{std.fmt.fmtSliceHexLower(con.session_id.session_id.slice())});
 
         var conStream = try net.tcpConnectToHost(allocator, upstream_host, upstream_port);
         defer conStream.close();
@@ -75,15 +78,14 @@ pub fn main() !void {
             if ((fds[0].revents & std.os.POLL.IN) > 0) {
                 while (true) {
                     const line = con.tlsReader().readUntilDelimiter(&tmp_buf, '\n') catch |err| {
-                        switch (err) {
-                            error.EndOfStream => continue,
-                            else => return err,
-                        }
+                        log.err("failed to read({})", .{err});
+                        return err;
                     };
+
                     if (line.len == 0) {
                         req_on_proc = false;
                         req_done = false;
-                        break;
+                        continue;
                     }
 
                     if (line.len >= 3 and std.mem.eql(u8, line[0..3], "GET")) {

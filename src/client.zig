@@ -41,6 +41,7 @@ const PskKeyExchangeModes = @import("psk_key_exchange_modes.zig").PskKeyExchange
 const EarlyData = @import("early_data.zig").EarlyData;
 const KeyUpdate = @import("key_update.zig").KeyUpdate;
 const RecordSizeLimit = @import("record_size_limit.zig").RecordSizeLimit;
+const utils = @import("utils.zig");
 
 const Content = @import("content.zig").Content;
 const ContentType = @import("content.zig").ContentType;
@@ -50,13 +51,11 @@ const Sha256 = std.crypto.hash.sha2.Sha256;
 const P256 = std.crypto.sign.ecdsa.EcdsaP256Sha256;
 const P384 = std.crypto.sign.ecdsa.EcdsaP384Sha384;
 
-const Client = std.x.net.tcp.Client;
-
 pub fn ErrorSetOf(comptime Function: anytype) type {
     return @typeInfo(@typeInfo(@TypeOf(Function)).Fn.return_type.?).ErrorUnion.error_set;
 }
 
-pub const TLSClientTCP = TLSClientImpl(io.Reader(Client.Reader, ErrorSetOf(Client.Reader.read), Client.Reader.read), io.Writer(Client.Writer, ErrorSetOf(Client.Writer.write), Client.Writer.write), true);
+pub const TLSClientTCP = TLSClientImpl(std.net.Stream.Reader, std.net.Stream.Writer, true);
 
 pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, comptime is_tcp: bool) type {
     return struct {
@@ -65,7 +64,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         reader: ReaderType = undefined,
         writer: WriterType = undefined,
         write_buffer: io.BufferedWriter(4096, WriterType) = undefined,
-        tcp_client: ?std.x.net.tcp.Client = null,
+        tcp_client: ?std.net.Stream = null,
 
         // session related
         random: [32]u8,
@@ -255,7 +254,9 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 p.deinit();
             }
             if (self.tcp_client) |tc| {
-                tc.deinit();
+                std.os.shutdown(tc.handle, .both) catch |err| {
+                    log.warn("failed to shutdown tcp client err={}", .{err});
+                };
             }
         }
 
@@ -395,14 +396,12 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         pub fn connect(self: *Self, host: []const u8, port: u16) !void {
             if (is_tcp) {
-                var tcp_client = try std.x.net.tcp.Client.init(.ip, .{});
-                errdefer tcp_client.deinit();
+                var tcp_client = try std.net.tcpConnectToHost(self.allocator, host, port);
+                errdefer tcp_client.close();
 
-                try tcp_client.setReadTimeout(500);
-                // establish tcp connection.
-                try connectToHost(&tcp_client, self.allocator, host, port);
-                self.reader = tcp_client.reader(0);
-                self.writer = tcp_client.writer(0); //TODO: handle SIGPIPE
+                try utils.setReadTimeout(tcp_client, 500);
+                self.reader = tcp_client.reader();
+                self.writer = tcp_client.writer(); //TODO: handle SIGPIPE
                 self.tcp_client = tcp_client;
                 self.io_init = true;
             }
@@ -532,7 +531,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         pub fn close(self: *Self) !void {
             defer {
                 if (self.tcp_client) |tc| {
-                    tc.shutdown(.both) catch {
+                    std.os.shutdown(tc.handle, .both) catch {
                         //TODO Error handle
                     };
                 }

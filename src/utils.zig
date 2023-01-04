@@ -25,3 +25,12 @@ test "intToEnum" {
     const e = try intToEnum(TestEnum, 2);
     try expect(e == .B);
 }
+
+pub fn setReadTimeout(self: std.net.Stream, milliseconds: usize) !void {
+    const timeout = std.os.timeval{
+        .tv_sec = @intCast(i32, milliseconds / std.time.ms_per_s),
+        .tv_usec = @intCast(i32, (milliseconds % std.time.ms_per_s) * std.time.us_per_ms),
+    };
+
+    return std.os.setsockopt(self.handle, std.os.SOL.SOCKET, std.os.SO.RCVTIMEO, std.mem.asBytes(&timeout));
+}

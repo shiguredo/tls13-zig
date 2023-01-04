@@ -57,7 +57,7 @@ pub fn main() !void {
 
         var fds: [2]std.os.pollfd = undefined;
         fds[0] = .{
-            .fd = con.tcp_conn.?.client.socket.fd,
+            .fd = con.tcp_conn.?.stream.handle,
             .events = std.os.POLL.IN,
             .revents = undefined,
         };

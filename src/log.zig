@@ -66,7 +66,7 @@ fn getDateTimeNowStr(buf: []u8) ![]u8 {
     const ed = es.getEpochDay();
     const yd = ed.calculateYearDay();
     const md = yd.calculateMonthDay();
-    try std.fmt.format(buf_writer.writer(), "{}-{:0>2}-{:0>2}-{:0>2}:{:0>2}:{:0>2}", .{ yd.year, md.month.numeric(), md.day_index + 1, ds.getHoursIntoDay(), ds.getMinutesIntoHour(), ds.getSecondsIntoMinute() });
+    try std.fmt.format(buf_writer.writer(), "{}-{:0>2}-{:0>2} {:0>2}:{:0>2}:{:0>2}", .{ yd.year, md.month.numeric(), md.day_index + 1, ds.getHoursIntoDay(), ds.getMinutesIntoHour(), ds.getSecondsIntoMinute() });
 
     return buf_writer.getWritten();
 }

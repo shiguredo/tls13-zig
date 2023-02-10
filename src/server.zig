@@ -8,7 +8,7 @@ const expectError = std.testing.expectError;
 const random = std.crypto.random;
 const ArrayList = std.ArrayList;
 
-const log = @import("log.zig");
+pub const log = @import("log.zig");
 const msg = @import("msg.zig");
 const key = @import("key.zig");
 const extension = @import("extension.zig");

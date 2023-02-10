@@ -4,8 +4,8 @@ const io = std.io;
 const os = std.os;
 const allocator = std.heap.page_allocator;
 
-const log = @import("log");
 const server = @import("tls13-server");
+const log = server.log;
 
 pub fn main() !void {
     // ignore SIGCHLD

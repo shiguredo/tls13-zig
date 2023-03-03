@@ -98,7 +98,7 @@ pub const Decoder = struct {
 
     fn decodeOIDInt(bytes: []const u8) usize {
         var res: usize = 0;
-        for (bytes) |b, i| {
+        for (bytes, 0..) |b, i| {
             res *= 128;
             if (i == bytes.len - 1) {
                 res += b;
@@ -238,7 +238,7 @@ pub const Encoder = struct {
         var count: usize = 0;
         var out_idx: usize = 0;
         var start_idx: usize = 0;
-        for (id) |c, i| {
+        for (id, 0..) |c, i| {
             if (i != (id.len - 1) and c != '.') {
                 continue;
             }

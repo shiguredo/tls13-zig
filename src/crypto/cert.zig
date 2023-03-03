@@ -31,7 +31,7 @@ pub fn readCertificateFromFileToDer(cert_path: []const u8, allocator: std.mem.Al
     if (isPEMFormatted(cert_content)) {
         const certs = try convertPEMsToDERs(cert_content, "CERTIFICATE", allocator);
         defer {
-            for (certs.items) |c, idx| {
+            for (certs.items, 0..) |c, idx| {
                 if (idx != 0) {
                     allocator.free(c);
                 }

@@ -1152,7 +1152,7 @@ test "client test with RFC8448" {
 
     // send application_data
     var c_app_data: [50]u8 = undefined;
-    for (c_app_data) |*value, app_i| {
+    for (&c_app_data, 0..) |*value, app_i| {
         value.* = @intCast(u8, app_i);
     }
 

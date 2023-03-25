@@ -195,24 +195,17 @@ pub const RSAPrivateKey = struct {
         const modulus = try asn1.Decoder.decodeINTEGER(reader, allocator);
         defer allocator.free(modulus);
 
-        var modulus_len = modulus.len;
-        var i: usize = 0;
-        while (i < modulus_len) : (i += 1) {
-            if (modulus[i] != 0) {
-                break;
-            }
-            modulus_len -= 1;
-        }
-
-        var modulus_new = try allocator.alloc(u8, modulus_len);
+        var modulus_new = try removeZeros(modulus, allocator);
         errdefer allocator.free(modulus_new);
-        std.mem.copy(u8, modulus_new, modulus[i..]);
 
         const publicExponent = try asn1.Decoder.decodeINTEGER(reader, allocator);
         errdefer allocator.free(publicExponent);
 
         const privateExponent = try asn1.Decoder.decodeINTEGER(reader, allocator);
-        errdefer allocator.free(privateExponent);
+        defer allocator.free(privateExponent);
+
+        var privExponent_new = try removeZeros(privateExponent, allocator);
+        errdefer allocator.free(privExponent_new);
 
         const prime1 = try asn1.Decoder.decodeINTEGER(reader, allocator);
         errdefer allocator.free(prime1);
@@ -232,9 +225,9 @@ pub const RSAPrivateKey = struct {
         return Self{
             .version = version,
             .modulus = modulus_new,
-            .modulus_length_bits = modulus_len * 8,
+            .modulus_length_bits = modulus_new.len * 8,
             .publicExponent = publicExponent,
-            .privateExponent = privateExponent,
+            .privateExponent = privExponent_new,
             .prime1 = prime1,
             .prime2 = prime2,
             .exponent1 = exponent1,
@@ -242,6 +235,22 @@ pub const RSAPrivateKey = struct {
             .coefficient = coef,
             .allocator = allocator,
         };
+    }
+
+    fn removeZeros(src: []const u8, allocator: std.mem.Allocator) ![]u8 {
+        var len = src.len;
+        var i: usize = 0;
+        while (i < len) : (i += 1) {
+            if (src[i] != 0) {
+                break;
+            }
+            len -= 1;
+        }
+
+        var res = try allocator.alloc(u8, len);
+        errdefer allocator.free(res);
+        std.mem.copy(u8, res, src[i..]);
+        return res;
     }
 
     pub fn deinit(self: Self) void {

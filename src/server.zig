@@ -18,7 +18,6 @@ const SupportedVersions = @import("supported_versions.zig").SupportedVersions;
 const signature_scheme = @import("signature_scheme.zig");
 const server_name = @import("server_name.zig");
 const crypto = @import("crypto.zig");
-const x509 = @import("crypto/x509.zig");
 const common = @import("common.zig");
 const ServerHello = @import("server_hello.zig").ServerHello;
 const ClientHello = @import("client_hello.zig").ClientHello;
@@ -64,9 +63,9 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
         host: []u8 = &([_]u8{}),
 
         // certificate
-        rootCA: crypto.root.RootCA,
+        ca_bundle: std.crypto.Certificate.Bundle = .{},
         cert: certificate.CertificateEntry,
-        cert_key: crypto.PrivateKey,
+        cert_key: @import("cert.zig").PrivateKey,
 
         ca_cert: ?certificate.CertificateEntry = null,
 
@@ -105,11 +104,10 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
             const cert = try certificate.CertificateEntry.fromFile(cert_path, allocator);
             errdefer cert.deinit();
 
-            const cert_key = try crypto.cert.readPrivateKeyFromFile(key_path, allocator);
+            const cert_key = try @import("cert.zig").readPrivateKeyFromFile(key_path, allocator);
             errdefer cert_key.deinit();
 
             var res = Self{
-                .rootCA = crypto.root.RootCA.init(allocator),
                 .cert = cert,
                 .cert_key = cert_key,
 
@@ -117,28 +115,21 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
             };
             errdefer res.deinit();
 
-            // Loading rootCA certificates
-            try res.rootCA.loadCAFiles();
+            // Scanning CA certificates
+            try res.ca_bundle.rescan(allocator);
 
             random.bytes(&res.ticket_key_name);
             random.bytes(&res.ticket_key);
 
+            const now_sec = std.time.timestamp();
             if (ca_path) |p| {
                 const ca_cert = try certificate.CertificateEntry.fromFile(p, allocator);
                 res.ca_cert = ca_cert;
-                try res.cert.cert.verify(ca_cert.cert);
+                try res.cert.cert.verify(ca_cert.cert, now_sec);
                 log.debug("Certificate has been verified.", .{});
 
-                if (res.rootCA.getCertificateBySubject(ca_cert.cert.tbs_certificate.issuer)) |rootCA| {
-                    try ca_cert.cert.verify(rootCA);
-                    log.debug("CA Certificate has been verified.", .{});
-                } else |err| {
-                    log.warn("Failed to find rootCA certificate err={}", .{err});
-                }
-            } else {
-                // for self-signed certificate
-                try res.cert.cert.verify(null);
-                log.debug("Certificate has been verified as self-signed.", .{});
+                try res.ca_bundle.verify(ca_cert.cert, now_sec);
+                log.debug("CA Certificate has been verified.", .{});
             }
 
             if (host) |h| {
@@ -161,12 +152,12 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
             if (self.host.len != 0) {
                 self.allocator.free(self.host);
             }
-            self.rootCA.deinit();
             self.cert.deinit();
             self.cert_key.deinit();
             if (self.ca_cert) |c| {
                 c.deinit();
             }
+            self.ca_bundle.deinit(self.allocator);
         }
 
         pub fn listen(self: *Self, port: u16) !void {
@@ -923,20 +914,19 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             var cv: CertificateVerify = undefined;
             switch (self.tls_server.cert_key) {
                 .rsa => |k| {
+                    const rsa = @import("rsa.zig");
                     if (k.modulus_length_bits == 2048) {
-                        var p_key = try crypto.rsa.Rsa2048.SecretKey.fromBytes(k.privateExponent, k.modulus, self.allocator);
+                        var p_key = try rsa.Rsa2048.SecretKey.fromBytes(k.privateExponent, k.modulus, self.allocator);
                         defer p_key.deinit();
-                        const sig = try crypto.rsa.Rsa2048.PSSSignature.sign(verify_stream.getWritten(), p_key, std.crypto.hash.sha2.Sha256, self.allocator);
-                        _ = sig;
-                        unreachable;
-                    } else if (k.modulus_length_bits == 4096) {
-                        var p_key = try crypto.rsa.Rsa4096.SecretKey.fromBytes(k.privateExponent, k.modulus, self.allocator);
-                        defer p_key.deinit();
-                        var pub_key = try crypto.rsa.Rsa4096.PublicKey.fromBytes(k.publicExponent, k.modulus, self.allocator);
-                        defer pub_key.deinit();
+                        const sig = try rsa.Rsa2048.PSSSignature.sign(verify_stream.getWritten(), p_key, std.crypto.hash.sha2.Sha256, self.allocator);
 
-                        const sig = try crypto.rsa.Rsa4096.PSSSignature.sign(verify_stream.getWritten(), p_key, std.crypto.hash.sha2.Sha256, self.allocator);
-                        try sig.verify(verify_stream.getWritten(), pub_key, std.crypto.hash.sha2.Sha256, self.allocator);
+                        cv = try CertificateVerify.init(.rsa_pss_rsae_sha256, sig.signature.len, self.allocator);
+                        std.mem.copy(u8, cv.signature, &sig.signature);
+                    } else if (k.modulus_length_bits == 4096) {
+                        var p_key = try rsa.Rsa4096.SecretKey.fromBytes(k.privateExponent, k.modulus, self.allocator);
+                        defer p_key.deinit();
+
+                        const sig = try rsa.Rsa4096.PSSSignature.sign(verify_stream.getWritten(), p_key, std.crypto.hash.sha2.Sha256, self.allocator);
                         cv = try CertificateVerify.init(.rsa_pss_rsae_sha256, sig.signature.len, self.allocator);
                         std.mem.copy(u8, cv.signature, &sig.signature);
                     } else {

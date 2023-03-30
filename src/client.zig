@@ -17,7 +17,6 @@ const SupportedVersions = @import("supported_versions.zig").SupportedVersions;
 const signature_scheme = @import("signature_scheme.zig");
 const server_name = @import("server_name.zig");
 const crypto = @import("crypto.zig");
-const x509 = @import("crypto/x509.zig");
 const common = @import("common.zig");
 const ServerHello = @import("server_hello.zig").ServerHello;
 const ClientHello = @import("client_hello.zig").ClientHello;
@@ -113,9 +112,11 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         // certificate
         allow_self_signed: bool = false,
-        rootCA: crypto.root.RootCA,
+        ca_bundle: std.crypto.Certificate.Bundle = .{},
         signature_schems: ArrayList(signature_scheme.SignatureScheme),
-        cert_pubkeys: ArrayList(crypto.key.PublicKey),
+        main_cert_pub_key_algo: std.crypto.Certificate.AlgorithmCategory = undefined,
+        main_cert_pub_key_buf: [300]u8 = undefined,
+        main_cert_pub_key_len: u16 = undefined,
 
         // record size limitation
         // RFC 8449 Section 4.  The "record_size_limit" Extension
@@ -185,15 +186,15 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 .ks = undefined,
                 .hs_protector = undefined,
                 .ap_protector = undefined,
-                .rootCA = crypto.root.RootCA.init(allocator),
+                //.rootCA = crypto.root.RootCA.init(allocator),
                 .signature_schems = ArrayList(signature_scheme.SignatureScheme).init(allocator),
-                .cert_pubkeys = ArrayList(crypto.key.PublicKey).init(allocator),
+                //.cert_pubkeys = ArrayList(crypto.key.PublicKey).init(allocator),
 
                 .allocator = allocator,
             };
 
-            // Loading rootCA certificates
-            try res.rootCA.loadCAFiles();
+            // Scanning CA certificates
+            try res.ca_bundle.rescan(allocator);
 
             random.bytes(&res.x25519_priv_key);
             res.x25519_pub_key = try dh.X25519.recoverPublicKey(res.x25519_priv_key);
@@ -229,24 +230,21 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             return res;
         }
 
-        pub fn deinit(self: Self) void {
+        pub fn deinit(self: *Self) void {
             self.allocator.free(self.msgs_bytes);
             if (self.read_engine) |re| {
                 re.deinit();
             }
-            for (self.cert_pubkeys.items) |c| {
-                c.deinit();
-            }
+            self.ca_bundle.deinit(self.allocator);
             if (self.host.len != 0) {
                 self.allocator.free(self.host);
             }
-            self.cert_pubkeys.deinit();
             self.supported_groups.deinit();
             self.key_shares.deinit();
             if (self.session_ticket) |st| {
                 st.deinit();
             }
-            self.rootCA.deinit();
+            //self.rootCA.deinit();
             self.cipher_suites.deinit();
             self.ks.deinit();
             self.signature_schems.deinit();
@@ -817,81 +815,39 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             if (cert.cert_list.items.len == 0) {
                 return Error.CertificateNotFound;
             }
-            var cert_host = true;
-            const cn_oid = (try x509.OIDMap.getEntryByName("CN")).oid;
-            const host_cert = cert.cert_list.items[0].cert;
-            for (host_cert.tbs_certificate.subject.rdn_sequence.items) |rs| {
-                for (rs.attrs.items) |attr| {
-                    if (!std.mem.eql(u8, attr.attr_type.id, cn_oid)) {
-                        continue;
-                    }
-                    if (!certHostMatches(attr.attr_value, self.host)) {
-                        cert_host = false;
-                    }
-                }
-            }
-            if (!cert_host) {
-                return Error.CertificateNotFound;
-            }
 
-            const pubkey = host_cert.tbs_certificate.subjectPublicKeyInfo.publicKey;
-            if (pubkey == .secp256r1 or pubkey == .secp384r1 or pubkey == .rsa) {
-                try self.cert_pubkeys.append(try pubkey.copy(self.allocator));
-            } else {
-                log.err("PublicKey {} not found", .{pubkey});
-                return Error.UnsupportedCertificateAlgorithm;
-            }
+            const host_cert = cert.cert_list.items[0].cert;
+            try host_cert.verifyHostName(self.host);
+            self.main_cert_pub_key_algo = host_cert.pub_key_algo;
+            const pub_key = host_cert.pubKey();
+            if (pub_key.len > self.main_cert_pub_key_buf.len)
+                return error.CertificatePublicKeyInvalid;
+            @memcpy(&self.main_cert_pub_key_buf, pub_key.ptr, pub_key.len);
+            self.main_cert_pub_key_len = @intCast(@TypeOf(self.main_cert_pub_key_len), pub_key.len);
 
             // Verifying certificates
             var idx: usize = 0;
             const certs = cert.cert_list.items;
-            while (idx < certs.len) : (idx += 1) {
+            var prev_cert: std.crypto.Certificate.Parsed = certs[0].cert;
+            const now_sec = std.time.timestamp();
+            var verified = false;
+            while (idx < certs.len and !verified) : (idx += 1) {
                 const c = certs[idx].cert;
-                if (idx + 1 == certs.len) {
-                    const issuer = c.tbs_certificate.issuer;
-                    const subject = c.tbs_certificate.subject;
-                    if (issuer.eql(subject)) {
-                        c.verify(null) catch |err| {
-                            log.warn("Failed to verify RootCA certificate", .{});
-                            return err;
-                        };
-                        if (!self.allow_self_signed) {
-                            const rootCA = self.rootCA.getCertificateBySubject(c.tbs_certificate.issuer) catch |err| {
-                                log.warn("Failed to get RootCA certificate.", .{});
-                                return err;
-                            };
-                            if (!std.mem.eql(u8, rootCA.signature_value.value, c.signature_value.value)) {
-                                log.warn("Invalid RootCA certificate.", .{});
-                                return Error.InvalidCertificate;
-                            }
-                        }
-                    } else {
-                        const rootCA = self.rootCA.getCertificateBySubject(c.tbs_certificate.issuer) catch |err| {
-                            log.warn("Failed to get RootCA certificate.", .{});
-                            return err;
-                        };
-                        c.verify(rootCA) catch |err| {
-                            log.warn("Failed to verify RootCA certificate", .{});
-                            return err;
-                        };
-                    }
-                } else {
-                    c.verify(certs[idx + 1].cert) catch |err| {
-                        log.warn("Failed to verify certificate", .{});
-                        return err;
-                    };
+                if (idx != 0) {
+                    try prev_cert.verify(c, now_sec);
+                }
+
+                if (self.ca_bundle.verify(c, now_sec)) |_| {
+                    // TODO: allow untrusted certs
+                    //handshake_state = .trust_chain_established;
+                    //break :cert;
+                    verified = true;
+                } else |err| switch (err) {
+                    error.CertificateIssuerNotFound => {},
+                    else => |e| return e,
                 }
             }
             self.state = .WAIT_CV;
-        }
-
-        fn getPublicKey(self: Self, t: crypto.key.PublicKeyType) !crypto.key.PublicKey {
-            for (self.cert_pubkeys.items) |cp| {
-                if (cp == t) {
-                    return cp;
-                }
-            }
-            return Error.CertificateNotFound;
         }
 
         fn handleCertificateVerify(self: *Self, cert_verify: CertificateVerify) !void {
@@ -905,32 +861,44 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             _ = try verify_stream.write(&([_]u8{0x00}));
             _ = try verify_stream.write(hash_out[0..self.ks.hkdf.digest_length]);
 
+            const main_cert_pub_key = self.main_cert_pub_key_buf[0..self.main_cert_pub_key_len];
+
             switch (cert_verify.algorithm) {
                 .ecdsa_secp256r1_sha256 => {
-                    const pk = (try self.getPublicKey(.secp256r1)).secp256r1;
+                    if (self.main_cert_pub_key_algo != .X9_62_id_ecPublicKey)
+                        return error.TlsBadSignatureScheme;
+                    const pk = try P256.PublicKey.fromSec1(main_cert_pub_key);
                     const sig = try P256.Signature.fromDer(cert_verify.signature);
-                    try sig.verify(verify_stream.getWritten(), pk.key);
+                    try sig.verify(verify_stream.getWritten(), pk);
                 },
                 .ecdsa_secp384r1_sha384 => {
-                    const pk = (try self.getPublicKey(.secp384r1)).secp384r1;
+                    if (self.main_cert_pub_key_algo != .X9_62_id_ecPublicKey)
+                        return error.TlsBadSignatureScheme;
+                    const pk = try P384.PublicKey.fromSec1(main_cert_pub_key);
                     const sig = try P384.Signature.fromDer(cert_verify.signature);
-                    try sig.verify(verify_stream.getWritten(), pk.key);
+                    try sig.verify(verify_stream.getWritten(), pk);
                 },
                 .rsa_pss_rsae_sha256 => {
-                    const pk = (try self.getPublicKey(.rsa)).rsa;
-                    if (pk.modulus_length_bits == 2048) {
-                        var p_key = try crypto.rsa.Rsa2048.PublicKey.fromBytes(pk.publicExponent, pk.modulus, self.allocator);
-                        defer p_key.deinit();
-                        const sig = crypto.rsa.Rsa2048.PSSSignature.fromBytes(cert_verify.signature);
-                        try sig.verify(verify_stream.getWritten(), p_key, Sha256, self.allocator);
-                    } else if (pk.modulus_length_bits == 4096) {
-                        var p_key = try crypto.rsa.Rsa4096.PublicKey.fromBytes(pk.publicExponent, pk.modulus, self.allocator);
-                        defer p_key.deinit();
-                        const sig = crypto.rsa.Rsa4096.PSSSignature.fromBytes(cert_verify.signature);
-                        try sig.verify(verify_stream.getWritten(), p_key, Sha256, self.allocator);
-                    } else {
-                        log.err("unsupported modulus length: {d} bits", .{pk.modulus_length_bits});
-                        return Error.UnsupportedSignatureScheme;
+                    if (self.main_cert_pub_key_algo != .rsaEncryption)
+                        return error.TlsBadSignatureScheme;
+
+                    const Hash = std.crypto.hash.sha2.Sha256;
+                    const rsa = std.crypto.Certificate.rsa;
+                    const components = try rsa.PublicKey.parseDer(main_cert_pub_key);
+                    const exponent = components.exponent;
+                    const modulus = components.modulus;
+                    var rsa_mem_buf: [512 * 32]u8 = undefined;
+                    var fba = std.heap.FixedBufferAllocator.init(&rsa_mem_buf);
+                    const ally = fba.allocator();
+                    switch (modulus.len) {
+                        inline 128, 256, 512 => |modulus_len| {
+                            const pk = try rsa.PublicKey.fromBytes(exponent, modulus, ally);
+                            const sig = rsa.PSSSignature.fromBytes(modulus_len, cert_verify.signature);
+                            try rsa.PSSSignature.verify(modulus_len, sig, verify_stream.getWritten(), pk, Hash, ally);
+                        },
+                        else => {
+                            return error.TlsBadRsaSignatureBitCount;
+                        },
                     }
                 },
                 else => return Error.UnsupportedSignatureScheme,

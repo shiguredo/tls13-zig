@@ -5,7 +5,6 @@ const ArrayList = std.ArrayList;
 const BoundedArray = std.BoundedArray;
 
 const msg = @import("msg.zig");
-const x509 = @import("crypto/x509.zig");
 const crypto = @import("crypto.zig");
 const Extension = @import("extension.zig").Extension;
 
@@ -133,7 +132,7 @@ pub const Certificate = struct {
 /// } CertificateEntry;
 ///
 pub const CertificateEntry = struct {
-    cert: x509.Certificate,
+    cert: std.crypto.Certificate.Parsed,
     cert_len: usize, // TODO: remove this
     extensions: ArrayList(Extension),
 
@@ -149,10 +148,13 @@ pub const CertificateEntry = struct {
     /// @param allocator allocator to allocate CertificateEntry.
     /// @return CertificateEntry with loaded certificate.
     pub fn fromFile(cert_path: []const u8, allocator: std.mem.Allocator) !Self {
-        const cert_data = try crypto.cert.readCertificateFromFileToDer(cert_path, allocator);
-        var stream = io.fixedBufferStream(cert_data);
+        const cert_data = try @import("cert.zig").readCertificateFromFileToDer(cert_path, allocator);
+        const cert: std.crypto.Certificate = .{
+            .buffer = cert_data,
+            .index = 0,
+        };
         return Self{
-            .cert = try x509.Certificate.decode(stream.reader(), allocator),
+            .cert = try cert.parse(),
             .cert_len = cert_data.len,
             .extensions = ArrayList(Extension).init(allocator),
             .cert_data = cert_data,
@@ -174,15 +176,24 @@ pub const CertificateEntry = struct {
 
         // Decoding certificate.
         const cert_len = try reader.readIntBig(u16);
-        const cert = try x509.Certificate.decode(reader, allocator);
-        errdefer cert.deinit();
+        const cert_data = try allocator.alloc(u8, cert_len);
+        errdefer allocator.free(cert_data);
+
+        try reader.readNoEof(cert_data);
+
+        const cert: std.crypto.Certificate = .{
+            .buffer = cert_data,
+            .index = 0,
+        };
+        const cert_parsed = try cert.parse();
 
         // Decoding extensions.
         var exts = ArrayList(Extension).init(allocator);
         try msg.decodeExtensions(reader, allocator, &exts, .server_hello, false);
 
         return Self{
-            .cert = cert,
+            .cert_data = cert_data,
+            .cert = cert_parsed,
             .cert_len = cert_len,
             .extensions = exts,
             .allocator = allocator,
@@ -233,7 +244,6 @@ pub const CertificateEntry = struct {
     /// deinitialize CertificateEntry.
     /// @param self CertificateEntry to be deinitialized.
     pub fn deinit(self: Self) void {
-        self.cert.deinit();
         for (self.extensions.items) |e| {
             e.deinit();
         }

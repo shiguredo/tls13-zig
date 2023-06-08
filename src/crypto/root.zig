@@ -78,7 +78,7 @@ pub const RootCA = struct {
             defer walker.deinit();
             var walking = try walker.next();
             while (walking != null) : (walking = try walker.next()) {
-                if (walking.?.kind == .Directory) {
+                if (walking.?.kind == .directory) {
                     continue;
                 }
 

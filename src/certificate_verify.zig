@@ -41,11 +41,11 @@ pub const CertificateVerify = struct {
     /// @return the result of decoded CertificateVerify.
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
         // Decoding SignatureAlgorithm.
-        const algorithm = @intToEnum(SignatureScheme, try reader.readIntBig(u16));
+        const algorithm = @as(SignatureScheme, @enumFromInt(try reader.readInt(u16, .big)));
 
         // Decoding signature.
-        const sig_len = try reader.readIntBig(u16);
-        var signature = try allocator.alloc(u8, sig_len);
+        const sig_len = try reader.readInt(u16, .big);
+        const signature = try allocator.alloc(u8, sig_len);
         errdefer allocator.free(signature);
         try reader.readNoEof(signature);
 
@@ -64,11 +64,11 @@ pub const CertificateVerify = struct {
         var len: usize = 0;
 
         // Encoding algorithm.
-        try writer.writeIntBig(u16, @enumToInt(self.algorithm));
+        try writer.writeInt(u16, @intFromEnum(self.algorithm), .big);
         len += 2;
 
         // Encoding signature.
-        try writer.writeIntBig(u16, @intCast(u16, self.signature.len));
+        try writer.writeInt(u16, @as(u16, @intCast(self.signature.len)), .big);
         len += 2;
         try writer.writeAll(self.signature);
         len += self.signature.len;

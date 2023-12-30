@@ -85,27 +85,27 @@ pub const ExtensionType = enum(u16) {
 ///
 pub const Extension = union(ExtensionType) {
     server_name: ServerNameList,
+    status_request: Dummy,
     supported_groups: NamedGroupList,
     signature_algorithms: SignatureSchemeList,
-    record_size_limit: RecordSizeLimit,
-    supported_versions: SupportedVersions,
-    key_share: KeyShare,
-    none: Dummy,
     application_layer_protocol_negotiation: Dummy,
+    signed_certificate_timestamp: Dummy,
+    record_size_limit: RecordSizeLimit,
+    pre_shared_key: PreSharedKey,
+    early_data: EarlyData,
+    supported_versions: SupportedVersions,
     psk_key_exchange_modes: PskKeyExchangeModes,
     post_handshake_auth: Dummy,
+    key_share: KeyShare,
+    none: Dummy,
     ec_points_format: Dummy,
     next_protocol_negotiation: Dummy,
     encrypt_then_mac: Dummy,
     extended_master_secret: Dummy,
     padding: Dummy,
-    status_request: Dummy,
-    signed_certificate_timestamp: Dummy,
     session_ticket: Dummy,
     compress_certificate: Dummy,
     application_settings: Dummy,
-    pre_shared_key: PreSharedKey,
-    early_data: EarlyData,
 
     const Self = @This();
     pub const HEADER_LENGTH = @sizeOf(u16) + @sizeOf(u16);
@@ -119,14 +119,14 @@ pub const Extension = union(ExtensionType) {
     pub fn decode(reader: anytype, allocator: std.mem.Allocator, ht: HandshakeType, hello_retry: bool) !Self {
         // Decoding ExtensionType.
         // none is for GREASE.
-        const t_raw = try reader.readIntBig(u16);
-        var t = utils.intToEnum(ExtensionType, t_raw) catch blk: {
+        const t_raw = try reader.readInt(u16, .big);
+        const t = utils.intToEnum(ExtensionType, t_raw) catch blk: {
             log.warn("Unknown ExtensionType 0x{x:0>4}", .{t_raw});
             break :blk .none;
         };
 
         // Decoding extension_data.
-        const len = try reader.readIntBig(u16); // TODO: check readable length of reader
+        const len = try reader.readInt(u16, .big); // TODO: check readable length of reader
 
         switch (t) {
             .server_name => return Self{ .server_name = try ServerNameList.decode(reader, len, allocator) },
@@ -167,11 +167,11 @@ pub const Extension = union(ExtensionType) {
         var len: usize = 0;
 
         // Encoding ExtensionType.
-        try writer.writeIntBig(u16, @enumToInt(self));
+        try writer.writeInt(u16, @intFromEnum(self), .big);
         len += @sizeOf(ExtensionType); // type
 
         // Encoding extension_data.
-        try writer.writeIntBig(u16, @intCast(u16, self.length() - (@sizeOf(u16) + @sizeOf(u16))));
+        try writer.writeInt(u16, @as(u16, @intCast(self.length() - (@sizeOf(u16) + @sizeOf(u16)))), .big);
         len += @sizeOf(u16); // length
         switch (self) {
             .server_name => |e| len += try e.encode(writer),

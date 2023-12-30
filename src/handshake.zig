@@ -87,8 +87,8 @@ pub const Handshake = union(HandshakeType) {
     /// @return the result of decoded Handshake.
     pub fn decode(reader: anytype, allocator: std.mem.Allocator, hkdf: ?Hkdf) !Self {
         // Decoding HandshakeType
-        const t = @intToEnum(HandshakeType, try reader.readIntBig(u8));
-        const len = try reader.readIntBig(u24);
+        const t = @as(HandshakeType, @enumFromInt(try reader.readInt(u8, .big)));
+        const len = try reader.readInt(u24, .big);
         _ = len; // TODO: check the length is less than readable size.
 
         // Decoding Handshake payload.
@@ -118,11 +118,11 @@ pub const Handshake = union(HandshakeType) {
         var len: usize = 0;
 
         // Encoding HandshakeType.
-        try writer.writeIntBig(u8, @enumToInt(self));
+        try writer.writeInt(u8, @intFromEnum(self), .big);
         len += @sizeOf(HandshakeType);
 
         // Encoding length of payload.
-        try writer.writeIntBig(u24, @intCast(u24, self.length() - (@sizeOf(u8) + 3)));
+        try writer.writeInt(u24, @as(u24, @intCast(self.length() - (@sizeOf(u8) + 3))), .big);
         len += 3;
 
         // Encoding payload.

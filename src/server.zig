@@ -143,7 +143,7 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
             if (host) |h| {
                 res.host = try allocator.alloc(u8, h.len);
-                std.mem.copy(u8, res.host, h);
+                @memcpy(res.host, h);
             }
 
             if (is_tcp) {
@@ -176,9 +176,9 @@ pub fn TLSServerImpl(comptime ReaderType: type, comptime WriterType: type, compt
         }
 
         pub fn accept(self: *Self) !TLSStreamTCP {
-            var conn = try self.tcp_listener.?.accept();
+            const conn = try self.tcp_listener.?.accept();
             log.info("accept remote_addr={}", .{conn.address});
-            var stream = try TLSStreamTCP.init(self.*, conn, self.allocator);
+            const stream = try TLSStreamTCP.init(self.*, conn, self.allocator);
             return stream;
         }
     };
@@ -283,7 +283,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             var rand: [32]u8 = undefined;
             random.bytes(&rand);
 
-            var msgs_bytes = try allocator.alloc(u8, 1024 * 32);
+            const msgs_bytes = try allocator.alloc(u8, 1024 * 32);
             errdefer allocator.free(msgs_bytes);
 
             var secp256r1_priv_key: [P256.SecretKey.encoded_length]u8 = undefined;
@@ -337,13 +337,13 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             var ks = key_share.KeyShare.init(self.allocator, .server_hello, false);
             switch (self.key_share) {
                 .x25519 => {
-                    var entry_x25519 = try key_share.KeyShareEntry.init(.x25519, 32, self.allocator);
-                    std.mem.copy(u8, entry_x25519.key_exchange, &self.x25519_pub_key);
+                    const entry_x25519 = try key_share.KeyShareEntry.init(.x25519, 32, self.allocator);
+                    @memcpy(entry_x25519.key_exchange, &self.x25519_pub_key);
                     try ks.entries.append(entry_x25519);
                 },
                 .secp256r1 => {
-                    var entry_secp256r1 = try key_share.KeyShareEntry.init(.secp256r1, P256.PublicKey.uncompressed_sec1_encoded_length, self.allocator);
-                    std.mem.copy(u8, entry_secp256r1.key_exchange, &self.secp256r1_key.public_key.toUncompressedSec1());
+                    const entry_secp256r1 = try key_share.KeyShareEntry.init(.secp256r1, P256.PublicKey.uncompressed_sec1_encoded_length, self.allocator);
+                    @memcpy(entry_secp256r1.key_exchange, &self.secp256r1_key.public_key.toUncompressedSec1());
                     try ks.entries.append(entry_secp256r1);
                 },
                 else => unreachable,
@@ -359,7 +359,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
                 // Extension PreSharedKey
                 // TODO: Currently, only the first identity is accepted.
-                var psk = pre_shared_key.PreSharedKey{
+                const psk = pre_shared_key.PreSharedKey{
                     .msg_type = .server_hello,
                     .selected_identify = 0,
                 };
@@ -388,7 +388,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         pub fn handshake(self: *Self) !void {
             log.info("handshake started", .{});
-            var t = try self.reader.readEnum(ContentType, .Big);
+            var t = try self.reader.readEnum(ContentType, .big);
             const ch_record = try TLSPlainText.decode(self.reader, t, self.allocator, null, self.msgs_stream.writer());
             defer ch_record.deinit();
             if (ch_record.content != .handshake) {
@@ -424,7 +424,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
                         // handle ClientHello2
                         while (true) {
-                            t = try self.reader.readEnum(ContentType, .Big);
+                            t = try self.reader.readEnum(ContentType, .big);
                             if (t == .change_cipher_spec) {
                                 const ch_record2 = try TLSPlainText.decode(self.reader, t, self.allocator, null, null);
                                 defer ch_record2.deinit();
@@ -481,7 +481,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 if (self.read_engine.?.recv_contents == null) {
                     self.read_engine.?.recv_contents = ArrayList(Content).init(self.allocator);
                 }
-                t = try self.reader.readEnum(ContentType, .Big);
+                t = try self.reader.readEnum(ContentType, .big);
                 if (t == .change_cipher_spec) {
                     const r = try TLSPlainText.decode(self.reader, t, self.allocator, null, null);
                     defer r.deinit();
@@ -527,7 +527,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             // wait for Finished.
             var finished_ok = false;
             while (!finished_ok) {
-                t = self.reader.readEnum(ContentType, .Big) catch |err| {
+                t = self.reader.readEnum(ContentType, .big) catch |err| {
                     switch (err) {
                         // some clients disconnect without sending Finished
                         error.EndOfStream => {
@@ -758,8 +758,8 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         key_share_ok = true;
 
                         const pubkey = try P256.PublicKey.fromSec1(ke.key_exchange);
-                        const mul = try pubkey.p.mulPublic(self.secp256r1_key.secret_key.bytes, .Big);
-                        const shared_key = mul.affineCoordinates().x.toBytes(.Big);
+                        const mul = try pubkey.p.mulPublic(self.secp256r1_key.secret_key.bytes, .big);
+                        const shared_key = mul.affineCoordinates().x.toBytes(.big);
                         try self.ks.generateHandshakeSecrets1(&shared_key);
                         log.debug("generated handshake secrets", .{});
                     },
@@ -938,7 +938,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         const sig = try crypto.rsa.Rsa4096.PSSSignature.sign(verify_stream.getWritten(), p_key, std.crypto.hash.sha2.Sha256, self.allocator);
                         try sig.verify(verify_stream.getWritten(), pub_key, std.crypto.hash.sha2.Sha256, self.allocator);
                         cv = try CertificateVerify.init(.rsa_pss_rsae_sha256, sig.signature.len, self.allocator);
-                        std.mem.copy(u8, cv.signature, &sig.signature);
+                        @memcpy(cv.signature, &sig.signature);
                     } else {
                         log.err("unsupported modulus length: {d} bits", .{k.modulus_length_bits});
                         return Error.UnsupportedSignatureScheme;
@@ -951,7 +951,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     var sig_buf: [P256.Signature.der_encoded_max_length]u8 = undefined;
                     const sig_bytes = verify_sig.toDer(&sig_buf);
                     cv = try CertificateVerify.init(.ecdsa_secp256r1_sha256, sig_bytes.len, self.allocator);
-                    std.mem.copy(u8, cv.signature, sig_bytes);
+                    @memcpy(cv.signature, sig_bytes);
                 },
             }
             const cont_cv = Content{ .handshake = .{ .certificate_verify = cv } };
@@ -993,7 +993,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 .cipher_suite = self.cipher_suite,
                 .master_secret = self.ks.secret.res_secret,
                 .client_identity = .{ .client_authentication_type = .anonymous },
-                .timestamp = @intCast(u64, std.time.timestamp()),
+                .timestamp = @as(u64, @intCast(std.time.timestamp())),
             };
             const ticket = try new_session_ticket.Ticket.fromStatePlaintext(self.tls_server.ticket_key_name, self.tls_server.ticket_key, nonce, state, self.allocator);
             defer ticket.deinit();

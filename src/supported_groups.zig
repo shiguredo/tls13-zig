@@ -72,13 +72,13 @@ pub const NamedGroupList = struct {
         errdefer res.deinit();
 
         // Decoding NamedGroups.
-        const group_len = try reader.readIntBig(u16);
+        const group_len = try reader.readInt(u16, .big);
         if (group_len % 2 != 0) {
             return Error.InvalidGroupLength;
         }
         var i: usize = 0;
         while (i < group_len) : (i += 2) {
-            const ng = reader.readEnum(NamedGroup, .Big) catch {
+            const ng = reader.readEnum(NamedGroup, .big) catch {
                 // if the value is not NamedGroup, it may be GREASE.
                 res.grease_length += 2;
                 continue;
@@ -96,10 +96,10 @@ pub const NamedGroupList = struct {
     pub fn encode(self: Self, writer: anytype) !usize {
         // Encoding NamedGroups.
         var len: usize = 0;
-        try writer.writeIntBig(u16, @intCast(u16, self.groups.items.len * @sizeOf(NamedGroup)));
+        try writer.writeInt(u16, @as(u16, @intCast(self.groups.items.len * @sizeOf(NamedGroup))), .big);
         len += @sizeOf(u16);
         for (self.groups.items) |e| {
-            try writer.writeIntBig(u16, @enumToInt(e));
+            try writer.writeInt(u16, @intFromEnum(e), .big);
             len += @sizeOf(NamedGroup);
         }
 
@@ -125,7 +125,7 @@ pub const NamedGroupList = struct {
     pub fn print(self: Self) void {
         log.debug("Extension: SupportedGroups", .{});
         for (self.groups.items) |group| {
-            log.debug("- {s}(0x{x:0>4})", .{ @tagName(group), @enumToInt(group) });
+            log.debug("- {s}(0x{x:0>4})", .{ @tagName(group), @intFromEnum(group) });
         }
     }
 };

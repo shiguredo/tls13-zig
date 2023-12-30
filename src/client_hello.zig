@@ -56,7 +56,7 @@ pub const ClientHello = struct {
     /// @return the result of decoded ClientHello.
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
         // protocol_version must be TLSv1.2(0x0303).
-        const protocol_version = try reader.readIntBig(u16);
+        const protocol_version = try reader.readInt(u16, .big);
         if (protocol_version != 0x0303) {
             return Error.UnsupportedVersion;
         }
@@ -75,11 +75,11 @@ pub const ClientHello = struct {
 
         // Decoding legacy_compression_methods.
         // only compression method 'null' is allowed.
-        const comp_len = try reader.readIntBig(u8);
+        const comp_len = try reader.readInt(u8, .big);
         if (comp_len != 0x01) {
             return Error.UnsupportedCompressionMethod;
         }
-        if (try reader.readIntBig(u8) != 0x00) {
+        if (try reader.readInt(u8, .big) != 0x00) {
             return Error.UnsupportedCompressionMethod;
         }
 
@@ -107,7 +107,7 @@ pub const ClientHello = struct {
         var len: usize = 0;
 
         // Encoding protocol_version.
-        try writer.writeIntBig(u16, self.protocol_version);
+        try writer.writeInt(u16, self.protocol_version, .big);
         len += @sizeOf(u16);
 
         // Encoding random.

@@ -111,12 +111,12 @@ pub const Decoder = struct {
     }
 
     pub fn decodeSEQUENCE(reader: anytype, allocator: std.mem.Allocator, comptime DecodeType: type) !DecodeType {
-        const t = @intToEnum(Tag, try reader.readByte());
+        const t = @as(Tag, @enumFromInt(try reader.readByte()));
         if (t != .SEQUENCE) {
             return errs.DecodingError.InvalidType;
         }
         const len = try decodeLength(reader);
-        var content = try allocator.alloc(u8, len);
+        const content = try allocator.alloc(u8, len);
         defer allocator.free(content);
 
         // read all content
@@ -134,12 +134,12 @@ pub const Decoder = struct {
     }
 
     pub fn decodeINTEGER(reader: anytype, allocator: std.mem.Allocator) ![]u8 {
-        const t = @intToEnum(Tag, try reader.readByte());
+        const t = @as(Tag, @enumFromInt(try reader.readByte()));
         if (t != .INTEGER) {
             return errs.DecodingError.InvalidType;
         }
         const len = try decodeLength(reader);
-        var content = try allocator.alloc(u8, len);
+        const content = try allocator.alloc(u8, len);
         errdefer allocator.free(content);
 
         // read all content
@@ -149,12 +149,12 @@ pub const Decoder = struct {
     }
 
     pub fn decodeOCTETSTRING(reader: anytype, allocator: std.mem.Allocator) ![]u8 {
-        const t = @intToEnum(Tag, try reader.readByte());
+        const t = @as(Tag, @enumFromInt(try reader.readByte()));
         if (t != .OCTET_STRING) {
             return errs.DecodingError.InvalidType;
         }
         const len = try decodeLength(reader);
-        var content = try allocator.alloc(u8, len);
+        const content = try allocator.alloc(u8, len);
         errdefer allocator.free(content);
 
         // read all content
@@ -175,12 +175,12 @@ pub const ObjectIdentifier = struct {
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
-        const t = @intToEnum(Tag, try reader.readByte());
+        const t = @as(Tag, @enumFromInt(try reader.readByte()));
         if (t != .OBJECT_IDENTIFIER) {
             return errs.DecodingError.InvalidType;
         }
         const len = try Decoder.decodeLength(reader);
-        var id_bin = try allocator.alloc(u8, len);
+        const id_bin = try allocator.alloc(u8, len);
         defer allocator.free(id_bin);
 
         try reader.readNoEof(id_bin);
@@ -188,9 +188,9 @@ pub const ObjectIdentifier = struct {
         // TODO: calculate buffer size
         var id_tmp: [100]u8 = undefined;
         const id_len = Decoder.decodeOID(&id_tmp, id_bin);
-        var id = try allocator.alloc(u8, id_len);
+        const id = try allocator.alloc(u8, id_len);
         errdefer allocator.free(id);
-        std.mem.copy(u8, id, id_tmp[0..id_len]);
+        @memcpy(id, id_tmp[0..id_len]);
 
         return Self{
             .id = id,
@@ -206,7 +206,7 @@ pub const ObjectIdentifier = struct {
 pub const Encoder = struct {
     pub fn encodeLength(len: u64, writer: anytype) !usize {
         if (len < 0x80) {
-            try writer.writeByte(@intCast(u8, len));
+            try writer.writeByte(@as(u8, @intCast(len)));
             return 1;
         }
 
@@ -218,13 +218,13 @@ pub const Encoder = struct {
                 return errs.EncodingError.InvalidArgument;
             }
 
-            res[end_idx] = @intCast(u8, tmp & 0xFF);
+            res[end_idx] = @as(u8, @intCast(tmp & 0xFF));
             tmp = tmp >> 8;
             end_idx += 1;
         }
 
         const len_len = end_idx + 1;
-        try writer.writeByte(@intCast(u8, (end_idx & 0x7F) | 0x80));
+        try writer.writeByte(@as(u8, @intCast((end_idx & 0x7F) | 0x80)));
         while (end_idx > 0) {
             end_idx -= 1;
             try writer.writeByte(res[end_idx]);
@@ -249,10 +249,10 @@ pub const Encoder = struct {
 
             const code = try std.fmt.parseInt(usize, id[start_idx..end_idx], 10);
             if (count == 0) {
-                out[out_idx] = @intCast(u8, code);
+                out[out_idx] = @as(u8, @intCast(code));
                 count += 1;
             } else if (count == 1) {
-                out[out_idx] = @intCast(u8, out[out_idx] * 40 + code);
+                out[out_idx] = @as(u8, @intCast(out[out_idx] * 40 + code));
                 out_idx += 1;
                 count += 1;
             } else {
@@ -269,7 +269,7 @@ pub const Encoder = struct {
         var idx: usize = 0;
         var cur = i;
         while (cur > 0) {
-            tmp[idx] = @intCast(u8, cur % 128);
+            tmp[idx] = @as(u8, @intCast(cur % 128));
             if (idx > 0) {
                 tmp[idx] += 0x80;
             }

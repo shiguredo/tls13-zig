@@ -70,7 +70,7 @@ pub const Finished = struct {
         //                        Certificate*, CertificateVerify*))
         hkdf.hash(&hash, m);
         hkdf.create(&digest, hash[0..hkdf.digest_length], secret);
-        std.mem.copy(u8, res.verify_data.slice(), digest[0..hkdf.digest_length]);
+        @memcpy(res.verify_data.slice(), digest[0..hkdf.digest_length]);
 
         return res;
     }

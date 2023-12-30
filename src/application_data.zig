@@ -45,7 +45,7 @@ pub const ApplicationData = struct {
     /// @param allocator allocator to initialize ApplicationData.
     /// @return decoded ApplicationData.
     pub fn decode(reader: anytype, len: usize, allocator: std.mem.Allocator) !Self {
-        var res = try Self.init(len, allocator);
+        const res = try Self.init(len, allocator);
 
         try reader.readNoEof(res.content);
 

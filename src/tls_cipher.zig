@@ -56,13 +56,13 @@ pub const TLSCipherText = struct {
         }
 
         // ProtocolVersion must be TLSv1.2(0x0303).
-        const proto_version = try reader.readIntBig(u16);
+        const proto_version = try reader.readInt(u16, .big);
         if (proto_version != 0x0303) {
             return Error.InvalidProtocolVersion;
         }
 
         // Decoding length.
-        const len = try reader.readIntBig(u16);
+        const len = try reader.readInt(u16, .big);
 
         // Decoding record.
         var res = try Self.init(len, allocator);
@@ -94,15 +94,15 @@ pub const TLSCipherText = struct {
         var len: usize = 0;
 
         // Encoding ContentType.
-        try writer.writeIntBig(u8, @enumToInt(ContentType.application_data));
+        try writer.writeInt(u8, @intFromEnum(ContentType.application_data), .big);
         len += @sizeOf(u8);
 
         // Encoding ProtocolVersion(TLSv1.2, 0x0303).
-        try writer.writeIntBig(u16, 0x0303);
+        try writer.writeInt(u16, 0x0303, .big);
         len += @sizeOf(u16);
 
         // Encoding length.
-        try writer.writeIntBig(u16, @intCast(u16, self.record.len));
+        try writer.writeInt(u16, @as(u16, @intCast(self.record.len)), .big);
         len += @sizeOf(u16);
 
         return len;
@@ -206,13 +206,13 @@ pub const TLSInnerPlainText = struct {
         const content_len = m.len - zero_pad_length - 1;
 
         // Decoding content_type.
-        const content_type = @intToEnum(ContentType, m[content_len]);
+        const content_type = @as(ContentType, @enumFromInt(m[content_len]));
 
         // Decoding content.
         var res = try Self.init(content_len, content_type, allocator);
         errdefer res.deinit();
         res.zero_pad_length = zero_pad_length;
-        std.mem.copy(u8, res.content, m[0..content_len]);
+        @memcpy(res.content, m[0..content_len]);
 
         return res;
     }
@@ -265,7 +265,7 @@ pub const TLSInnerPlainText = struct {
         len += self.content.len;
 
         // Encoding content_type.
-        try writer.writeByte(@enumToInt(self.content_type));
+        try writer.writeByte(@intFromEnum(self.content_type));
         len += @sizeOf(u8);
 
         // Encoding zero-fill.
@@ -333,7 +333,7 @@ test "TLSCipherText decode" {
 
     var readStream = io.fixedBufferStream(&recv_data);
 
-    const t = try readStream.reader().readEnum(ContentType, .Big);
+    const t = try readStream.reader().readEnum(ContentType, .big);
     const res = try TLSCipherText.decode(readStream.reader(), t, std.testing.allocator);
     defer res.deinit();
 
@@ -359,7 +359,7 @@ test "TLSCipherText encode" {
 
     var ct = try TLSCipherText.init(record.len, std.testing.allocator);
     defer ct.deinit();
-    std.mem.copy(u8, ct.record, &record);
+    @memcpy(ct.record, &record);
 
     var send_data: [1000]u8 = undefined;
     var sendStream = io.fixedBufferStream(&send_data);

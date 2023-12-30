@@ -141,7 +141,7 @@ pub fn ReadEngine(comptime Entity: type, comptime et: EntityType) type {
                     log.debug("KeyUpdate updated_request has been sent", .{});
                 }
 
-                const t = self.entity.reader.readEnum(ContentType, .Big) catch |err| {
+                const t = self.entity.reader.readEnum(ContentType, .big) catch |err| {
                     switch (err) {
                         error.WouldBlock => return msg_stream.getWritten().len,
                         else => return err,

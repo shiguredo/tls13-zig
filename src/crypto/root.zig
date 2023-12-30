@@ -67,7 +67,7 @@ pub const RootCA = struct {
         }
 
         for (rootCAPaths) |caPath| {
-            var caDir = std.fs.openIterableDirAbsolute(caPath, .{}) catch |err| {
+            var caDir = std.fs.openDirAbsolute(caPath, .{}) catch |err| {
                 switch (err) {
                     std.fs.File.OpenError.FileNotFound => continue,
                     else => return err,

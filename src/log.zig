@@ -22,7 +22,7 @@ pub fn log(
     comptime format: []const u8,
     args: anytype,
 ) void {
-    if (@enumToInt(message_level) > @enumToInt(std.log.default_level)) {
+    if (@intFromEnum(message_level) > @intFromEnum(std.log.default_level)) {
         return;
     }
     if (builtin.os.tag == .freestanding)
@@ -61,7 +61,7 @@ fn getDateTimeNowStr(buf: []u8) ![]u8 {
     var buf_writer = std.io.fixedBufferStream(buf);
 
     const n = std.time.timestamp();
-    const es = std.time.epoch.EpochSeconds{ .secs = @intCast(u64, n) };
+    const es = std.time.epoch.EpochSeconds{ .secs = @as(u64, @intCast(n)) };
     const ds = es.getDaySeconds();
     const ed = es.getEpochDay();
     const yd = ed.calculateYearDay();

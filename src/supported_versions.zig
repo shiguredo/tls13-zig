@@ -49,18 +49,18 @@ pub const SupportedVersions = struct {
         switch (ht) {
             .client_hello => {
                 // Decoding versions
-                var supported_len = try reader.readIntBig(u8);
+                const supported_len = try reader.readInt(u8, .big);
                 if (supported_len % 2 != 0) {
                     return Error.InvalidVersionsLength;
                 }
 
                 var i: usize = 0;
                 while (i < supported_len) : (i += 2) {
-                    try res.versions.append(try reader.readIntBig(u16));
+                    try res.versions.append(try reader.readInt(u16, .big));
                 }
             },
             .server_hello => {
-                try res.versions.append(try reader.readIntBig(u16));
+                try res.versions.append(try reader.readInt(u16, .big));
             },
             else => unreachable,
         }
@@ -79,16 +79,16 @@ pub const SupportedVersions = struct {
         switch (self.ht) {
             .client_hello => {
                 // Encoding versions.
-                try writer.writeIntBig(u8, @intCast(u8, self.versions.len * @sizeOf(u16)));
+                try writer.writeInt(u8, @as(u8, @intCast(self.versions.len * @sizeOf(u16))), .big);
                 len += @sizeOf(u8);
 
                 for (self.versions.slice()) |version| {
-                    try writer.writeIntBig(u16, version);
+                    try writer.writeInt(u16, version, .big);
                     len += @sizeOf(u16);
                 }
             },
             .server_hello => {
-                try writer.writeIntBig(u16, self.versions.slice()[0]);
+                try writer.writeInt(u16, self.versions.slice()[0], .big);
                 len += @sizeOf(u16);
             },
             else => unreachable,

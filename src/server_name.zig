@@ -41,14 +41,14 @@ pub const ServerName = struct {
     /// @return decoded ServerName.
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
         // Decoding name_type.
-        const nt = @intToEnum(NameType, try reader.readByte());
+        const nt = @as(NameType, @enumFromInt(try reader.readByte()));
         if (nt != .host_name) {
             return Error.UnsupportedNameType;
         }
 
         // Decoding host_name.
-        const name_len = try reader.readIntBig(u16);
-        var host_name = try allocator.alloc(u8, name_len);
+        const name_len = try reader.readInt(u16, .big);
+        const host_name = try allocator.alloc(u8, name_len);
         errdefer allocator.free(host_name);
         try reader.readNoEof(host_name);
 
@@ -67,11 +67,11 @@ pub const ServerName = struct {
         var len: usize = 0;
 
         // Encoding name_type.
-        try writer.writeIntBig(u8, @enumToInt(self.name_type));
+        try writer.writeInt(u8, @intFromEnum(self.name_type), .big);
         len += @sizeOf(NameType);
 
         // Encoding server_name_list.
-        try writer.writeIntBig(u16, @intCast(u16, self.host_name.len));
+        try writer.writeInt(u16, @as(u16, @intCast(self.host_name.len)), .big);
         len += @sizeOf(u16);
         try writer.writeAll(self.host_name);
         len += self.host_name.len;
@@ -96,13 +96,13 @@ pub const ServerName = struct {
     /// @param allocator allocator to allocate host_name.
     /// @return created ServerName.
     pub fn fromHostName(host_name: []const u8, allocator: std.mem.Allocator) !Self {
-        var res = Self{
+        const res = Self{
             .name_type = .host_name,
             .host_name = try allocator.alloc(u8, host_name.len),
             .allocator = allocator,
         };
 
-        std.mem.copy(u8, res.host_name, host_name);
+        @memcpy(res.host_name, host_name);
 
         return res;
     }
@@ -168,7 +168,7 @@ pub const ServerNameList = struct {
         }
 
         // Decoding server_name_list.
-        const len = try reader.readIntBig(u16);
+        const len = try reader.readInt(u16, .big);
         var i: usize = 0;
         while (i < len) {
             const name = try ServerName.decode(reader, allocator);
@@ -191,7 +191,7 @@ pub const ServerNameList = struct {
     pub fn encode(self: Self, writer: anytype) !usize {
         var len: usize = 0;
 
-        try writer.writeIntBig(u16, @intCast(u16, self.length() - @sizeOf(u16)));
+        try writer.writeInt(u16, @as(u16, @intCast(self.length() - @sizeOf(u16))), .big);
         len += @sizeOf(u16);
         for (self.server_name_list.items) |n| {
             len += try n.encode(writer);

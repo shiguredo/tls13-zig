@@ -33,7 +33,7 @@ pub const SessionID = struct {
     }
 
     pub fn decode(reader: anytype) !Self {
-        var res = try Self.init(try reader.readIntBig(u8));
+        var res = try Self.init(try reader.readInt(u8, .big));
         _ = try reader.readAll(res.session_id.slice());
 
         return res;
@@ -42,7 +42,7 @@ pub const SessionID = struct {
     pub fn encode(self: Self, writer: anytype) !usize {
         var len: usize = 0;
 
-        try writer.writeIntBig(u8, @intCast(u8, self.session_id.len));
+        try writer.writeInt(u8, @as(u8, self.session_id.len), .big);
         len += @sizeOf(u8);
 
         try writer.writeAll(self.session_id.slice());
@@ -66,12 +66,12 @@ pub const SessionID = struct {
 };
 
 pub fn decodeCipherSuites(reader: anytype, suites: *ArrayList(CipherSuite)) !void {
-    var len: usize = try reader.readIntBig(u16);
+    const len: usize = try reader.readInt(u16, .big);
     assert(len % 2 == 0);
 
     var i: usize = 0;
     while (i < len) : (i += @sizeOf(u16)) {
-        const cs_raw = try reader.readIntBig(u16);
+        const cs_raw = try reader.readInt(u16, .big);
         const cs = utils.intToEnum(CipherSuite, cs_raw) catch {
             log.warn("Unknown CipherSuite 0x{x:0>4}", .{cs_raw});
             continue;
@@ -84,11 +84,11 @@ pub fn decodeCipherSuites(reader: anytype, suites: *ArrayList(CipherSuite)) !voi
 
 pub fn encodeCipherSuites(writer: anytype, suites: ArrayList(CipherSuite)) !usize {
     var len: usize = 0;
-    try writer.writeIntBig(u16, @intCast(u16, suites.items.len * @sizeOf(CipherSuite)));
+    try writer.writeInt(u16, @as(u16, @intCast(suites.items.len * @sizeOf(CipherSuite))), .big);
     len += @sizeOf(u16);
 
     for (suites.items) |suite| {
-        try writer.writeIntBig(u16, @enumToInt(suite));
+        try writer.writeInt(u16, @intFromEnum(suite), .big);
         len += @sizeOf(CipherSuite);
     }
 
@@ -101,7 +101,7 @@ pub fn decodeExtensions(reader: anytype, allocator: std.mem.Allocator, extension
             e.deinit();
         }
     }
-    const ext_len = try reader.readIntBig(u16);
+    const ext_len = try reader.readInt(u16, .big);
     var i: usize = 0;
     while (i < ext_len) {
         var ext = try Extension.decode(reader, allocator, ht, is_hello_retry);
@@ -118,7 +118,7 @@ pub fn encodeExtensions(writer: anytype, extensions: ArrayList(Extension)) !usiz
     }
 
     var len: usize = 0;
-    try writer.writeIntBig(u16, @intCast(u16, ext_len));
+    try writer.writeInt(u16, @as(u16, @intCast(ext_len)), .big);
     len += @sizeOf(u16);
 
     for (extensions.items) |ext| {

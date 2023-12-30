@@ -35,14 +35,14 @@ pub const TLSPlainText = struct {
     /// @return decoded TLSPlainText.
     pub fn decode(reader: anytype, t: ContentType, allocator: std.mem.Allocator, hkdf: ?crypto.Hkdf, writer: anytype) !Self {
         // Decoding ProtocolVersion.
-        const proto_version = try reader.readIntBig(u16);
+        const proto_version = try reader.readInt(u16, .big);
         log.debug("protocol_version=0x{x:0>4}", .{proto_version});
 
         // Decoding length.
-        const len = try reader.readIntBig(u16);
+        const len = try reader.readInt(u16, .big);
 
         // Reading the fragment.
-        var fragment: []u8 = try allocator.alloc(u8, len);
+        const fragment: []u8 = try allocator.alloc(u8, len);
         defer allocator.free(fragment);
         _ = try reader.readAll(fragment);
 
@@ -75,16 +75,16 @@ pub const TLSPlainText = struct {
         var len: usize = 0;
 
         // Encoding ContentType.
-        try writer.writeIntBig(u8, @enumToInt(self.content));
+        try writer.writeInt(u8, @intFromEnum(self.content), .big);
         len += @sizeOf(u8);
 
         // Encoding ProtocolVersion(TLS1.2 0x0303).
-        try writer.writeIntBig(u16, self.proto_version);
+        try writer.writeInt(u16, self.proto_version, .big);
         len += @sizeOf(u16);
 
         // Encoding length.
         len += @sizeOf(u16);
-        try writer.writeIntBig(u16, @intCast(u16, self.length() - len));
+        try writer.writeInt(u16, @as(u16, @intCast(self.length() - len)), .big);
 
         // Encoding Content as fragment.
         len += try self.content.encode(writer);
@@ -134,7 +134,7 @@ test "TLSPlainText ClientHello decode" {
 
     var readStream = io.fixedBufferStream(&recv_data);
 
-    const t = try readStream.reader().readEnum(ContentType, .Big);
+    const t = try readStream.reader().readEnum(ContentType, .big);
     const res = try TLSPlainText.decode(readStream.reader(), t, std.testing.allocator, null, null);
     defer res.deinit();
 

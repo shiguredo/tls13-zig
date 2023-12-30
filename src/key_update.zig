@@ -20,12 +20,12 @@ pub const KeyUpdate = struct {
 
     pub fn decode(reader: anytype) !Self {
         return .{
-            .request_update = try reader.readEnum(KeyUpdateRequest, .Big),
+            .request_update = try reader.readEnum(KeyUpdateRequest, .big),
         };
     }
 
     pub fn encode(self: Self, writer: anytype) !usize {
-        try writer.writeByte(@enumToInt(self.request_update));
+        try writer.writeByte(@intFromEnum(self.request_update));
 
         return @sizeOf(u8);
     }

@@ -25,7 +25,7 @@ pub const PreSharedKey = struct {
             },
             .server_hello => return .{
                 .msg_type = msg_type,
-                .selected_identify = try reader.readIntBig(u16),
+                .selected_identify = try reader.readInt(u16, .big),
             },
             else => unreachable,
         }
@@ -35,7 +35,7 @@ pub const PreSharedKey = struct {
         switch (self.msg_type) {
             .client_hello => return try self.offeredPsks.encode(writer),
             .server_hello => {
-                try writer.writeIntBig(u16, self.selected_identify);
+                try writer.writeInt(u16, self.selected_identify, .big);
                 return @sizeOf(u16);
             },
             else => unreachable,
@@ -78,7 +78,7 @@ pub const OfferedPsks = struct {
         var ids = ArrayList(PskIdentity).init(allocator);
         errdefer ids.deinit();
 
-        const id_len = try reader.readIntBig(u16);
+        const id_len = try reader.readInt(u16, .big);
         var i: usize = 0;
         while (i < id_len) {
             const psk_id = try PskIdentity.decode(reader, allocator);
@@ -87,8 +87,8 @@ pub const OfferedPsks = struct {
             i += psk_id.length();
         }
 
-        const b_len = try reader.readIntBig(u16);
-        var binders = try allocator.alloc(u8, b_len);
+        const b_len = try reader.readInt(u16, .big);
+        const binders = try allocator.alloc(u8, b_len);
         errdefer allocator.free(binders);
         try reader.readNoEof(binders);
 
@@ -106,13 +106,13 @@ pub const OfferedPsks = struct {
         for (self.identities.items) |i| {
             id_len += i.length();
         }
-        try writer.writeIntBig(u16, @intCast(u16, id_len));
+        try writer.writeInt(u16, @as(u16, @intCast(id_len)), .big);
         len += @sizeOf(u16);
         for (self.identities.items) |i| {
             len += try i.encode(writer);
         }
 
-        try writer.writeIntBig(u16, @intCast(u16, self.binders.len));
+        try writer.writeInt(u16, @as(u16, @intCast(self.binders.len)), .big);
         len += @sizeOf(u16);
         try writer.writeAll(self.binders);
         len += self.binders.len;
@@ -155,12 +155,12 @@ pub const PskIdentity = struct {
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
-        const id_len = try reader.readIntBig(u16);
-        var id = try allocator.alloc(u8, id_len);
+        const id_len = try reader.readInt(u16, .big);
+        const id = try allocator.alloc(u8, id_len);
         errdefer allocator.free(id);
         try reader.readNoEof(id);
 
-        const ticket_age = try reader.readIntBig(u32);
+        const ticket_age = try reader.readInt(u32, .big);
 
         return .{
             .identity = id,
@@ -172,13 +172,13 @@ pub const PskIdentity = struct {
     pub fn encode(self: Self, writer: anytype) !usize {
         var len: usize = 0;
 
-        try writer.writeIntBig(u16, @intCast(u16, self.identity.len));
+        try writer.writeInt(u16, @as(u16, @intCast(self.identity.len)), .big);
         len += @sizeOf(u16);
 
         try writer.writeAll(self.identity);
         len += self.identity.len;
 
-        try writer.writeIntBig(u32, self.obfuscated_ticket_age);
+        try writer.writeInt(u32, self.obfuscated_ticket_age, .big);
         len += @sizeOf(u32);
 
         return len;
@@ -195,7 +195,7 @@ pub const PskIdentity = struct {
 
     pub fn copy(self: Self, allocator: std.mem.Allocator) !Self {
         var res = try Self.init(allocator, self.identity.len);
-        std.mem.copy(u8, res.identity, self.identity);
+        @memcpy(res.identity, self.identity);
         res.obfuscated_ticket_age = self.obfuscated_ticket_age;
 
         return res;

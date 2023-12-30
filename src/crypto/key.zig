@@ -55,7 +55,7 @@ pub const ECPrivateKey = struct {
     pub fn decodeContent(stream: *asn1.Stream, allocator: std.mem.Allocator) !Self {
         const reader = stream.reader();
 
-        var t = @intToEnum(asn1.Tag, try reader.readByte());
+        var t = @as(asn1.Tag, @enumFromInt(try reader.readByte()));
         if (t != .INTEGER) {
             return errs.DecodingError.InvalidType;
         }
@@ -68,12 +68,12 @@ pub const ECPrivateKey = struct {
             return errs.DecodingError.InvalidFormat;
         }
 
-        t = @intToEnum(asn1.Tag, try reader.readByte());
+        t = @as(asn1.Tag, @enumFromInt(try reader.readByte()));
         if (t != .OCTET_STRING) {
             return errs.DecodingError.InvalidType;
         }
         t_len = try asn1.Decoder.decodeLength(reader);
-        var privKey = try allocator.alloc(u8, t_len);
+        const privKey = try allocator.alloc(u8, t_len);
         errdefer allocator.free(privKey);
         try reader.readNoEof(privKey);
 
@@ -94,7 +94,7 @@ pub const ECPrivateKey = struct {
 
         if (optional_t == 0xA1) { // [1] OPTIONAL
             t_len = try asn1.Decoder.decodeLength(reader);
-            const t_key = @intToEnum(asn1.Tag, try reader.readByte());
+            const t_key = @as(asn1.Tag, @enumFromInt(try reader.readByte()));
             if (t_key != .BIT_STRING) {
                 return errs.DecodingError.InvalidType;
             }
@@ -179,11 +179,11 @@ pub const RSAPrivateKey = struct {
     pub fn decodeContent(stream: *asn1.Stream, allocator: std.mem.Allocator) !Self {
         const reader = stream.reader();
 
-        var t = @intToEnum(asn1.Tag, try reader.readByte());
+        const t = @as(asn1.Tag, @enumFromInt(try reader.readByte()));
         if (t != .INTEGER) {
             return errs.DecodingError.InvalidType;
         }
-        var t_len: usize = try reader.readByte();
+        const t_len: usize = try reader.readByte();
         if (t_len != 0x01) { // length is assumed to be 1(u8)
             return errs.DecodingError.InvalidLength;
         }
@@ -195,7 +195,7 @@ pub const RSAPrivateKey = struct {
         const modulus = try asn1.Decoder.decodeINTEGER(reader, allocator);
         defer allocator.free(modulus);
 
-        var modulus_new = try removeZeros(modulus, allocator);
+        const modulus_new = try removeZeros(modulus, allocator);
         errdefer allocator.free(modulus_new);
 
         const publicExponent = try asn1.Decoder.decodeINTEGER(reader, allocator);
@@ -204,7 +204,7 @@ pub const RSAPrivateKey = struct {
         const privateExponent = try asn1.Decoder.decodeINTEGER(reader, allocator);
         defer allocator.free(privateExponent);
 
-        var privExponent_new = try removeZeros(privateExponent, allocator);
+        const privExponent_new = try removeZeros(privateExponent, allocator);
         errdefer allocator.free(privExponent_new);
 
         const prime1 = try asn1.Decoder.decodeINTEGER(reader, allocator);
@@ -247,9 +247,9 @@ pub const RSAPrivateKey = struct {
             len -= 1;
         }
 
-        var res = try allocator.alloc(u8, len);
+        const res = try allocator.alloc(u8, len);
         errdefer allocator.free(res);
-        std.mem.copy(u8, res, src[i..]);
+        @memcpy(res, src[i..]);
         return res;
     }
 
@@ -375,9 +375,9 @@ const RSAPublicKey = struct {
             modulus_len -= 1;
         }
 
-        var modulus_new = try allocator.alloc(u8, modulus_len);
+        const modulus_new = try allocator.alloc(u8, modulus_len);
         errdefer allocator.free(modulus_new);
-        std.mem.copy(u8, modulus_new, modulus[i..]);
+        @memcpy(modulus_new, modulus[i..]);
 
         const publicExponent = try asn1.Decoder.decodeINTEGER(reader, allocator);
         errdefer allocator.free(publicExponent);
@@ -393,17 +393,17 @@ const RSAPublicKey = struct {
     pub fn encode(self: Self, writer: anytype) !usize {
         var len: usize = 0;
 
-        try writer.writeByte(@enumToInt(asn1.Tag.SEQUENCE));
+        try writer.writeByte(@intFromEnum(asn1.Tag.SEQUENCE));
         len += 1;
         len += try asn1.Encoder.encodeLength(self.lengthContent(), writer);
 
-        try writer.writeByte(@enumToInt(asn1.Tag.INTEGER));
+        try writer.writeByte(@intFromEnum(asn1.Tag.INTEGER));
         len += 1;
         len += try asn1.Encoder.encodeLength(self.modulus.len, writer);
         try writer.writeAll(self.modulus);
         len += self.modulus.len;
 
-        try writer.writeByte(@enumToInt(asn1.Tag.INTEGER));
+        try writer.writeByte(@intFromEnum(asn1.Tag.INTEGER));
         len += 1;
         len += try asn1.Encoder.encodeLength(self.publicExponent.len, writer);
         try writer.writeAll(self.publicExponent);
@@ -426,7 +426,7 @@ const RSAPublicKey = struct {
     }
 
     pub fn copy(self: Self, allocator: std.mem.Allocator) !Self {
-        var buf = try allocator.alloc(u8, self.length());
+        const buf = try allocator.alloc(u8, self.length());
         defer allocator.free(buf);
         var stream = io.fixedBufferStream(buf);
 
@@ -493,7 +493,7 @@ const Secp256r1PublicKey = struct {
     }
 
     pub fn copy(self: Self, allocator: std.mem.Allocator) !Self {
-        var buf = try allocator.alloc(u8, self.length());
+        const buf = try allocator.alloc(u8, self.length());
         defer allocator.free(buf);
         var stream = io.fixedBufferStream(buf);
 
@@ -546,7 +546,7 @@ const Secp384r1PublicKey = struct {
     }
 
     pub fn copy(self: Self, allocator: std.mem.Allocator) !Self {
-        var buf = try allocator.alloc(u8, self.length());
+        const buf = try allocator.alloc(u8, self.length());
         defer allocator.free(buf);
         var stream = io.fixedBufferStream(buf);
 

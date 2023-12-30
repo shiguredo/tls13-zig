@@ -20,7 +20,7 @@ pub const EarlyData = struct {
     const Self = @This();
     pub fn decode(reader: anytype, ht: HandshakeType) !Self {
         switch (ht) {
-            .new_session_ticket => return .{ .msg_type = ht, .max_early_data_size = try reader.readIntBig(u32) },
+            .new_session_ticket => return .{ .msg_type = ht, .max_early_data_size = try reader.readInt(u32, .big) },
             .client_hello => return .{
                 .msg_type = ht,
             },
@@ -35,7 +35,7 @@ pub const EarlyData = struct {
         var len: usize = 0;
         switch (self.msg_type) {
             .new_session_ticket => {
-                try writer.writeIntBig(u32, self.max_early_data_size);
+                try writer.writeInt(u32, self.max_early_data_size, .big);
                 len += @sizeOf(u32);
             },
             .client_hello => {},

@@ -73,7 +73,7 @@ pub const RecordPayloadProtector = struct {
     /// @return encrypted TLSCipherText.
     pub fn encrypt(self: *Self, mt: TLSInnerPlainText, allocator: std.mem.Allocator) !TLSCipherText {
         // Encoding TLSInnerPlainText.
-        var mt_bytes = try allocator.alloc(u8, mt.length());
+        const mt_bytes = try allocator.alloc(u8, mt.length());
         defer allocator.free(mt_bytes);
         var stream = io.fixedBufferStream(mt_bytes);
         _ = try mt.encode(stream.writer());
@@ -133,7 +133,7 @@ pub const RecordPayloadProtector = struct {
     pub fn decrypt(self: *Self, c: TLSCipherText, allocator: std.mem.Allocator) !TLSInnerPlainText {
         // Allocate bytes array for decrypt message.
         const tag_length = self.aead.tag_length;
-        var mt_bytes = try allocator.alloc(u8, c.record.len - tag_length);
+        const mt_bytes = try allocator.alloc(u8, c.record.len - tag_length);
         defer allocator.free(mt_bytes);
 
         // Encoding header for aead tag.
@@ -162,7 +162,7 @@ pub const RecordPayloadProtector = struct {
         // Decoding TLSCipherText.
         var stream = io.fixedBufferStream(c);
         var reader = stream.reader();
-        const t = try reader.readEnum(ContentType, .Big);
+        const t = try reader.readEnum(ContentType, .big);
         const ct = try TLSCipherText.decode(reader, t, allocator);
         defer ct.deinit();
 
@@ -182,7 +182,7 @@ pub const RecordPayloadProtector = struct {
 
         i = 0;
         while (i < @sizeOf(u64)) : (i += 1) {
-            nonce.slice()[nonce.len - i - 1] = @intCast(u8, (count >> (@intCast(u6, i * 8))) & 0xFF);
+            nonce.slice()[nonce.len - i - 1] = @as(u8, @intCast((count >> (@as(u6, @intCast(i * 8)))) & 0xFF));
         }
 
         i = 0;
@@ -257,7 +257,7 @@ test "RecordPayloadProtector decryptToContent" {
     // zig fmt: on
 
     var stream = io.fixedBufferStream(&s_alert);
-    const t = try stream.reader().readEnum(ContentType, .Big);
+    const t = try stream.reader().readEnum(ContentType, .big);
     const ct = try TLSCipherText.decode(stream.reader(), t, std.testing.allocator);
     defer ct.deinit();
 

@@ -161,10 +161,10 @@ pub const Certificate = struct {
         errdefer tbs_certificate.deinit();
         const end_idx = try stream.getPos();
 
-        var cert_data = try allocator.alloc(u8, end_idx - begin_idx);
+        const cert_data = try allocator.alloc(u8, end_idx - begin_idx);
         errdefer allocator.free(cert_data);
 
-        std.mem.copy(u8, cert_data, stream.buffer[begin_idx..end_idx]);
+        @memcpy(cert_data, stream.buffer[begin_idx..end_idx]);
 
         const signature_algorithm = try AlgorithmIdentifier.decode(reader, allocator);
         errdefer signature_algorithm.deinit();
@@ -424,7 +424,7 @@ pub const Version = enum(u8) {
 
     const Self = @This();
     pub fn decode(reader: anytype) !Self {
-        const t = @intToEnum(asn1.Tag, try reader.readByte());
+        const t = @as(asn1.Tag, @enumFromInt(try reader.readByte()));
         if (t != .INTEGER) {
             return errs.DecodingError.InvalidType;
         }
@@ -433,7 +433,7 @@ pub const Version = enum(u8) {
             return errs.DecodingError.InvalidLength;
         }
 
-        return @intToEnum(Self, try reader.readByte());
+        return @as(Self, @enumFromInt(try reader.readByte()));
     }
 };
 
@@ -452,7 +452,7 @@ const CertificateSerialNumber = struct {
     }
 
     pub fn decode(reader: anytype) !Self {
-        const t = @intToEnum(asn1.Tag, try reader.readByte());
+        const t = @as(asn1.Tag, @enumFromInt(try reader.readByte()));
         if (t != .INTEGER) {
             return errs.DecodingError.InvalidType;
         }
@@ -501,7 +501,7 @@ pub const AlgorithmIdentifier = struct {
         }
 
         const rest_len = (try stream.getEndPos()) - (try stream.getPos());
-        var parameters = try allocator.alloc(u8, rest_len);
+        const parameters = try allocator.alloc(u8, rest_len);
         errdefer allocator.free(parameters);
 
         try reader.readNoEof(parameters);
@@ -625,7 +625,7 @@ const RelativeDistinguishedName = struct {
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
-        const t = @intToEnum(asn1.Tag, try reader.readByte());
+        const t = @as(asn1.Tag, @enumFromInt(try reader.readByte()));
         if (t != .SET) {
             return errs.DecodingError.InvalidType;
         }
@@ -709,7 +709,7 @@ const AttributeTypeAndValue = struct {
         const t_value = try reader.readByte(); // TODO: check value type defined by attr_type
         _ = t_value;
         const value_len = try asn1.Decoder.decodeLength(reader);
-        var attr_value = try allocator.alloc(u8, value_len);
+        const attr_value = try allocator.alloc(u8, value_len);
         errdefer allocator.free(attr_value);
         try reader.readNoEof(attr_value);
 
@@ -809,7 +809,7 @@ const Time = struct {
     const Self = @This();
 
     pub fn decode(reader: anytype) !Self {
-        const time_type = @intToEnum(asn1.Tag, try reader.readByte());
+        const time_type = @as(asn1.Tag, @enumFromInt(try reader.readByte()));
         var res = Self{
             .time_type = time_type,
         };
@@ -837,13 +837,13 @@ const Time = struct {
     // "YYMMDDhhmm[ss]Z" or "YYMMDDhhmm[ss](+|-)hhmm"
     fn decodeUTCTime(self: *Self, reader: anytype) !void {
         // TODO: check array length
-        self.year = @intCast(u16, c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte()));
+        self.year = @as(u16, @intCast(c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte())));
         if (self.year >= 50) {
             self.year = self.year + 1900;
         } else {
             self.year = self.year + 2000;
         }
-        self.month = @intCast(u4, c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte()));
+        self.month = @as(u4, @intCast(c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte())));
         self.day = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
         self.hour = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
         self.minute = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
@@ -876,9 +876,9 @@ const Time = struct {
     // "YYYYMMDDhhmm[ss][.d]Z" or "YYYYMMDDhhmm[ss][.d](+|-)hhmm"
     fn decodeGeneralizedTime(self: *Self, reader: anytype) !void {
         // TODO: check array length
-        self.year = @intCast(u16, c_to_i(try reader.readByte()) * 1000 + c_to_i(try reader.readByte()) * 100);
-        self.year += @intCast(u16, c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte()) * 1);
-        self.month = @intCast(u4, c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte()));
+        self.year = @as(u16, @intCast(c_to_i(try reader.readByte()) * 1000 + c_to_i(try reader.readByte()) * 100));
+        self.year += @as(u16, @intCast(c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte()) * 1));
+        self.month = @as(u4, @intCast(c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte())));
         self.day = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
         self.hour = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
         self.minute = c_to_i(try reader.readByte()) * 10 + c_to_i(try reader.readByte());
@@ -934,7 +934,7 @@ const Time = struct {
         const leap_kind: std.time.epoch.YearLeapKind = if (std.time.epoch.isLeapYear(self.year)) .leap else .not_leap;
         var month_idx: u4 = 1;
         while (self.month - month_idx > 0) : (month_idx += 1) {
-            const days: u64 = std.time.epoch.getDaysInMonth(leap_kind, @intToEnum(std.time.epoch.Month, month_idx));
+            const days: u64 = std.time.epoch.getDaysInMonth(leap_kind, @as(std.time.epoch.Month, @enumFromInt(month_idx)));
             sec += days * std.time.epoch.secs_per_day;
         }
 
@@ -951,7 +951,7 @@ const Time = struct {
             sec += self.t_minute * 60;
         }
 
-        return @intCast(i64, sec);
+        return @as(i64, @intCast(sec));
     }
 
     test "toSeconds" {
@@ -970,7 +970,7 @@ const Time = struct {
 
     pub fn writeToBuf(self: Self, out: []u8) !usize {
         var stream = io.fixedBufferStream(out);
-        var plus_s = if (self.plus) "+" else "-";
+        const plus_s = if (self.plus) "+" else "-";
         try std.fmt.format(stream.writer(), "{d:0>2}-{d:0>2}-{d:0>2}-{d:0>2}:{d:0>2}:{d:0>2}{s}{d:0>2}:{d:0>2}", .{ self.year, self.month, self.day, self.hour, self.minute, self.second, plus_s, self.t_hour, self.t_minute });
 
         return try stream.getPos();
@@ -1028,7 +1028,7 @@ const SubjectPublicKeyInfo = struct {
             return errs.DecodingError.InvalidFormat;
         }
 
-        const t_key = @intToEnum(asn1.Tag, try reader.readByte());
+        const t_key = @as(asn1.Tag, @enumFromInt(try reader.readByte()));
         if (t_key != .BIT_STRING) {
             return errs.DecodingError.InvalidType;
         }
@@ -1145,14 +1145,14 @@ const Extension = struct {
         const oid = try asn1.ObjectIdentifier.decode(reader, allocator);
         errdefer oid.deinit();
 
-        var t_default = @intToEnum(asn1.Tag, try reader.readByte());
+        var t_default = @as(asn1.Tag, @enumFromInt(try reader.readByte()));
         if (t_default == .BOOLEAN) {
             const criti_len = try asn1.Decoder.decodeLength(reader);
             var i: usize = 0;
             while (i < criti_len) : (i += 1) {
                 _ = try reader.readByte();
             }
-            t_default = @intToEnum(asn1.Tag, try reader.readByte());
+            t_default = @as(asn1.Tag, @enumFromInt(try reader.readByte()));
         }
 
         if (t_default != .OCTET_STRING) {
@@ -1218,7 +1218,7 @@ pub const SignatureValue = struct {
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
-        const t = @intToEnum(asn1.Tag, try reader.readByte());
+        const t = @as(asn1.Tag, @enumFromInt(try reader.readByte()));
         if (t != .BIT_STRING) {
             return errs.DecodingError.InvalidType;
         }
@@ -1232,7 +1232,7 @@ pub const SignatureValue = struct {
             return errs.DecodingError.InvalidFormat;
         }
 
-        var value = try allocator.alloc(u8, len - 1);
+        const value = try allocator.alloc(u8, len - 1);
         errdefer allocator.free(value);
 
         // read all content
@@ -1259,7 +1259,7 @@ const Dummy = struct {
     }
 
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
-        const t = @intToEnum(asn1.Tag, try reader.readByte());
+        const t = @as(asn1.Tag, @enumFromInt(try reader.readByte()));
         if (t != .SEQUENCE) {
             return errs.DecodingError.InvalidType;
         }

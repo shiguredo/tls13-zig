@@ -27,7 +27,7 @@ pub const PskKeyExchangeModes = struct {
         const len = try reader.readByte();
         var i: usize = 0;
         while (i < len) : (i += 1) {
-            const mode = try reader.readEnum(PskKeyExchangeMode, .Big);
+            const mode = try reader.readEnum(PskKeyExchangeMode, .big);
             try res.modes.append(mode);
         }
 
@@ -38,11 +38,11 @@ pub const PskKeyExchangeModes = struct {
         var len: usize = 0;
 
         const m_len = self.modes.items.len;
-        try writer.writeIntBig(u8, @intCast(u8, m_len));
+        try writer.writeInt(u8, @as(u8, @intCast(m_len)), .big);
         len += @sizeOf(u8);
 
         for (self.modes.items) |m| {
-            try writer.writeByte(@enumToInt(m));
+            try writer.writeByte(@intFromEnum(m));
             len += @sizeOf(u8);
         }
 

@@ -40,7 +40,7 @@ pub const Certificate = struct {
     /// @return decoded Certificate.
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
         // Decoding length of certificate_request_context and initializing Certificate.
-        const ctx_len = try reader.readIntBig(u16);
+        const ctx_len = try reader.readInt(u16, .big);
         var res = try Self.init(ctx_len, allocator);
         errdefer res.deinit();
 
@@ -48,7 +48,7 @@ pub const Certificate = struct {
         _ = try reader.readAll(res.cert_req_ctx.slice());
 
         // Decoding cert_list.
-        const cert_len = try reader.readIntBig(u16);
+        const cert_len = try reader.readInt(u16, .big);
         var i: usize = 0;
         while (i < cert_len) {
             // Decoding CertificateEntry.
@@ -69,7 +69,7 @@ pub const Certificate = struct {
         var len: usize = 0;
 
         // Encoding certificate_request.
-        try writer.writeIntBig(u16, @intCast(u16, self.cert_req_ctx.slice().len));
+        try writer.writeInt(u16, @as(u16, @intCast(self.cert_req_ctx.slice().len)), .big);
         len += 2;
         try writer.writeAll(self.cert_req_ctx.slice());
         len += self.cert_req_ctx.slice().len;
@@ -79,7 +79,7 @@ pub const Certificate = struct {
         for (self.cert_list.items) |c| {
             cert_len += c.length();
         }
-        try writer.writeIntBig(u16, @intCast(u16, cert_len));
+        try writer.writeInt(u16, @as(u16, @intCast(cert_len)), .big);
         len += 2;
         for (self.cert_list.items) |c| {
             len += try c.encode(writer);
@@ -166,14 +166,14 @@ pub const CertificateEntry = struct {
     /// @return the result of decoded CertificateEntry.
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
         // Decoding certificate_type.
-        const cert_type = try reader.readIntBig(u8); // CertificateType
+        const cert_type = try reader.readInt(u8, .big); // CertificateType
         if (cert_type != 0) {
             // only X509 certificate is supported.
             return Error.UnsupportedCertificate;
         }
 
         // Decoding certificate.
-        const cert_len = try reader.readIntBig(u16);
+        const cert_len = try reader.readInt(u16, .big);
         const cert = try x509.Certificate.decode(reader, allocator);
         errdefer cert.deinit();
 
@@ -201,7 +201,7 @@ pub const CertificateEntry = struct {
         len += 1;
 
         // Encoding certificate.
-        try writer.writeIntBig(u16, @intCast(u16, self.cert_len));
+        try writer.writeInt(u16, @as(u16, @intCast(self.cert_len)), .big);
         len += 2;
         // TODO: directly encode x509.Certificate.
         try writer.writeAll(self.cert_data);

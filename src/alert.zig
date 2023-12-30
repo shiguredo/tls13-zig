@@ -90,10 +90,10 @@ pub const Alert = struct {
     /// @return decoded Alert.
     pub fn decode(reader: anytype) !Self {
         // Decoding level.
-        const level = @intToEnum(AlertLevel, try reader.readByte());
+        const level = @as(AlertLevel, @enumFromInt(try reader.readByte()));
 
         // Decoding description.
-        const description = @intToEnum(AlertDescription, try reader.readByte());
+        const description = @as(AlertDescription, @enumFromInt(try reader.readByte()));
 
         return Self{
             .level = level,
@@ -109,11 +109,11 @@ pub const Alert = struct {
         var len: usize = 0;
 
         // Encoding level.
-        try writer.writeByte(@enumToInt(self.level));
+        try writer.writeByte(@intFromEnum(self.level));
         len += @sizeOf(u8);
 
         // Encoding description.
-        try writer.writeByte(@enumToInt(self.description));
+        try writer.writeByte(@intFromEnum(self.description));
         len += @sizeOf(u8);
 
         return len;

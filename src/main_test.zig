@@ -35,7 +35,7 @@ fn do(allocator: std.mem.Allocator) !void {
     tls_client_res.ks = try key.KeyScheduler.init(tls_client.ks.hkdf, tls_client.ks.aead);
     const nst = tls_client.session_ticket.?;
     tls_client_res.pre_shared_key = try PskIdentity.init(allocator, nst.ticket.len);
-    std.mem.copy(u8, tls_client_res.pre_shared_key.?.identity, nst.ticket);
+    @memcpy(tls_client_res.pre_shared_key.?.identity, nst.ticket);
     tls_client_res.pre_shared_key.?.obfuscated_ticket_age = nst.ticket_age_add + 10; // TODO: measure time
     tls_client_res.early_data = http_req; // Trying to send early_data, but server will not accept this.
 

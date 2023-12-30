@@ -92,13 +92,13 @@ pub const SignatureSchemeList = struct {
         errdefer res.deinit();
 
         // Decoding SignatureSchemes.
-        const algos_len = try reader.readIntBig(u16);
+        const algos_len = try reader.readInt(u16, .big);
         if (algos_len % 2 != 0) {
             return Error.InvalidAlgorithmsLength;
         }
         var i: usize = 0;
         while (i < algos_len) : (i += 2) {
-            const ss_raw = try reader.readIntBig(u16);
+            const ss_raw = try reader.readInt(u16, .big);
             const ss = utils.intToEnum(SignatureScheme, ss_raw) catch {
                 log.warn("Unknown SignatureScheme 0x{x:0>4}", .{ss_raw});
                 res.grease_length += 2;
@@ -117,10 +117,10 @@ pub const SignatureSchemeList = struct {
     pub fn encode(self: Self, writer: anytype) !usize {
         // Encoding SignatureSchemes.
         var len: usize = 0;
-        try writer.writeIntBig(u16, @intCast(u16, self.algos.items.len * @sizeOf(SignatureScheme)));
+        try writer.writeInt(u16, @as(u16, @intCast(self.algos.items.len * @sizeOf(SignatureScheme))), .big);
         len += @sizeOf(u16);
         for (self.algos.items) |e| {
-            try writer.writeIntBig(u16, @enumToInt(e));
+            try writer.writeInt(u16, @intFromEnum(e), .big);
             len += @sizeOf(SignatureScheme);
         }
 
@@ -146,7 +146,7 @@ pub const SignatureSchemeList = struct {
     pub fn print(self: Self) void {
         log.debug("Extension: SignatureAlgrotihms", .{});
         for (self.algos.items) |algo| {
-            log.debug("- {s}(0x{x:0>4})", .{ @tagName(algo), @enumToInt(algo) });
+            log.debug("- {s}(0x{x:0>4})", .{ @tagName(algo), @intFromEnum(algo) });
         }
     }
 };

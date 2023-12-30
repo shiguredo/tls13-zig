@@ -74,7 +74,7 @@ pub const OneAsymmetricKey = struct {
 
     pub fn decodeContent(stream: *asn1.Stream, allocator: std.mem.Allocator) !Self {
         var reader = stream.reader();
-        var t = @intToEnum(asn1.Tag, try reader.readByte());
+        const t = @as(asn1.Tag, @enumFromInt(try reader.readByte()));
         if (t != .INTEGER) {
             return errs.DecodingError.InvalidType;
         }
@@ -90,7 +90,7 @@ pub const OneAsymmetricKey = struct {
         const pkey = try asn1.Decoder.decodeOCTETSTRING(reader, allocator);
         errdefer allocator.free(pkey);
 
-        var res = Self{
+        const res = Self{
             .version = version,
             .privateKeyAlgorithmIdentifier = algorithm,
             .privateKey = pkey,
@@ -305,7 +305,7 @@ test "decode PEM RSA-2048 private key" {
     const k = try OneAsymmetricKey.decodeFromPEM(key_pem, std.testing.allocator);
     defer k.deinit();
 
-    const pk = (try key.decodePrivateKey()).rsa;
+    const pk = (try k.decodePrivateKey()).rsa;
     defer pk.deinit();
 
     try expect(std.mem.eql(u8, pk.modulus, &modulus_ans));

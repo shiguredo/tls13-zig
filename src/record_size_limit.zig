@@ -20,7 +20,7 @@ pub const RecordSizeLimit = struct {
     /// @param reader io.Reader to read messages.
     /// @return decoded RecordSizeLimit.
     pub fn decode(reader: anytype) !Self {
-        const record_size_limit = try reader.readIntBig(u16);
+        const record_size_limit = try reader.readInt(u16, .big);
 
         return Self{
             .record_size_limit = record_size_limit,
@@ -34,7 +34,7 @@ pub const RecordSizeLimit = struct {
     pub fn encode(self: Self, writer: anytype) !usize {
         var len: usize = 0;
 
-        try writer.writeIntBig(u16, self.record_size_limit);
+        try writer.writeInt(u16, self.record_size_limit, .big);
         len += @sizeOf(u16);
 
         return len;

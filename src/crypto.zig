@@ -42,7 +42,7 @@ pub const Hkdf = struct {
 
         fn extract(out: []u8, salt: []const u8, ikm: []const u8) void {
             const res = H.extract(salt, ikm);
-            std.mem.copy(u8, out, &res);
+            @memcpy(out, &res);
         }
 
         fn expand(out: []u8, ctx: []const u8, prk: []const u8) void {
@@ -74,7 +74,7 @@ pub const Hkdf = struct {
 
         fn extract(out: []u8, salt: []const u8, ikm: []const u8) void {
             const res = H.extract(salt, ikm);
-            std.mem.copy(u8, out, &res);
+            @memcpy(out, &res);
         }
 
         fn expand(out: []u8, ctx: []const u8, prk: []const u8) void {
@@ -111,7 +111,7 @@ pub const Hkdf = struct {
     }
 
     pub fn hkdfExpandLabel(self: Self, out: []u8, prk: []const u8, label: []const u8, ctx: []const u8, len: usize) !void {
-        const info = try generateHkdfLabel(@intCast(u16, len), label, ctx);
+        const info = try generateHkdfLabel(@as(u16, @intCast(len)), label, ctx);
         self.expand(out, info.slice(), prk);
     }
 
@@ -119,13 +119,13 @@ pub const Hkdf = struct {
         var hkdf_label = try BoundedArray(u8, MAX_HKDF_LABEL_LENGTH).init(0);
 
         var len_buf = [_]u8{0} ** 2;
-        mem.writeIntBig(u16, &len_buf, len);
+        mem.writeInt(u16, &len_buf, len, .big);
 
         try hkdf_label.appendSlice(&len_buf);
-        try hkdf_label.append(@intCast(u8, 6 + label.len)); // "tls13 ".len + label.len
+        try hkdf_label.append(@as(u8, @intCast(6 + label.len))); // "tls13 ".len + label.len
         try hkdf_label.appendSlice("tls13 ");
         try hkdf_label.appendSlice(label);
-        try hkdf_label.append(@intCast(u8, ctx.len));
+        try hkdf_label.append(@as(u8, @intCast(ctx.len)));
         try hkdf_label.appendSlice(ctx);
 
         return hkdf_label;
@@ -246,8 +246,8 @@ pub const Secret = struct {
                 .iv = try NonceBoundedArray.init(iv.len),
             };
 
-            std.mem.copy(u8, res.key.slice(), k);
-            std.mem.copy(u8, res.iv.slice(), iv);
+            @memcpy(res.key.slice(), k);
+            @memcpy(res.iv.slice(), iv);
 
             return res;
         }
@@ -355,15 +355,15 @@ const random = std.crypto.random;
 test "ECDHE-P256" {
     var a_skey_bytes: [P256.SecretKey.encoded_length]u8 = [_]u8{0} ** P256.SecretKey.encoded_length;
     a_skey_bytes[31] = 1;
-    var a_skey = try P256.SecretKey.fromBytes(a_skey_bytes);
+    const a_skey = try P256.SecretKey.fromBytes(a_skey_bytes);
     const a_key = try P256.KeyPair.fromSecretKey(a_skey);
 
     var b_skey_bytes: [P256.SecretKey.encoded_length]u8 = [_]u8{0} ** P256.SecretKey.encoded_length;
     b_skey_bytes[31] = 2;
-    var b_skey = try P256.SecretKey.fromBytes(b_skey_bytes);
+    const b_skey = try P256.SecretKey.fromBytes(b_skey_bytes);
     const b_key = try P256.KeyPair.fromSecretKey(b_skey);
 
-    const shared = try a_key.public_key.p.mul(b_key.secret_key.bytes, .Big);
-    const shared2 = try b_key.public_key.p.mul(a_key.secret_key.bytes, .Big);
-    try expect(std.mem.eql(u8, &shared.affineCoordinates().x.toBytes(.Big), &shared2.affineCoordinates().x.toBytes(.Big)));
+    const shared = try a_key.public_key.p.mul(b_key.secret_key.bytes, .big);
+    const shared2 = try b_key.public_key.p.mul(a_key.secret_key.bytes, .big);
+    try expect(std.mem.eql(u8, &shared.affineCoordinates().x.toBytes(.big), &shared2.affineCoordinates().x.toBytes(.big)));
 }

@@ -39,7 +39,7 @@ fn do(start_n: usize, end_n: usize, allocator: std.mem.Allocator) !void {
     var recv_bytes = try allocator.alloc(u8, end_n);
     defer allocator.free(recv_bytes);
 
-    var size: u64 = @intCast(u64, start_n);
+    var size: u64 = @as(u64, @intCast(start_n));
     var idx: usize = 0;
 
     const reader = tls_client.tlsReader();
@@ -52,13 +52,13 @@ fn do(start_n: usize, end_n: usize, allocator: std.mem.Allocator) !void {
 
         idx = 0;
         while (idx < size) : (idx += 1) {
-            recv_bytes[idx] = @intCast(u8, idx & 0xFF);
+            recv_bytes[idx] = @as(u8, @intCast(idx & 0xFF));
         }
 
-        try writer.writeIntBig(u64, size);
+        try writer.writeInt(u64, size, .big);
         try writer.writeAll(recv_bytes[0..size]);
 
-        const msg_len = try reader.readIntBig(u64);
+        const msg_len = try reader.readInt(u64, .big);
         const recv_size = try reader.readAll(recv_bytes[0..size]);
         if (msg_len != recv_size) {
             return Error.InvalidValue;

@@ -62,7 +62,7 @@ pub const KeyShare = struct {
         switch (res.ht) {
             HandshakeType.client_hello => {
                 // Decoding KeyShareEntries.
-                const ks_len = try reader.readIntBig(u16);
+                const ks_len = try reader.readInt(u16, .big);
                 var i: usize = 0;
                 while (i < ks_len) {
                     const kse = try KeyShareEntry.decode(reader, allocator);
@@ -84,7 +84,7 @@ pub const KeyShare = struct {
             HandshakeType.server_hello => {
                 if (res.is_hello_retry_request) {
                     // Decoding NamedGroup.
-                    res.selected = @intToEnum(NamedGroup, try reader.readIntBig(u16));
+                    res.selected = @as(NamedGroup, @enumFromInt(try reader.readInt(u16, .big)));
                 } else {
                     // Decoding a KeyShareEntry
                     const kse = try KeyShareEntry.decode(reader, allocator);
@@ -109,7 +109,7 @@ pub const KeyShare = struct {
         switch (self.ht) {
             HandshakeType.client_hello => {
                 // Encoding KeyShareEntries.
-                try writer.writeIntBig(u16, @intCast(u16, self.length() - @sizeOf(u16))); // entire length - sizeOf(field:'len')
+                try writer.writeInt(u16, @as(u16, @intCast(self.length() - @sizeOf(u16))), .big); // entire length - sizeOf(field:'len')
                 len += @sizeOf(u16);
                 for (self.entries.items) |entry| {
                     len += try entry.encode(writer);
@@ -118,7 +118,7 @@ pub const KeyShare = struct {
             HandshakeType.server_hello => {
                 if (self.is_hello_retry_request) {
                     // Encoding NamedGroup.
-                    try writer.writeIntBig(u16, @enumToInt(self.selected));
+                    try writer.writeInt(u16, @intFromEnum(self.selected), .big);
                     len += @sizeOf(NamedGroup);
                 } else {
                     // Encoding KeyShareEntry.
@@ -170,7 +170,7 @@ pub const KeyShare = struct {
     pub fn print(self: Self) void {
         log.debug("Extension: KeyShare({s})", .{@tagName(self.ht)});
         if (self.is_hello_retry_request) {
-            log.debug("- SelectedGroup = {s}(0x{x:0>4})", .{ @tagName(self.selected), @enumToInt(self.selected) });
+            log.debug("- SelectedGroup = {s}(0x{x:0>4})", .{ @tagName(self.selected), @intFromEnum(self.selected) });
         } else {
             for (self.entries.items) |e| {
                 e.print();
@@ -217,11 +217,11 @@ pub const KeyShareEntry = struct {
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
         // Decoding group.
         // NamedGroup.none is for GREASE.
-        const t = reader.readEnum(NamedGroup, .Big) catch NamedGroup.none;
+        const t = reader.readEnum(NamedGroup, .big) catch NamedGroup.none;
 
         // Decoding key_exchange.
-        const len = try reader.readIntBig(u16);
-        var ke = try allocator.alloc(u8, len);
+        const len = try reader.readInt(u16, .big);
+        const ke = try allocator.alloc(u8, len);
         errdefer allocator.free(ke);
         try reader.readNoEof(ke);
 
@@ -240,11 +240,11 @@ pub const KeyShareEntry = struct {
         var len: usize = 0;
 
         // Encoding group.
-        try writer.writeIntBig(u16, @enumToInt(self.group));
+        try writer.writeInt(u16, @intFromEnum(self.group), .big);
         len += @sizeOf(u16);
 
         // Encoding key_exchange.
-        try writer.writeIntBig(u16, @intCast(u16, self.key_exchange.len));
+        try writer.writeInt(u16, @as(u16, @intCast(self.key_exchange.len)), .big);
         len += @sizeOf(u16);
         try writer.writeAll(self.key_exchange);
         len += self.key_exchange.len;
@@ -305,7 +305,7 @@ test "Extension KeyShare with EntryX25519 decode" {
 }
 
 test "Extension KeyShare with EntryX25519 encode" {
-    var res = try KeyShareEntry.init(.x25519, 32, std.testing.allocator);
+    const res = try KeyShareEntry.init(.x25519, 32, std.testing.allocator);
 
     // zig fmt: off
     const key = [_]u8{
@@ -315,7 +315,7 @@ test "Extension KeyShare with EntryX25519 encode" {
     };
     // zig fmt: on
 
-    std.mem.copy(u8, res.key_exchange, &key);
+    @memcpy(res.key_exchange, &key);
     var ext = Extension{ .key_share = KeyShare.init(std.testing.allocator, .client_hello, false) };
     defer ext.deinit();
     try ext.key_share.entries.append(res);
@@ -382,7 +382,7 @@ test "EntrySecp256r1 encode" {
     var res = try KeyShareEntry.init(.secp256r1, key.len, std.testing.allocator);
     defer res.deinit();
 
-    std.mem.copy(u8, res.key_exchange, &key);
+    @memcpy(res.key_exchange, &key);
 
     var send_bytes: [100]u8 = undefined;
     var stream = io.fixedBufferStream(&send_bytes);

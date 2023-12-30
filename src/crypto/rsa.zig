@@ -158,9 +158,9 @@ pub fn Rsa(comptime modulus_bits: usize) type {
                 var idx: usize = 2 + ps_len;
                 out[idx] = 0x00;
                 idx += 1;
-                std.mem.copy(u8, out[idx..], hash_der);
+                @memcpy(out[idx .. idx + hash_der.len], hash_der);
                 idx += hash_der.len;
-                std.mem.copy(u8, out[idx..], &hashed);
+                @memcpy(out[idx .. idx + hashed.len], &hashed);
                 idx += hashed.len;
 
                 return out;
@@ -208,7 +208,7 @@ pub fn Rsa(comptime modulus_bits: usize) type {
                 var res = Self{
                     .signature = [_]u8{0} ** modulus_length,
                 };
-                std.mem.copy(u8, &res.signature, msg);
+                @memcpy(&res.signature, msg);
                 return res;
             }
 
@@ -226,19 +226,19 @@ pub fn Rsa(comptime modulus_bits: usize) type {
 
                 var hash = try allocator.alloc(u8, seed.len + c.len);
                 defer allocator.free(hash);
-                std.mem.copy(u8, hash, seed);
+                @memcpy(hash[0..seed.len], seed);
                 var hashed: [Hash.digest_length]u8 = undefined;
 
                 while (idx < len) {
-                    c[0] = @intCast(u8, (counter >> 24) & 0xFF);
-                    c[1] = @intCast(u8, (counter >> 16) & 0xFF);
-                    c[2] = @intCast(u8, (counter >> 8) & 0xFF);
-                    c[3] = @intCast(u8, counter & 0xFF);
+                    c[0] = @as(u8, @intCast((counter >> 24) & 0xFF));
+                    c[1] = @as(u8, @intCast((counter >> 16) & 0xFF));
+                    c[2] = @as(u8, @intCast((counter >> 8) & 0xFF));
+                    c[3] = @as(u8, @intCast(counter & 0xFF));
 
-                    std.mem.copy(u8, hash[seed.len..], &c);
+                    @memcpy(hash[seed.len..], &c);
                     Hash.hash(hash, &hashed, .{});
 
-                    std.mem.copy(u8, out[idx..], &hashed);
+                    @memcpy(out[idx .. idx + hashed.len], &hashed);
                     idx += hashed.len;
 
                     counter += 1;
@@ -283,10 +283,10 @@ pub fn Rsa(comptime modulus_bits: usize) type {
                 var m_p = try allocator.alloc(u8, 8 + Hash.digest_length + sLen);
                 defer allocator.free(m_p);
 
-                std.mem.copy(u8, m_p, &([_]u8{0} ** 8));
-                std.mem.copy(u8, m_p[8..], &mHash);
+                @memcpy(m_p[0..8], &([_]u8{0} ** 8));
+                @memcpy(m_p[8 .. 8 + mHash.len], &mHash);
                 if (salt) |s| {
-                    std.mem.copy(u8, m_p[(8 + Hash.digest_length)..], s);
+                    @memcpy(m_p[(8 + Hash.digest_length)..], s);
                 } else {
                     std.crypto.random.bytes(m_p[(8 + Hash.digest_length)..]);
                 }
@@ -310,14 +310,14 @@ pub fn Rsa(comptime modulus_bits: usize) type {
                 db[i] = 0x01;
                 i += 1;
                 if (salt) |s| {
-                    std.mem.copy(u8, db[i..], s);
+                    @memcpy(db[i..], s);
                 } else {
-                    std.mem.copy(u8, db[i..], m_p[(8 + Hash.digest_length)..]);
+                    @memcpy(db[i..], m_p[(8 + Hash.digest_length)..]);
                 }
 
                 // 9.   Let dbMask = MGF(H, emLen - hLen - 1).
                 const mgf_len = emLen - Hash.digest_length - 1;
-                var mgf_out = try allocator.alloc(u8, ((mgf_len - 1) / Hash.digest_length + 1) * Hash.digest_length);
+                const mgf_out = try allocator.alloc(u8, ((mgf_len - 1) / Hash.digest_length + 1) * Hash.digest_length);
                 defer allocator.free(mgf_out);
                 const dbMask = try MGF1(mgf_out, &hash, mgf_len, Hash, allocator);
 
@@ -340,9 +340,9 @@ pub fn Rsa(comptime modulus_bits: usize) type {
 
                 // 12.  Let EM = maskedDB || H || 0xbc.
                 i = 0;
-                std.mem.copy(u8, out, db);
+                @memcpy(out[0..db.len], db);
                 i += db.len;
-                std.mem.copy(u8, out[i..], &hash);
+                @memcpy(out[i .. i + hash.len], &hash);
                 i += hash.len;
                 out[i] = 0xbc;
                 i += 1;
@@ -396,7 +396,7 @@ pub fn Rsa(comptime modulus_bits: usize) type {
 
                 // 7.   Let dbMask = MGF(H, emLen - hLen - 1).
                 const mgf_len = emLen - Hash.digest_length - 1;
-                var mgf_out = try allocator.alloc(u8, ((mgf_len - 1) / Hash.digest_length + 1) * Hash.digest_length);
+                const mgf_out = try allocator.alloc(u8, ((mgf_len - 1) / Hash.digest_length + 1) * Hash.digest_length);
                 defer allocator.free(mgf_out);
                 var dbMask = try MGF1(mgf_out, h, mgf_len, Hash, allocator);
 
@@ -437,9 +437,9 @@ pub fn Rsa(comptime modulus_bits: usize) type {
                 //      initial zero octets.
                 var m_p = try allocator.alloc(u8, 8 + Hash.digest_length + sLen);
                 defer allocator.free(m_p);
-                std.mem.copy(u8, m_p, &([_]u8{0} ** 8));
-                std.mem.copy(u8, m_p[8..], &mHash);
-                std.mem.copy(u8, m_p[(8 + Hash.digest_length)..], salt);
+                @memcpy(m_p[0..8], &([_]u8{0} ** 8));
+                @memcpy(m_p[8 .. 8 + mHash.len], &mHash);
+                @memcpy(m_p[(8 + Hash.digest_length)..], salt);
 
                 // 13.  Let H' = Hash(M'), an octet string of length hLen.
                 var h_p: [Hash.digest_length]u8 = undefined;
@@ -505,7 +505,7 @@ fn countBits(a: bigInt.Const, allocator: std.mem.Allocator) !usize {
     defer a_copy.deinit();
     try a_copy.copy(a);
 
-    while (!a_copy.eqZero()) {
+    while (!a_copy.eqlZero()) {
         try a_copy.shiftRight(&a_copy, 1);
         i += 1;
     }
@@ -536,7 +536,7 @@ fn toBytes(out: []u8, a: *const bigInt.Managed, allocator: std.mem.Allocator) !v
         try a_copy.shiftRight(&a_copy, 8);
     }
 
-    if (!a_copy.eqZero()) {
+    if (!a_copy.eqlZero()) {
         return Error.BufferTooSmall;
     }
 }
@@ -575,7 +575,7 @@ fn pow_montgomery(r: *bigInt.Managed, a: *const bigInt.Managed, x: *const bigInt
     try bigInt.Managed.copy(&r1, a.toConst());
     i = 0;
     while (i < bin.len * 8) : (i += 1) {
-        if (((bin[i / 8] >> @intCast(u3, (7 - (i % 8)))) & 0x1) == 0) {
+        if (((bin[i / 8] >> @as(u3, @intCast((7 - (i % 8))))) & 0x1) == 0) {
             try bigInt.Managed.mul(&r1, r, &r1);
             try mod(&r1, &r1, n, allocator);
             try bigInt.Managed.sqr(r, r);
@@ -602,7 +602,7 @@ test "pow_montgomery" {
     defer ans.deinit();
 
     try pow_montgomery(&r, &a, &x, &n, std.testing.allocator);
-    try expect(bigInt.Managed.eq(r, ans));
+    try expect(bigInt.Managed.eql(r, ans));
 }
 
 test "countBits" {

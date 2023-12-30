@@ -37,14 +37,14 @@ fn do(allocator: std.mem.Allocator) !void {
         };
 
         while (true) {
-            const msg_len = con.tlsReader().readIntBig(u64) catch |err| {
+            const msg_len = con.tlsReader().readInt(u64, .big) catch |err| {
                 switch (err) {
                     error.ConnectionResetByPeer => return,
                     error.EndOfStream => return,
                     else => return err,
                 }
             };
-            try con.tlsWriter().writeIntBig(u64, msg_len);
+            try con.tlsWriter().writeInt(u64, msg_len, .big);
 
             var cur_idx: u64 = 0;
             while (cur_idx < msg_len) {

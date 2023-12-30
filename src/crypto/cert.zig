@@ -142,7 +142,7 @@ fn splitPEM(src: []const u8, comptime label: []const u8, allocator: std.mem.Allo
 
 fn convertPEMToDER(pem: []const u8, allocator: std.mem.Allocator) ![]u8 {
     var base64_decoder = base64.Base64Decoder.init(base64.standard_alphabet_chars, null);
-    var decode_content = try allocator.alloc(u8, pem.len);
+    const decode_content = try allocator.alloc(u8, pem.len);
     defer allocator.free(decode_content);
 
     var stream_decode = io.fixedBufferStream(decode_content);
@@ -156,7 +156,7 @@ fn convertPEMToDER(pem: []const u8, allocator: std.mem.Allocator) ![]u8 {
         content_length += 1;
     }
 
-    var decoded_content = try allocator.alloc(u8, try base64_decoder.calcSizeForSlice(stream_decode.getWritten()));
+    const decoded_content = try allocator.alloc(u8, try base64_decoder.calcSizeForSlice(stream_decode.getWritten()));
     errdefer allocator.free(decoded_content);
 
     try base64_decoder.decode(decoded_content, stream_decode.getWritten());

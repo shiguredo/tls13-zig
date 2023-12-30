@@ -28,8 +28,8 @@ test "intToEnum" {
 
 pub fn setReadTimeout(self: std.net.Stream, milliseconds: usize) !void {
     const timeout = std.os.timeval{
-        .tv_sec = @intCast(i32, milliseconds / std.time.ms_per_s),
-        .tv_usec = @intCast(i32, (milliseconds % std.time.ms_per_s) * std.time.us_per_ms),
+        .tv_sec = @as(i32, @intCast(milliseconds / std.time.ms_per_s)),
+        .tv_usec = @as(i32, @intCast((milliseconds % std.time.ms_per_s) * std.time.us_per_ms)),
     };
 
     return std.os.setsockopt(self.handle, std.os.SOL.SOCKET, std.os.SO.RCVTIMEO, std.mem.asBytes(&timeout));

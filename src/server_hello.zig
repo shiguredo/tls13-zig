@@ -65,7 +65,7 @@ pub const ServerHello = struct {
     /// @return the result of decoded ServerHello.
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
         // procotol_version must be TLSv1.2(0x0303)
-        const protocol_version = try reader.readIntBig(u16);
+        const protocol_version = try reader.readInt(u16, .big);
         if (protocol_version != 0x0303) {
             return Error.UnsupportedVersion;
         }
@@ -84,11 +84,11 @@ pub const ServerHello = struct {
         const legacy_session_id = try SessionID.decode(reader);
 
         // Decoding CipherSuite.
-        const cipher_suite = @intToEnum(CipherSuite, try reader.readIntBig(u16));
+        const cipher_suite = @as(CipherSuite, @enumFromInt(try reader.readInt(u16, .big)));
 
         // Decoding legacy_compression_methods.
         // This must be null(0x00)
-        const legacy_compression_methods = try reader.readIntBig(u8);
+        const legacy_compression_methods = try reader.readInt(u8, .big);
         if (legacy_compression_methods != 0x00) {
             return Error.UnsupportedCompressionMethod;
         }
@@ -121,7 +121,7 @@ pub const ServerHello = struct {
         var len: usize = 0;
 
         // Encoding protocol_version.
-        try writer.writeIntBig(u16, self.protocol_version);
+        try writer.writeInt(u16, self.protocol_version, .big);
         len += @sizeOf(u16);
 
         // Encoding random.
@@ -132,11 +132,11 @@ pub const ServerHello = struct {
         len += try self.legacy_session_id.encode(writer);
 
         // Encoding CipherSuite.
-        try writer.writeIntBig(u16, @enumToInt(self.cipher_suite));
+        try writer.writeInt(u16, @intFromEnum(self.cipher_suite), .big);
         len += @sizeOf(CipherSuite);
 
         // Encoding legacy_compression_methods.
-        try writer.writeIntBig(u8, self.legacy_compression_methods);
+        try writer.writeInt(u8, self.legacy_compression_methods, .big);
         len += @sizeOf(u8);
 
         // Encoding extensions.

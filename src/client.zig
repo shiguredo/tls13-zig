@@ -167,7 +167,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
         pub fn init(allocator: std.mem.Allocator) !Self {
             var session_id = try msg.SessionID.init(32);
-            var msgs_bytes = try allocator.alloc(u8, 1024 * 32);
+            const msgs_bytes = try allocator.alloc(u8, 1024 * 32);
             errdefer allocator.free(msgs_bytes);
 
             var rand: [32]u8 = undefined;
@@ -200,7 +200,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
             var skey_bytes: [P256.SecretKey.encoded_length]u8 = undefined;
             random.bytes(skey_bytes[0..]);
-            var skey = try P256.SecretKey.fromBytes(skey_bytes);
+            const skey = try P256.SecretKey.fromBytes(skey_bytes);
             res.secp256r1_key = try P256.KeyPair.fromSecretKey(skey);
 
             try res.supported_groups.append(.x25519);
@@ -261,7 +261,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         }
 
         pub fn configureX25519Keys(self: *Self, priv_key: [32]u8) !void {
-            std.mem.copy(u8, &self.x25519_priv_key, &priv_key);
+            @memcpy(&self.x25519_priv_key, &priv_key);
             self.x25519_pub_key = try dh.X25519.recoverPublicKey(self.x25519_priv_key);
         }
 
@@ -290,13 +290,13 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             for (self.key_shares.items) |k| {
                 switch (k) {
                     .x25519 => {
-                        var entry_x25519 = try key_share.KeyShareEntry.init(.x25519, 32, self.allocator);
-                        std.mem.copy(u8, entry_x25519.key_exchange, &self.x25519_pub_key);
+                        const entry_x25519 = try key_share.KeyShareEntry.init(.x25519, 32, self.allocator);
+                        @memcpy(entry_x25519.key_exchange, &self.x25519_pub_key);
                         try ks.entries.append(entry_x25519);
                     },
                     .secp256r1 => {
-                        var entry_secp256r1 = try key_share.KeyShareEntry.init(.secp256r1, P256.PublicKey.uncompressed_sec1_encoded_length, self.allocator);
-                        std.mem.copy(u8, entry_secp256r1.key_exchange, &self.secp256r1_key.public_key.toUncompressedSec1());
+                        const entry_secp256r1 = try key_share.KeyShareEntry.init(.secp256r1, P256.PublicKey.uncompressed_sec1_encoded_length, self.allocator);
+                        @memcpy(entry_secp256r1.key_exchange, &self.secp256r1_key.public_key.toUncompressedSec1());
                         try ks.entries.append(entry_secp256r1);
                     },
                     else => unreachable,
@@ -334,7 +334,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 var opsk = try pre_shared_key.OfferedPsks.init(self.ks.hkdf.digest_length + 1, self.allocator);
                 errdefer opsk.deinit();
                 try opsk.identities.append(try psk.copy(self.allocator));
-                var ext_psk = pre_shared_key.PreSharedKey{
+                const ext_psk = pre_shared_key.PreSharedKey{
                     .msg_type = .client_hello,
                     .offeredPsks = opsk,
                 };
@@ -347,7 +347,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 try self.ks.hkdf.hkdfExpandLabel(fin_secret.slice(), prk.slice(), "finished", "", self.ks.hkdf.digest_length);
 
                 var hs_ch = Handshake{ .client_hello = client_hello };
-                var ch_tmp = try self.allocator.alloc(u8, hs_ch.length());
+                const ch_tmp = try self.allocator.alloc(u8, hs_ch.length());
                 defer self.allocator.free(ch_tmp);
                 var ch_stream = io.fixedBufferStream(ch_tmp);
                 _ = try hs_ch.encode(ch_stream.writer());
@@ -359,8 +359,8 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 _ = try binder_stream.write(ch_stream.getWritten()[0..last_chb_idx]);
 
                 const fin = try Finished.fromMessageBytes(binder_stream.getWritten(), fin_secret.slice(), self.ks.hkdf);
-                opsk.binders[0] = @intCast(u8, self.ks.hkdf.digest_length);
-                std.mem.copy(u8, opsk.binders[1..], fin.verify_data.slice());
+                opsk.binders[0] = @as(u8, @intCast(self.ks.hkdf.digest_length));
+                @memcpy(opsk.binders[1..], fin.verify_data.slice());
             }
 
             return client_hello;
@@ -377,8 +377,8 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     continue;
                 }
                 // TODO: ipv6
-                const bytes = @ptrCast(*const [4]u8, &addr.in.sa.addr);
-                var ipv4_addr = std.x.os.IPv4{
+                const bytes = @as(*const [4]u8, @ptrCast(&addr.in.sa.addr));
+                const ipv4_addr = std.x.os.IPv4{
                     .octets = [_]u8{ bytes[0], bytes[1], bytes[2], bytes[3] },
                 };
 
@@ -407,7 +407,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             }
 
             self.host = try self.allocator.alloc(u8, host.len);
-            std.mem.copy(u8, self.host, host);
+            @memcpy(self.host, host);
 
             if (!self.io_init) {
                 return Error.IoNotConfigured;
@@ -448,7 +448,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
                     self.state = .WAIT_SH;
                 } else {
-                    const t = try self.reader.readEnum(ContentType, .Big);
+                    const t = try self.reader.readEnum(ContentType, .big);
                     if (t == .change_cipher_spec) {
                         const recv_record = (try TLSPlainText.decode(self.reader, t, self.allocator, null, null));
                         defer recv_record.deinit();
@@ -548,7 +548,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
 
             var close_recv = false;
             while (!close_recv) {
-                const t = self.reader.readEnum(ContentType, .Big) catch |err| {
+                const t = self.reader.readEnum(ContentType, .big) catch |err| {
                     switch (err) {
                         // sometimes the tcp connection is closed after sending close_notify.
                         error.EndOfStream => return,
@@ -689,8 +689,8 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 },
                 .secp256r1 => {
                     const pubkey = try P256.PublicKey.fromSec1(server_pubkey);
-                    const mul = try pubkey.p.mulPublic(self.secp256r1_key.secret_key.bytes, .Big);
-                    const shared_key = mul.affineCoordinates().x.toBytes(.Big);
+                    const mul = try pubkey.p.mulPublic(self.secp256r1_key.secret_key.bytes, .big);
+                    const shared_key = mul.affineCoordinates().x.toBytes(.big);
                     try self.ks.generateHandshakeSecrets1(&shared_key);
                 },
                 else => unreachable,
@@ -1003,7 +1003,7 @@ test "client test with RFC8448" {
     const server_hello_bytes = [_]u8{ 0x16, 0x03, 0x03, 0x00, 0x5a, 0x02, 0x00, 0x00, 0x56, 0x03, 0x03, 0xa6, 0xaf, 0x06, 0xa4, 0x12, 0x18, 0x60, 0xdc, 0x5e, 0x6e, 0x60, 0x24, 0x9c, 0xd3, 0x4c, 0x95, 0x93, 0x0c, 0x8a, 0xc5, 0xcb, 0x14, 0x34, 0xda, 0xc1, 0x55, 0x77, 0x2e, 0xd3, 0xe2, 0x69, 0x28, 0x00, 0x13, 0x01, 0x00, 0x00, 0x2e, 0x00, 0x33, 0x00, 0x24, 0x00, 0x1d, 0x00, 0x20, 0xc9, 0x82, 0x88, 0x76, 0x11, 0x20, 0x95, 0xfe, 0x66, 0x76, 0x2b, 0xdb, 0xf7, 0xc6, 0x72, 0xe1, 0x56, 0xd6, 0xcc, 0x25, 0x3b, 0x83, 0x3d, 0xf1, 0xdd, 0x69, 0xb1, 0xb0, 0x4e, 0x75, 0x1f, 0x0f, 0x00, 0x2b, 0x00, 0x02, 0x03, 0x04 };
     var stream = io.fixedBufferStream(&server_hello_bytes);
     var sh_reader = stream.reader();
-    var t = try sh_reader.readEnum(ContentType, .Big);
+    const t = try sh_reader.readEnum(ContentType, .big);
     const handshake = (try TLSPlainText.decode(sh_reader, t, std.testing.allocator, null, msgs_stream.writer())).content.handshake;
     try expect(handshake == .server_hello);
 
@@ -1153,7 +1153,7 @@ test "client test with RFC8448" {
     // send application_data
     var c_app_data: [50]u8 = undefined;
     for (&c_app_data, 0..) |*value, app_i| {
-        value.* = @intCast(u8, app_i);
+        value.* = @as(u8, @intCast(app_i));
     }
 
     const c_app_record_ans = [_]u8{ 0x17, 0x03, 0x03, 0x00, 0x43, 0xA2, 0x3F, 0x70, 0x54, 0xB6, 0x2C, 0x94, 0xD0, 0xAF, 0xFA, 0xFE, 0x82, 0x28, 0xBA, 0x55, 0xCB, 0xEF, 0xAC, 0xEA, 0x42, 0xF9, 0x14, 0xAA, 0x66, 0xBC, 0xAB, 0x3F, 0x2B, 0x98, 0x19, 0xA8, 0xA5, 0xB4, 0x6B, 0x39, 0x5B, 0xD5, 0x4A, 0x9A, 0x20, 0x44, 0x1E, 0x2B, 0x62, 0x97, 0x4E, 0x1F, 0x5A, 0x62, 0x92, 0xA2, 0x97, 0x70, 0x14, 0xBD, 0x1E, 0x3D, 0xEA, 0xE6, 0x3A, 0xEE, 0xBB, 0x21, 0x69, 0x49, 0x15, 0xE4 };
@@ -1317,7 +1317,7 @@ test "connect e2e with x25519" {
     // zig fmt: on
 
     tls_client.random = dummy;
-    std.mem.copy(u8, tls_client.session_id.session_id.slice(), &dummy);
+    @memcpy(tls_client.session_id.session_id.slice(), &dummy);
 
     tls_client.cipher_suites.clearAndFree();
     try tls_client.cipher_suites.append(.TLS_AES_128_GCM_SHA256);

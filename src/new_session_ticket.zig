@@ -39,19 +39,19 @@ pub const NewSessionTicket = struct {
     /// @return the result of decoded NewSessionTicket.
     pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Self {
         // Decoding ticket_lifetime.
-        const ticket_lifetime = try reader.readIntBig(u32);
+        const ticket_lifetime = try reader.readInt(u32, .big);
 
         // Decoding ticket_age_add.
-        const ticket_age_add = try reader.readIntBig(u32);
+        const ticket_age_add = try reader.readInt(u32, .big);
 
         // Decoding ticket_nonce.
-        const nonce_len = try reader.readIntBig(u8);
+        const nonce_len = try reader.readInt(u8, .big);
         var ticket_nonce = try BoundedArray(u8, MAX_TICKET_NONCE_LENGTH).init(nonce_len);
         try reader.readNoEof(ticket_nonce.slice());
 
         // Decoding ticket.
-        const ticket_len = try reader.readIntBig(u16);
-        var ticket = try allocator.alloc(u8, ticket_len);
+        const ticket_len = try reader.readInt(u16, .big);
+        const ticket = try allocator.alloc(u8, ticket_len);
         errdefer allocator.free(ticket);
         try reader.readNoEof(ticket);
 
@@ -78,21 +78,21 @@ pub const NewSessionTicket = struct {
         var len: usize = 0;
 
         // Encoding ticket_lifetime.
-        try writer.writeIntBig(u32, self.ticket_lifetime);
+        try writer.writeInt(u32, self.ticket_lifetime, .big);
         len += @sizeOf(u32);
 
         // Encoding ticket_age_add.
-        try writer.writeIntBig(u32, self.ticket_age_add);
+        try writer.writeInt(u32, self.ticket_age_add, .big);
         len += @sizeOf(u32);
 
         // Encoding ticket_nonce.
-        try writer.writeByte(@intCast(u8, self.ticket_nonce.len));
+        try writer.writeByte(@as(u8, @intCast(self.ticket_nonce.len)));
         len += @sizeOf(u8);
         try writer.writeAll(self.ticket_nonce.slice());
         len += self.ticket_nonce.len;
 
         // Encoding ticket.
-        try writer.writeIntBig(u16, @intCast(u16, self.ticket.len));
+        try writer.writeInt(u16, @as(u16, @intCast(self.ticket.len)), .big);
         len += @sizeOf(u16);
         try writer.writeAll(self.ticket);
         len += self.ticket.len;
@@ -143,7 +143,7 @@ pub const NewSessionTicket = struct {
         };
         errdefer res.deinit();
 
-        std.mem.copy(u8, res.ticket_nonce.slice(), &ticket.nonce);
+        @memcpy(res.ticket_nonce.slice(), &ticket.nonce);
 
         var stream = io.fixedBufferStream(res.ticket);
         _ = try ticket.encode(stream.writer());
@@ -207,8 +207,8 @@ pub const Ticket = struct {
         var nonce: [Aes128Gcm.nonce_length]u8 = undefined;
         try reader.readNoEof(&nonce);
 
-        const enc_len = try reader.readIntBig(u16);
-        var enc_state = try allocator.alloc(u8, enc_len);
+        const enc_len = try reader.readInt(u16, .big);
+        const enc_state = try allocator.alloc(u8, enc_len);
         errdefer allocator.free(enc_state);
         try reader.readNoEof(enc_state);
 
@@ -225,7 +225,7 @@ pub const Ticket = struct {
     }
 
     pub fn decryptState(self: Self, key: [Aes128Gcm.key_length]u8) !StatePlaintext {
-        var plain = try self.allocator.alloc(u8, self.encrypted_state.len);
+        const plain = try self.allocator.alloc(u8, self.encrypted_state.len);
         defer self.allocator.free(plain);
 
         try Aes128Gcm.decrypt(plain, self.encrypted_state, self.tag, &(self.key_name ++ self.nonce), self.nonce, key);
@@ -241,7 +241,7 @@ pub const Ticket = struct {
         res.key_name = key_name;
         res.nonce = nonce;
 
-        var plain = try allocator.alloc(u8, state.length());
+        const plain = try allocator.alloc(u8, state.length());
         defer allocator.free(plain);
         var stream = io.fixedBufferStream(plain);
         _ = try state.encode(stream.writer());
@@ -263,7 +263,7 @@ pub const Ticket = struct {
         try writer.writeAll(&self.nonce);
         len += self.nonce.len;
 
-        try writer.writeIntBig(u16, @intCast(u16, self.encrypted_state.len));
+        try writer.writeInt(u16, @as(u16, @intCast(self.encrypted_state.len)), .big);
         len += 2;
         try writer.writeAll(self.encrypted_state);
         len += self.encrypted_state.len;
@@ -297,13 +297,13 @@ pub const StatePlaintext = struct {
     const Self = @This();
 
     pub fn decode(reader: anytype) !Self {
-        const proto_version = try reader.readIntBig(u16);
-        const cipher_suite = try reader.readEnum(CipherSuite, .Big);
-        const master_secret_len = try reader.readIntBig(u16);
+        const proto_version = try reader.readInt(u16, .big);
+        const cipher_suite = try reader.readEnum(CipherSuite, .big);
+        const master_secret_len = try reader.readInt(u16, .big);
         var master_secret = try crypto.DigestBoundedArray.init(master_secret_len);
         try reader.readNoEof(master_secret.slice());
         const identity = try ClientIdentity.decode(reader);
-        const timestamp = try reader.readIntBig(u64);
+        const timestamp = try reader.readInt(u64, .big);
 
         return Self{
             .protocol_version = proto_version,
@@ -317,16 +317,16 @@ pub const StatePlaintext = struct {
     pub fn encode(self: Self, writer: anytype) !usize {
         var len: usize = 0;
 
-        try writer.writeIntBig(u16, self.protocol_version);
+        try writer.writeInt(u16, self.protocol_version, .big);
         len += 2;
-        try writer.writeIntBig(u16, @enumToInt(self.cipher_suite));
+        try writer.writeInt(u16, @intFromEnum(self.cipher_suite), .big);
         len += 2;
-        try writer.writeIntBig(u16, @intCast(u16, self.master_secret.len));
+        try writer.writeInt(u16, @as(u16, @intCast(self.master_secret.len)), .big);
         len += 2;
         try writer.writeAll(self.master_secret.slice());
         len += self.master_secret.len;
         len += try self.client_identity.encode(writer);
-        try writer.writeIntBig(u64, self.timestamp);
+        try writer.writeInt(u64, self.timestamp, .big);
         len += 8;
 
         return len;
@@ -357,7 +357,7 @@ pub const ClientIdentity = struct {
     const Self = @This();
 
     pub fn decode(reader: anytype) !Self {
-        const t = try reader.readEnum(ClientAuthenticationType, .Big);
+        const t = try reader.readEnum(ClientAuthenticationType, .big);
         switch (t) {
             .anonymous => return .{ .client_authentication_type = t },
             else => unreachable,
@@ -366,7 +366,7 @@ pub const ClientIdentity = struct {
 
     pub fn encode(self: Self, writer: anytype) !usize {
         var len: usize = 0;
-        try writer.writeByte(@enumToInt(self.client_authentication_type));
+        try writer.writeByte(@intFromEnum(self.client_authentication_type));
         len += 1;
         switch (self.client_authentication_type) {
             .anonymous => return len,
@@ -375,7 +375,7 @@ pub const ClientIdentity = struct {
     }
 
     pub fn length(self: Self) usize {
-        var len: usize = 1;
+        const len: usize = 1;
         switch (self.client_authentication_type) {
             .anonymous => return len,
             else => unreachable,

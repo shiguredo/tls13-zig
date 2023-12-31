@@ -112,7 +112,7 @@ pub const RootCA = struct {
     fn loadCAFilesMacOS(self: *Self) !void {
         log.debug("Loading RootCA certificate", .{});
 
-        const result = try std.ChildProcess.exec(.{
+        const result = try std.ChildProcess.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ "/usr/bin/security", "find-certificate", "-a", "-p", "/System/Library/Keychains/SystemRootCertificates.keychain" },
             .max_output_bytes = 1000 * 1024,

@@ -234,8 +234,8 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
         // payload protection
         cipher_suite: msg.CipherSuite,
         ks: key.KeyScheduler,
-        hs_protector: RecordPayloadProtector,
-        ap_protector: RecordPayloadProtector,
+        hs_protector: ?RecordPayloadProtector,
+        ap_protector: ?RecordPayloadProtector,
 
         // misc
         allocator: std.mem.Allocator,
@@ -304,8 +304,8 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 .secp256r1_key = try P256.KeyPair.fromSecretKey(try P256.SecretKey.fromBytes(secp256r1_priv_key)),
                 .cipher_suite = undefined,
                 .ks = undefined,
-                .hs_protector = undefined,
-                .ap_protector = undefined,
+                .hs_protector = null,
+                .ap_protector = null,
                 .allocator = allocator,
             };
 
@@ -550,7 +550,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     defer c_record.deinit();
 
                     // client may send early_data. Currently, server does not accept early_data.
-                    var p_record = self.hs_protector.decrypt(c_record, self.allocator) catch |err| {
+                    var p_record = self.hs_protector.?.decrypt(c_record, self.allocator) catch |err| {
                         switch (err) {
                             error.AuthenticationFailed => continue,
                             else => return err,
@@ -589,7 +589,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             }
 
             self.write_engine = .{
-                .protector = &self.ap_protector,
+                .protector = &self.ap_protector.?,
                 .ks = &self.ks,
                 .write_buffer = &self.write_buffer,
                 .allocator = self.allocator,
@@ -620,8 +620,13 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 }
             }
 
+            // TODO: Send close notify as plain text
+            if (self.ap_protector == null) {
+                return;
+            }
+
             const close_notify = Content{ .alert = Alert{ .level = .warning, .description = .close_notify } };
-            _ = self.ap_protector.encryptFromMessageAndWrite(
+            _ = self.ap_protector.?.encryptFromMessageAndWrite(
                 close_notify,
                 self.allocator,
                 self.write_buffer.writer(),
@@ -882,7 +887,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             defer cont_ee.deinit();
             _ = try cont_ee.encode(self.msgs_stream.writer());
 
-            _ = try self.hs_protector.encryptFromMessageAndWrite(cont_ee, self.allocator, self.write_buffer.writer());
+            _ = try self.hs_protector.?.encryptFromMessageAndWrite(cont_ee, self.allocator, self.write_buffer.writer());
 
             log.debug("EncryptedExtensions has been written to send buffer", .{});
         }
@@ -903,7 +908,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             }
             var cont_c = Content{ .handshake = .{ .certificate = c } };
             _ = try cont_c.encode(self.msgs_stream.writer());
-            _ = try self.hs_protector.encryptFromMessageAndWrite(cont_c, self.allocator, self.write_buffer.writer());
+            _ = try self.hs_protector.?.encryptFromMessageAndWrite(cont_c, self.allocator, self.write_buffer.writer());
 
             log.debug("Certificate has been written to send buffer", .{});
         }
@@ -957,7 +962,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             const cont_cv = Content{ .handshake = .{ .certificate_verify = cv } };
             defer cont_cv.deinit();
             _ = try cont_cv.encode(self.msgs_stream.writer());
-            _ = try self.hs_protector.encryptFromMessageAndWrite(cont_cv, self.allocator, self.write_buffer.writer());
+            _ = try self.hs_protector.?.encryptFromMessageAndWrite(cont_cv, self.allocator, self.write_buffer.writer());
 
             log.debug("CertificateVerify has been written to send buffer", .{});
         }
@@ -968,7 +973,7 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             defer cont_fin.deinit();
             _ = try cont_fin.encode(self.msgs_stream.writer());
 
-            _ = try self.hs_protector.encryptFromMessageAndWrite(cont_fin, self.allocator, self.write_buffer.writer());
+            _ = try self.hs_protector.?.encryptFromMessageAndWrite(cont_fin, self.allocator, self.write_buffer.writer());
 
             log.debug("Finished has been written to send buffer", .{});
         }
@@ -1009,15 +1014,15 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
             const c = Content{ .handshake = Handshake{ .new_session_ticket = nst } };
             defer c.deinit();
 
-            _ = try self.ap_protector.encryptFromMessageAndWrite(c, self.allocator, self.write_buffer.writer());
+            _ = try self.ap_protector.?.encryptFromMessageAndWrite(c, self.allocator, self.write_buffer.writer());
             log.debug("NewSessionTicket has been written to send buffer", .{});
         }
 
         pub fn handleKeyUpdate(self: *Self, ku: KeyUpdate) !void {
             // update decoding key(client key)
             try self.ks.updateClientSecrets();
-            self.ap_protector.dec_keys = self.ks.secret.c_ap_keys;
-            self.ap_protector.dec_cnt = 0;
+            self.ap_protector.?.dec_keys = self.ks.secret.c_ap_keys;
+            self.ap_protector.?.dec_cnt = 0;
 
             switch (ku.request_update) {
                 .update_not_requested => {
@@ -1028,13 +1033,13 @@ pub fn TLSStreamImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     const update = Content{ .handshake = .{ .key_update = .{ .request_update = .update_not_requested } } };
                     defer update.deinit();
 
-                    _ = try self.ap_protector.encryptFromMessageAndWrite(update, self.allocator, self.write_buffer.writer());
+                    _ = try self.ap_protector.?.encryptFromMessageAndWrite(update, self.allocator, self.write_buffer.writer());
                     try self.write_buffer.flush();
 
                     // update encoding key(server key)
                     try self.ks.updateServerSecrets();
-                    self.ap_protector.enc_keys = self.ks.secret.s_ap_keys;
-                    self.ap_protector.enc_cnt = 0;
+                    self.ap_protector.?.enc_keys = self.ks.secret.s_ap_keys;
+                    self.ap_protector.?.enc_cnt = 0;
                 },
             }
         }

@@ -108,8 +108,8 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         // payload protection
         cipher_suites: ArrayList(msg.CipherSuite),
         ks: key.KeyScheduler,
-        hs_protector: RecordPayloadProtector,
-        ap_protector: RecordPayloadProtector,
+        hs_protector: ?RecordPayloadProtector,
+        ap_protector: ?RecordPayloadProtector,
 
         // certificate
         allow_self_signed: bool = false,
@@ -183,8 +183,8 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 .key_shares = ArrayList(NamedGroup).init(allocator),
                 .cipher_suites = ArrayList(msg.CipherSuite).init(allocator),
                 .ks = undefined,
-                .hs_protector = undefined,
-                .ap_protector = undefined,
+                .hs_protector = null,
+                .ap_protector = null,
                 .rootCA = crypto.root.RootCA.init(allocator),
                 .signature_schems = ArrayList(signature_scheme.SignatureScheme).init(allocator),
                 .cert_pubkeys = ArrayList(crypto.key.PublicKey).init(allocator),
@@ -474,7 +474,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                         const recv_record = try TLSCipherText.decode(self.reader, t, self.allocator);
                         defer recv_record.deinit();
 
-                        var plain_record = try self.hs_protector.decrypt(recv_record, self.allocator);
+                        var plain_record = try self.hs_protector.?.decrypt(recv_record, self.allocator);
                         defer plain_record.deinit();
 
                         if (plain_record.content_type == .alert) {
@@ -499,7 +499,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
             }
 
             self.write_engine = .{
-                .protector = &self.ap_protector,
+                .protector = &self.ap_protector.?,
                 .ks = &self.ks,
                 .write_buffer = &self.write_buffer,
                 .allocator = self.allocator,
@@ -537,9 +537,14 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 }
             }
 
+            // TODO: Send close notify as plain text
+            if (self.ap_protector == null) {
+                return;
+            }
+
             // close connection
             const close_notify = Content{ .alert = Alert{ .level = .warning, .description = .close_notify } };
-            _ = try self.ap_protector.encryptFromMessageAndWrite(
+            _ = try self.ap_protector.?.encryptFromMessageAndWrite(
                 close_notify,
                 self.allocator,
                 self.write_buffer.writer(),
@@ -559,7 +564,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 const recv_record = try TLSCipherText.decode(self.reader, t, self.allocator);
                 defer recv_record.deinit();
 
-                const plain_record = try self.ap_protector.decrypt(recv_record, self.allocator);
+                const plain_record = try self.ap_protector.?.decrypt(recv_record, self.allocator);
                 defer plain_record.deinit();
 
                 if (plain_record.content_type != .alert) {
@@ -756,7 +761,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                 if (self.state == .SEND_FINISHED) {
                     // generate keys
                     try self.ks.generateApplicationSecrets(self.msgs_stream.getWritten());
-                    self.ap_protector = RecordPayloadProtector.init(self.hs_protector.aead, self.ks.secret.c_ap_keys, self.ks.secret.s_ap_keys);
+                    self.ap_protector = RecordPayloadProtector.init(self.hs_protector.?.aead, self.ks.secret.c_ap_keys, self.ks.secret.s_ap_keys);
 
                     if (self.early_data_ok) {
                         const eoed = Content{ .handshake = Handshake{ .end_of_early_data = [0]u8{} } };
@@ -773,7 +778,7 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     defer hs_c_finished.deinit();
                     _ = try hs_c_finished.encode(self.msgs_stream.writer());
 
-                    _ = try self.hs_protector.encryptFromMessageAndWrite(hs_c_finished, self.allocator, writer);
+                    _ = try self.hs_protector.?.encryptFromMessageAndWrite(hs_c_finished, self.allocator, writer);
 
                     self.state = .CONNECTED;
                 }
@@ -959,8 +964,8 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
         pub fn handleKeyUpdate(self: *Self, ku: KeyUpdate) !void {
             // update decoding key(server key)
             try self.ks.updateServerSecrets();
-            self.ap_protector.dec_keys = self.ks.secret.s_ap_keys;
-            self.ap_protector.dec_cnt = 0;
+            self.ap_protector.?.dec_keys = self.ks.secret.s_ap_keys;
+            self.ap_protector.?.dec_cnt = 0;
 
             switch (ku.request_update) {
                 .update_not_requested => {
@@ -971,13 +976,13 @@ pub fn TLSClientImpl(comptime ReaderType: type, comptime WriterType: type, compt
                     const update = Content{ .handshake = .{ .key_update = .{ .request_update = .update_not_requested } } };
                     defer update.deinit();
 
-                    _ = try self.ap_protector.encryptFromMessageAndWrite(update, self.allocator, self.write_buffer.writer());
+                    _ = try self.ap_protector.?.encryptFromMessageAndWrite(update, self.allocator, self.write_buffer.writer());
                     try self.write_buffer.flush();
 
                     // update encoding key(clieny key)
                     try self.ks.updateClientSecrets();
-                    self.ap_protector.enc_keys = self.ks.secret.c_ap_keys;
-                    self.ap_protector.enc_cnt = 0;
+                    self.ap_protector.?.enc_keys = self.ks.secret.c_ap_keys;
+                    self.ap_protector.?.enc_cnt = 0;
                 },
             }
         }

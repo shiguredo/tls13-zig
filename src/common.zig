@@ -136,7 +136,8 @@ pub fn ReadEngine(comptime Entity: type, comptime et: EntityType) type {
                     return try msg_stream.getPos();
                 }
 
-                const updated = try checkAndUpdateKey(&self.entity.ap_protector, &self.entity.ks, &self.entity.write_buffer, self.entity.allocator, et);
+                const updated = try checkAndUpdateKey(&self.entity.ap_protector.?, &self.entity.ks, &self.entity.write_buffer, self.entity.allocator, et);
+
                 if (updated) {
                     log.debug("KeyUpdate updated_request has been sent", .{});
                 }
@@ -155,7 +156,7 @@ pub fn ReadEngine(comptime Entity: type, comptime et: EntityType) type {
                 const recv_record = try TLSCipherText.decode(self.entity.reader, t, self.entity.allocator);
                 defer recv_record.deinit();
 
-                const plain_record = try self.entity.ap_protector.decrypt(recv_record, self.entity.allocator);
+                const plain_record = try self.entity.ap_protector.?.decrypt(recv_record, self.entity.allocator);
                 defer plain_record.deinit();
 
                 if (plain_record.content_type != .application_data) {
